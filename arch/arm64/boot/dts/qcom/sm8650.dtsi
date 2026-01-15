@@ -696,7 +696,7 @@
 	};
 
 	firmware {
-		scm: scm {
+		scm: qcom_scm {
 			compatible = "qcom,scm-sm8650", "qcom,scm";
 			qcom,dload-mode = <&tcsr 0x19000>;
 			interconnects = <&aggre2_noc MASTER_CRYPTO QCOM_ICC_TAG_ALWAYS
@@ -7840,6 +7840,8 @@
 				};
 			};
 		};
+
+		qcom_tzlog: tz-log { };
 	};
 
 	thermal-zones {
@@ -8666,7 +8668,7 @@
 		};
 	};
 
-	timer {
+	arch_timer: timer {
 		compatible = "arm,armv8-timer";
 
 		interrupts = <GIC_PPI 13 IRQ_TYPE_LEVEL_LOW 0>,
