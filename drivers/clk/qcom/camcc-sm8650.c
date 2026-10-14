@@ -6,12 +6,15 @@
 #include <linux/clk-provider.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/pm.h>
 #include <linux/regmap.h>
 
 #include <dt-bindings/clock/qcom,sm8650-camcc.h>
+#include <dt-bindings/power/qcom,rpmhpd.h>
 
 #include "clk-alpha-pll.h"
 #include "clk-branch.h"
+#include "clk-dvfs.h"
 #include "clk-rcg.h"
 #include "clk-regmap.h"
 #include "common.h"
@@ -46,6 +49,110 @@ enum {
 	P_SLEEP_CLK,
 };
 
+/*
+ * Downstream uses CRM/CESTA for PLL3-7/10 and the CAMNOC AXI RT, CPHY RX,
+ * CSID, IFE0-2 and SFE0-2 RCGs. Until upstream supports that path, manage
+ * their rail requirements through clock-owned DVFS.
+ */
+enum {
+	DT_PMDOMAIN_MMCX,
+	DT_PMDOMAIN_MXC,
+	DT_PMDOMAIN_MX,
+};
+
+static const struct qcom_clk_dvfs_data cam_cc_pll0_dvfs = {
+	.pd_indices = (const unsigned int[]) { DT_PMDOMAIN_MXC },
+	.num_pd_indices = 1,
+	.rates = (const struct qcom_clk_dvfs_rate[]) {
+		{ 615000000, RPMH_REGULATOR_LEVEL_LOW_SVS_D1 },
+		{ 1100000000, RPMH_REGULATOR_LEVEL_SVS },
+		{ 1600000000, RPMH_REGULATOR_LEVEL_SVS_L1 },
+		{ 2000000000, RPMH_REGULATOR_LEVEL_NOM },
+		{ 2100000000, RPMH_REGULATOR_LEVEL_TURBO_L1 },
+	},
+	.num_rates = 5,
+};
+
+static const struct qcom_clk_dvfs_data cam_cc_camnoc_axi_rt_clk_src_dvfs = {
+	.pd_indices = (const unsigned int[]) { DT_PMDOMAIN_MMCX, DT_PMDOMAIN_MXC },
+	.num_pd_indices = 2,
+	.rates = (const struct qcom_clk_dvfs_rate[]) {
+		{ 300000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+		{ 400000000, RPMH_REGULATOR_LEVEL_SVS },
+	},
+	.num_rates = 2,
+};
+
+static const struct qcom_clk_dvfs_data cam_cc_cci_0_clk_src_dvfs = {
+	.pd_indices = (const unsigned int[]) { DT_PMDOMAIN_MMCX },
+	.num_pd_indices = 1,
+	.rates = (const struct qcom_clk_dvfs_rate[]) {
+		{ 37500000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+	},
+	.num_rates = 1,
+};
+
+static const struct qcom_clk_dvfs_data cam_cc_cphy_rx_clk_src_dvfs = {
+	.pd_indices = (const unsigned int[]) {
+		DT_PMDOMAIN_MMCX, DT_PMDOMAIN_MX, DT_PMDOMAIN_MXC,
+	},
+	.num_pd_indices = 3,
+	.rates = (const struct qcom_clk_dvfs_rate[]) {
+		{ 400000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+		{ 480000000, RPMH_REGULATOR_LEVEL_SVS },
+	},
+	.num_rates = 2,
+};
+
+static const struct qcom_clk_dvfs_data cam_cc_csi0phytimer_clk_src_dvfs = {
+	.pd_indices = (const unsigned int[]) { DT_PMDOMAIN_MXC },
+	.num_pd_indices = 1,
+	.rates = (const struct qcom_clk_dvfs_rate[]) {
+		{ 400000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+	},
+	.num_rates = 1,
+};
+
+static const struct qcom_clk_dvfs_data cam_cc_csi2phytimer_clk_src_dvfs = {
+	.pd_indices = (const unsigned int[]) { DT_PMDOMAIN_MX },
+	.num_pd_indices = 1,
+	.rates = (const struct qcom_clk_dvfs_rate[]) {
+		{ 400000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+	},
+	.num_rates = 1,
+};
+
+static const struct qcom_clk_dvfs_data cam_cc_ife_0_clk_src_dvfs = {
+	.pd_indices = (const unsigned int[]) { DT_PMDOMAIN_MMCX, DT_PMDOMAIN_MXC },
+	.num_pd_indices = 2,
+	.rates = (const struct qcom_clk_dvfs_rate[]) {
+		{ 466000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+		{ 594000000, RPMH_REGULATOR_LEVEL_SVS },
+		{ 675000000, RPMH_REGULATOR_LEVEL_SVS_L1 },
+		{ 785000000, RPMH_REGULATOR_LEVEL_NOM },
+	},
+	.num_rates = 4,
+};
+
+static const struct qcom_clk_dvfs_data cam_cc_ife_lite_clk_src_dvfs = {
+	.pd_indices = (const unsigned int[]) { DT_PMDOMAIN_MMCX, DT_PMDOMAIN_MXC },
+	.num_pd_indices = 2,
+	.rates = (const struct qcom_clk_dvfs_rate[]) {
+		{ 400000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+		{ 480000000, RPMH_REGULATOR_LEVEL_SVS },
+	},
+	.num_rates = 2,
+};
+
+static const struct qcom_clk_dvfs_data cam_cc_mclk0_clk_src_dvfs = {
+	.pd_indices = (const unsigned int[]) { DT_PMDOMAIN_MX },
+	.num_pd_indices = 1,
+	.rates = (const struct qcom_clk_dvfs_rate[]) {
+		{ 68571429, RPMH_REGULATOR_LEVEL_LOW_SVS },
+	},
+	.num_rates = 1,
+};
+
 static const struct pll_vco lucid_ole_vco[] = {
 	{ 249600000, 2300000000, 0 },
 };
@@ -75,6 +182,7 @@ static struct clk_alpha_pll cam_cc_pll0 = {
 	.num_vco = ARRAY_SIZE(lucid_ole_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
 	.clkr = {
+		.dvfs_data = &cam_cc_pll0_dvfs,
 		.hw.init = &(const struct clk_init_data) {
 			.name = "cam_cc_pll0",
 			.parent_data = &(const struct clk_parent_data) {
@@ -153,6 +261,7 @@ static struct clk_alpha_pll cam_cc_pll1 = {
 	.num_vco = ARRAY_SIZE(lucid_ole_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
 	.clkr = {
+		.dvfs_data = &cam_cc_pll0_dvfs,
 		.hw.init = &(const struct clk_init_data) {
 			.name = "cam_cc_pll1",
 			.parent_data = &(const struct clk_parent_data) {
@@ -204,6 +313,16 @@ static struct clk_alpha_pll cam_cc_pll2 = {
 	.num_vco = ARRAY_SIZE(rivian_ole_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_RIVIAN_EVO],
 	.clkr = {
+		.dvfs_data = &(const struct qcom_clk_dvfs_data) {
+			.pd_indices = (const unsigned int[]) {
+				DT_PMDOMAIN_MX,
+			},
+			.num_pd_indices = 1,
+			.rates = (const struct qcom_clk_dvfs_rate[]) {
+				{ 1285000000, RPMH_REGULATOR_LEVEL_SVS },
+			},
+			.num_rates = 1,
+		},
 		.hw.init = &(const struct clk_init_data) {
 			.name = "cam_cc_pll2",
 			.parent_data = &(const struct clk_parent_data) {
@@ -236,6 +355,7 @@ static struct clk_alpha_pll cam_cc_pll3 = {
 	.num_vco = ARRAY_SIZE(lucid_ole_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
 	.clkr = {
+		.dvfs_data = &cam_cc_pll0_dvfs,
 		.hw.init = &(const struct clk_init_data) {
 			.name = "cam_cc_pll3",
 			.parent_data = &(const struct clk_parent_data) {
@@ -291,6 +411,7 @@ static struct clk_alpha_pll cam_cc_pll4 = {
 	.num_vco = ARRAY_SIZE(lucid_ole_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
 	.clkr = {
+		.dvfs_data = &cam_cc_pll0_dvfs,
 		.hw.init = &(const struct clk_init_data) {
 			.name = "cam_cc_pll4",
 			.parent_data = &(const struct clk_parent_data) {
@@ -346,6 +467,7 @@ static struct clk_alpha_pll cam_cc_pll5 = {
 	.num_vco = ARRAY_SIZE(lucid_ole_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
 	.clkr = {
+		.dvfs_data = &cam_cc_pll0_dvfs,
 		.hw.init = &(const struct clk_init_data) {
 			.name = "cam_cc_pll5",
 			.parent_data = &(const struct clk_parent_data) {
@@ -401,6 +523,7 @@ static struct clk_alpha_pll cam_cc_pll6 = {
 	.num_vco = ARRAY_SIZE(lucid_ole_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
 	.clkr = {
+		.dvfs_data = &cam_cc_pll0_dvfs,
 		.hw.init = &(const struct clk_init_data) {
 			.name = "cam_cc_pll6",
 			.parent_data = &(const struct clk_parent_data) {
@@ -456,6 +579,7 @@ static struct clk_alpha_pll cam_cc_pll7 = {
 	.num_vco = ARRAY_SIZE(lucid_ole_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
 	.clkr = {
+		.dvfs_data = &cam_cc_pll0_dvfs,
 		.hw.init = &(const struct clk_init_data) {
 			.name = "cam_cc_pll7",
 			.parent_data = &(const struct clk_parent_data) {
@@ -511,6 +635,7 @@ static struct clk_alpha_pll cam_cc_pll8 = {
 	.num_vco = ARRAY_SIZE(lucid_ole_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
 	.clkr = {
+		.dvfs_data = &cam_cc_pll0_dvfs,
 		.hw.init = &(const struct clk_init_data) {
 			.name = "cam_cc_pll8",
 			.parent_data = &(const struct clk_parent_data) {
@@ -566,6 +691,7 @@ static struct clk_alpha_pll cam_cc_pll9 = {
 	.num_vco = ARRAY_SIZE(lucid_ole_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
 	.clkr = {
+		.dvfs_data = &cam_cc_pll0_dvfs,
 		.hw.init = &(const struct clk_init_data) {
 			.name = "cam_cc_pll9",
 			.parent_data = &(const struct clk_parent_data) {
@@ -644,6 +770,7 @@ static struct clk_alpha_pll cam_cc_pll10 = {
 	.num_vco = ARRAY_SIZE(lucid_ole_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID_OLE],
 	.clkr = {
+		.dvfs_data = &cam_cc_pll0_dvfs,
 		.hw.init = &(const struct clk_init_data) {
 			.name = "cam_cc_pll10",
 			.parent_data = &(const struct clk_parent_data) {
@@ -819,6 +946,20 @@ static struct clk_rcg2 cam_cc_bps_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_2,
 	.freq_tbl = ftbl_cam_cc_bps_clk_src,
+	.clkr.dvfs_data = &(const struct qcom_clk_dvfs_data) {
+		.pd_indices = (const unsigned int[]) {
+			DT_PMDOMAIN_MMCX,
+			DT_PMDOMAIN_MXC,
+		},
+		.num_pd_indices = 2,
+		.rates = (const struct qcom_clk_dvfs_rate[]) {
+			{ 200000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+			{ 400000000, RPMH_REGULATOR_LEVEL_SVS },
+			{ 480000000, RPMH_REGULATOR_LEVEL_SVS_L1 },
+			{ 785000000, RPMH_REGULATOR_LEVEL_NOM },
+		},
+		.num_rates = 4,
+	},
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_bps_clk_src",
 		.parent_data = cam_cc_parent_data_2,
@@ -840,6 +981,7 @@ static struct clk_rcg2 cam_cc_camnoc_axi_rt_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_camnoc_axi_rt_clk_src,
+	.clkr.dvfs_data = &cam_cc_camnoc_axi_rt_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_camnoc_axi_rt_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -861,6 +1003,7 @@ static struct clk_rcg2 cam_cc_cci_0_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_cci_0_clk_src,
+	.clkr.dvfs_data = &cam_cc_cci_0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_cci_0_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -876,6 +1019,7 @@ static struct clk_rcg2 cam_cc_cci_1_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_cci_0_clk_src,
+	.clkr.dvfs_data = &cam_cc_cci_0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_cci_1_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -891,6 +1035,7 @@ static struct clk_rcg2 cam_cc_cci_2_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_cci_0_clk_src,
+	.clkr.dvfs_data = &cam_cc_cci_0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_cci_2_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -913,6 +1058,7 @@ static struct clk_rcg2 cam_cc_cphy_rx_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_cphy_rx_clk_src,
+	.clkr.dvfs_data = &cam_cc_cphy_rx_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_cphy_rx_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -936,6 +1082,19 @@ static struct clk_rcg2 cam_cc_cre_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_cre_clk_src,
+	.clkr.dvfs_data = &(const struct qcom_clk_dvfs_data) {
+		.pd_indices = (const unsigned int[]) {
+			DT_PMDOMAIN_MMCX,
+		},
+		.num_pd_indices = 1,
+		.rates = (const struct qcom_clk_dvfs_rate[]) {
+			{ 200000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+			{ 400000000, RPMH_REGULATOR_LEVEL_SVS },
+			{ 480000000, RPMH_REGULATOR_LEVEL_SVS_L1 },
+			{ 600000000, RPMH_REGULATOR_LEVEL_NOM },
+		},
+		.num_rates = 4,
+	},
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_cre_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -957,6 +1116,7 @@ static struct clk_rcg2 cam_cc_csi0phytimer_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_csi0phytimer_clk_src,
+	.clkr.dvfs_data = &cam_cc_csi0phytimer_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_csi0phytimer_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -972,6 +1132,7 @@ static struct clk_rcg2 cam_cc_csi1phytimer_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_csi0phytimer_clk_src,
+	.clkr.dvfs_data = &cam_cc_csi0phytimer_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_csi1phytimer_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -987,6 +1148,7 @@ static struct clk_rcg2 cam_cc_csi2phytimer_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_csi0phytimer_clk_src,
+	.clkr.dvfs_data = &cam_cc_csi2phytimer_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_csi2phytimer_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -1002,6 +1164,7 @@ static struct clk_rcg2 cam_cc_csi3phytimer_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_csi0phytimer_clk_src,
+	.clkr.dvfs_data = &cam_cc_csi0phytimer_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_csi3phytimer_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -1017,6 +1180,7 @@ static struct clk_rcg2 cam_cc_csi4phytimer_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_csi0phytimer_clk_src,
+	.clkr.dvfs_data = &cam_cc_csi2phytimer_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_csi4phytimer_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -1032,6 +1196,7 @@ static struct clk_rcg2 cam_cc_csi5phytimer_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_csi0phytimer_clk_src,
+	.clkr.dvfs_data = &cam_cc_csi0phytimer_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_csi5phytimer_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -1047,6 +1212,7 @@ static struct clk_rcg2 cam_cc_csi6phytimer_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_csi0phytimer_clk_src,
+	.clkr.dvfs_data = &cam_cc_csi0phytimer_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_csi6phytimer_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -1062,6 +1228,7 @@ static struct clk_rcg2 cam_cc_csi7phytimer_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_csi0phytimer_clk_src,
+	.clkr.dvfs_data = &cam_cc_csi0phytimer_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_csi7phytimer_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -1083,6 +1250,7 @@ static struct clk_rcg2 cam_cc_csid_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_csid_clk_src,
+	.clkr.dvfs_data = &cam_cc_ife_lite_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_csid_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -1105,6 +1273,18 @@ static struct clk_rcg2 cam_cc_fast_ahb_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_fast_ahb_clk_src,
+	.clkr.dvfs_data = &(const struct qcom_clk_dvfs_data) {
+		.pd_indices = (const unsigned int[]) {
+			DT_PMDOMAIN_MMCX,
+			DT_PMDOMAIN_MXC,
+		},
+		.num_pd_indices = 2,
+		.rates = (const struct qcom_clk_dvfs_rate[]) {
+			{ 300000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+			{ 400000000, RPMH_REGULATOR_LEVEL_NOM },
+		},
+		.num_rates = 2,
+	},
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_fast_ahb_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -1128,6 +1308,19 @@ static struct clk_rcg2 cam_cc_icp_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_icp_clk_src,
+	.clkr.dvfs_data = &(const struct qcom_clk_dvfs_data) {
+		.pd_indices = (const unsigned int[]) {
+			DT_PMDOMAIN_MMCX,
+			DT_PMDOMAIN_MXC,
+		},
+		.num_pd_indices = 2,
+		.rates = (const struct qcom_clk_dvfs_rate[]) {
+			{ 400000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+			{ 480000000, RPMH_REGULATOR_LEVEL_SVS },
+			{ 600000000, RPMH_REGULATOR_LEVEL_SVS_L1 },
+		},
+		.num_rates = 3,
+	},
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_icp_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -1152,6 +1345,7 @@ static struct clk_rcg2 cam_cc_ife_0_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_3,
 	.freq_tbl = ftbl_cam_cc_ife_0_clk_src,
+	.clkr.dvfs_data = &cam_cc_ife_0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_ife_0_clk_src",
 		.parent_data = cam_cc_parent_data_3,
@@ -1176,6 +1370,7 @@ static struct clk_rcg2 cam_cc_ife_1_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_4,
 	.freq_tbl = ftbl_cam_cc_ife_1_clk_src,
+	.clkr.dvfs_data = &cam_cc_ife_0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_ife_1_clk_src",
 		.parent_data = cam_cc_parent_data_4,
@@ -1200,6 +1395,7 @@ static struct clk_rcg2 cam_cc_ife_2_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_5,
 	.freq_tbl = ftbl_cam_cc_ife_2_clk_src,
+	.clkr.dvfs_data = &cam_cc_ife_0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_ife_2_clk_src",
 		.parent_data = cam_cc_parent_data_5,
@@ -1215,6 +1411,7 @@ static struct clk_rcg2 cam_cc_ife_lite_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_csid_clk_src,
+	.clkr.dvfs_data = &cam_cc_ife_lite_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_ife_lite_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -1230,6 +1427,7 @@ static struct clk_rcg2 cam_cc_ife_lite_csid_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_csid_clk_src,
+	.clkr.dvfs_data = &cam_cc_ife_lite_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_ife_lite_csid_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -1253,6 +1451,20 @@ static struct clk_rcg2 cam_cc_ipe_nps_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_6,
 	.freq_tbl = ftbl_cam_cc_ipe_nps_clk_src,
+	.clkr.dvfs_data = &(const struct qcom_clk_dvfs_data) {
+		.pd_indices = (const unsigned int[]) {
+			DT_PMDOMAIN_MMCX,
+			DT_PMDOMAIN_MXC,
+		},
+		.num_pd_indices = 2,
+		.rates = (const struct qcom_clk_dvfs_rate[]) {
+			{ 475000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+			{ 575000000, RPMH_REGULATOR_LEVEL_SVS },
+			{ 675000000, RPMH_REGULATOR_LEVEL_SVS_L1 },
+			{ 825000000, RPMH_REGULATOR_LEVEL_NOM },
+		},
+		.num_rates = 4,
+	},
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_ipe_nps_clk_src",
 		.parent_data = cam_cc_parent_data_6,
@@ -1277,6 +1489,20 @@ static struct clk_rcg2 cam_cc_jpeg_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_jpeg_clk_src,
+	.clkr.dvfs_data = &(const struct qcom_clk_dvfs_data) {
+		.pd_indices = (const unsigned int[]) {
+			DT_PMDOMAIN_MMCX,
+			DT_PMDOMAIN_MXC,
+		},
+		.num_pd_indices = 2,
+		.rates = (const struct qcom_clk_dvfs_rate[]) {
+			{ 200000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+			{ 400000000, RPMH_REGULATOR_LEVEL_SVS },
+			{ 480000000, RPMH_REGULATOR_LEVEL_SVS_L1 },
+			{ 600000000, RPMH_REGULATOR_LEVEL_NOM },
+		},
+		.num_rates = 4,
+	},
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_jpeg_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -1299,6 +1525,7 @@ static struct clk_rcg2 cam_cc_mclk0_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_1,
 	.freq_tbl = ftbl_cam_cc_mclk0_clk_src,
+	.clkr.dvfs_data = &cam_cc_mclk0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_mclk0_clk_src",
 		.parent_data = cam_cc_parent_data_1,
@@ -1314,6 +1541,7 @@ static struct clk_rcg2 cam_cc_mclk1_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_1,
 	.freq_tbl = ftbl_cam_cc_mclk0_clk_src,
+	.clkr.dvfs_data = &cam_cc_mclk0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_mclk1_clk_src",
 		.parent_data = cam_cc_parent_data_1,
@@ -1329,6 +1557,7 @@ static struct clk_rcg2 cam_cc_mclk2_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_1,
 	.freq_tbl = ftbl_cam_cc_mclk0_clk_src,
+	.clkr.dvfs_data = &cam_cc_mclk0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_mclk2_clk_src",
 		.parent_data = cam_cc_parent_data_1,
@@ -1344,6 +1573,7 @@ static struct clk_rcg2 cam_cc_mclk3_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_1,
 	.freq_tbl = ftbl_cam_cc_mclk0_clk_src,
+	.clkr.dvfs_data = &cam_cc_mclk0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_mclk3_clk_src",
 		.parent_data = cam_cc_parent_data_1,
@@ -1359,6 +1589,7 @@ static struct clk_rcg2 cam_cc_mclk4_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_1,
 	.freq_tbl = ftbl_cam_cc_mclk0_clk_src,
+	.clkr.dvfs_data = &cam_cc_mclk0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_mclk4_clk_src",
 		.parent_data = cam_cc_parent_data_1,
@@ -1374,6 +1605,7 @@ static struct clk_rcg2 cam_cc_mclk5_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_1,
 	.freq_tbl = ftbl_cam_cc_mclk0_clk_src,
+	.clkr.dvfs_data = &cam_cc_mclk0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_mclk5_clk_src",
 		.parent_data = cam_cc_parent_data_1,
@@ -1389,6 +1621,7 @@ static struct clk_rcg2 cam_cc_mclk6_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_1,
 	.freq_tbl = ftbl_cam_cc_mclk0_clk_src,
+	.clkr.dvfs_data = &cam_cc_mclk0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_mclk6_clk_src",
 		.parent_data = cam_cc_parent_data_1,
@@ -1404,6 +1637,7 @@ static struct clk_rcg2 cam_cc_mclk7_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_1,
 	.freq_tbl = ftbl_cam_cc_mclk0_clk_src,
+	.clkr.dvfs_data = &cam_cc_mclk0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_mclk7_clk_src",
 		.parent_data = cam_cc_parent_data_1,
@@ -1427,6 +1661,18 @@ static struct clk_rcg2 cam_cc_qdss_debug_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_qdss_debug_clk_src,
+	.clkr.dvfs_data = &(const struct qcom_clk_dvfs_data) {
+		.pd_indices = (const unsigned int[]) {
+			DT_PMDOMAIN_MMCX,
+		},
+		.num_pd_indices = 1,
+		.rates = (const struct qcom_clk_dvfs_rate[]) {
+			{ 75000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+			{ 150000000, RPMH_REGULATOR_LEVEL_SVS },
+			{ 300000000, RPMH_REGULATOR_LEVEL_SVS_L1 },
+		},
+		.num_rates = 3,
+	},
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_qdss_debug_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -1450,6 +1696,7 @@ static struct clk_rcg2 cam_cc_sfe_0_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_7,
 	.freq_tbl = ftbl_cam_cc_sfe_0_clk_src,
+	.clkr.dvfs_data = &cam_cc_ife_0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_sfe_0_clk_src",
 		.parent_data = cam_cc_parent_data_7,
@@ -1473,6 +1720,7 @@ static struct clk_rcg2 cam_cc_sfe_1_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_8,
 	.freq_tbl = ftbl_cam_cc_sfe_1_clk_src,
+	.clkr.dvfs_data = &cam_cc_ife_0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_sfe_1_clk_src",
 		.parent_data = cam_cc_parent_data_8,
@@ -1496,6 +1744,7 @@ static struct clk_rcg2 cam_cc_sfe_2_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_9,
 	.freq_tbl = ftbl_cam_cc_sfe_2_clk_src,
+	.clkr.dvfs_data = &cam_cc_ife_0_clk_src_dvfs,
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_sfe_2_clk_src",
 		.parent_data = cam_cc_parent_data_9,
@@ -1516,6 +1765,16 @@ static struct clk_rcg2 cam_cc_sleep_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_10,
 	.freq_tbl = ftbl_cam_cc_sleep_clk_src,
+	.clkr.dvfs_data = &(const struct qcom_clk_dvfs_data) {
+		.pd_indices = (const unsigned int[]) {
+			DT_PMDOMAIN_MMCX,
+		},
+		.num_pd_indices = 1,
+		.rates = (const struct qcom_clk_dvfs_rate[]) {
+			{ 32000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+		},
+		.num_rates = 1,
+	},
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_sleep_clk_src",
 		.parent_data = cam_cc_parent_data_10,
@@ -1537,6 +1796,17 @@ static struct clk_rcg2 cam_cc_slow_ahb_clk_src = {
 	.hid_width = 5,
 	.parent_map = cam_cc_parent_map_0,
 	.freq_tbl = ftbl_cam_cc_slow_ahb_clk_src,
+	.clkr.dvfs_data = &(const struct qcom_clk_dvfs_data) {
+		.pd_indices = (const unsigned int[]) {
+			DT_PMDOMAIN_MMCX,
+			DT_PMDOMAIN_MXC,
+		},
+		.num_pd_indices = 2,
+		.rates = (const struct qcom_clk_dvfs_rate[]) {
+			{ 80000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
+		},
+		.num_rates = 1,
+	},
 	.clkr.hw.init = &(const struct clk_init_data) {
 		.name = "cam_cc_slow_ahb_clk_src",
 		.parent_data = cam_cc_parent_data_0,
@@ -3214,6 +3484,9 @@ static struct gdsc cam_cc_titan_top_gdsc = {
 	},
 	.pwrsts = PWRSTS_OFF_ON,
 	.flags = POLL_CFG_GDSCR | RETAIN_FF_ENABLE,
+	.required_pds = (const unsigned int[]){ DT_PMDOMAIN_MMCX,
+						       DT_PMDOMAIN_MXC },
+	.num_required_pds = 2,
 };
 
 static struct gdsc cam_cc_bps_gdsc = {
@@ -3554,6 +3827,12 @@ static const struct qcom_cc_driver_data cam_cc_sm8650_driver_data = {
 	.num_clk_cbcrs = ARRAY_SIZE(cam_cc_sm8650_critical_cbcrs),
 };
 
+static const unsigned int cam_cc_sm8650_access_pd_indices[] = {
+	DT_PMDOMAIN_MMCX,
+	DT_PMDOMAIN_MXC,
+	DT_PMDOMAIN_MX,
+};
+
 static const struct qcom_cc_desc cam_cc_sm8650_desc = {
 	.config = &cam_cc_sm8650_regmap_config,
 	.clks = cam_cc_sm8650_clocks,
@@ -3563,6 +3842,9 @@ static const struct qcom_cc_desc cam_cc_sm8650_desc = {
 	.gdscs = cam_cc_sm8650_gdscs,
 	.num_gdscs = ARRAY_SIZE(cam_cc_sm8650_gdscs),
 	.use_rpm = true,
+	.pd_indices = cam_cc_sm8650_access_pd_indices,
+	.num_pd_indices = ARRAY_SIZE(cam_cc_sm8650_access_pd_indices),
+	.num_dvfs_rail_voters = 3,
 	.driver_data = &cam_cc_sm8650_driver_data,
 };
 
