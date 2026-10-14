@@ -10,6 +10,7 @@
 #include <linux/pm_domain.h>
 
 struct icc_path;
+struct device;
 struct regmap;
 struct regulator;
 struct reset_controller_dev;
@@ -31,6 +32,9 @@ struct reset_controller_dev;
  * @resets: ids of resets associated with this gdsc
  * @reset_count: number of @resets
  * @rcdev: reset controller
+ * @required_pds: ordered controller power-domain indices required
+ *                while this GDSC is logically on
+ * @num_required_pds: number of entries in @required_pds
  */
 struct gdsc {
 	struct generic_pm_domain	pd;
@@ -79,6 +83,8 @@ struct gdsc {
 	bool				needs_icc;
 	unsigned int			icc_path_index;
 	struct icc_path			*icc_path;
+	const unsigned int		*required_pds;
+	size_t				num_required_pds;
 };
 
 struct gdsc_desc {

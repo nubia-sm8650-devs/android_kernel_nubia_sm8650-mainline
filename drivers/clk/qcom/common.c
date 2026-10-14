@@ -332,7 +332,7 @@ int qcom_cc_really_probe(struct device *dev,
 	struct clk_regmap **rclks = desc->clks;
 	size_t num_clk_hws = desc->num_clk_hws;
 	struct clk_hw **clk_hws = desc->clk_hws;
-	struct dev_pm_domain_list *pd_list;
+	struct dev_pm_domain_list *pd_list = NULL;
 	const struct dev_pm_domain_attach_data pd_data = {
 		.pd_indices = desc->pd_indices,
 		.num_pd_indices = desc->num_pd_indices,
@@ -397,6 +397,8 @@ int qcom_cc_really_probe(struct device *dev,
 		scd->dev = dev;
 		scd->scs = desc->gdscs;
 		scd->num = desc->num_gdscs;
+		scd->pd_list = pd_list;
+		scd->no_external_parent = !!desc->num_dvfs_rail_voters;
 		ret = gdsc_register(scd, &reset->rcdev, regmap);
 		if (ret)
 			goto put_rpm;

@@ -12,10 +12,12 @@
 #include <linux/kernel.h>
 #include <linux/ktime.h>
 #include <linux/pm_domain.h>
+#include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/reset-controller.h>
 #include <linux/slab.h>
+#include "clk-dvfs.h"
 #include "gdsc.h"
 
 #define PWR_ON_MASK		BIT(31)
@@ -162,6 +164,8 @@ static int gdsc_toggle_logic(struct gdsc *sc, enum gdsc_status status,
 	}
 
 	ret = gdsc_update_collapse_bit(sc, status == GDSC_OFF);
+	if (ret)
+		return ret;
 
 	/* If disabling votable gdscs, don't poll on status */
 	if ((sc->flags & VOTABLE) && status == GDSC_OFF && !wait) {
@@ -343,6 +347,7 @@ static int gdsc_enable(struct generic_pm_domain *domain)
 static int gdsc_disable(struct generic_pm_domain *domain)
 {
 	struct gdsc *sc = domain_to_gdsc(domain);
+	bool wait_for_off = domain->synced_poweroff;
 	int ret;
 
 	if (sc->pwrsts == PWRSTS_ON)
@@ -379,7 +384,10 @@ static int gdsc_disable(struct generic_pm_domain *domain)
 	if (sc->pwrsts == PWRSTS_RET_ON)
 		return 0;
 
-	ret = gdsc_toggle_logic(sc, GDSC_OFF, domain->synced_poweroff);
+	if (sc->num_required_pds && !(sc->flags & VOTABLE))
+		wait_for_off = true;
+
+	ret = gdsc_toggle_logic(sc, GDSC_OFF, wait_for_off);
 	if (ret)
 		return ret;
 
@@ -535,6 +543,93 @@ err_disable_supply:
 	return ret;
 }
 
+static void gdsc_put_rail_voters(struct gdsc_desc *desc, struct gdsc *sc, size_t num)
+{
+	size_t i;
+
+	for (i = num; i-- > 0;) {
+		struct device *voter;
+
+		voter = qcom_clk_dvfs_get_rail_voter(desc->dev, sc->required_pds[i]);
+		if (!IS_ERR(voter))
+			pm_runtime_put_sync(voter);
+	}
+}
+
+static int gdsc_get_rail_voters(struct gdsc_desc *desc, struct gdsc *sc)
+{
+	size_t i;
+	int ret;
+
+	for (i = 0; i < sc->num_required_pds; i++) {
+		struct device *voter;
+
+		voter = qcom_clk_dvfs_get_rail_voter(desc->dev, sc->required_pds[i]);
+		if (IS_ERR(voter)) {
+			ret = PTR_ERR(voter);
+			goto unwind;
+		}
+
+		ret = pm_runtime_resume_and_get(voter);
+		if (ret)
+			goto unwind;
+	}
+
+	return 0;
+
+unwind:
+	gdsc_put_rail_voters(desc, sc, i);
+
+	return ret;
+}
+
+static void gdsc_remove_required_subdomains(struct gdsc_desc *desc, struct gdsc *sc, size_t num)
+{
+	size_t i;
+
+	for (i = num; i-- > 0;) {
+		struct device *voter;
+
+		voter = qcom_clk_dvfs_get_rail_voter(desc->dev, sc->required_pds[i]);
+		if (IS_ERR(voter) || !voter->pm_domain)
+			continue;
+
+		pm_genpd_remove_subdomain(pd_to_genpd(voter->pm_domain), &sc->pd);
+	}
+}
+
+static int gdsc_add_required_subdomains(struct gdsc_desc *desc, struct gdsc *sc)
+{
+	size_t i;
+	int ret;
+
+	for (i = 0; i < sc->num_required_pds; i++) {
+		struct device *voter;
+
+		voter = qcom_clk_dvfs_get_rail_voter(desc->dev, sc->required_pds[i]);
+		if (IS_ERR(voter)) {
+			ret = PTR_ERR(voter);
+			goto unwind;
+		}
+		if (!voter->pm_domain) {
+			ret = -ENODEV;
+			goto unwind;
+		}
+
+		ret = pm_genpd_add_subdomain_with_flags(pd_to_genpd(voter->pm_domain), &sc->pd,
+							GENPD_SUBDOMAIN_NO_PERF_STATE_PROPAGATION);
+		if (ret)
+			goto unwind;
+	}
+
+	return 0;
+
+unwind:
+	gdsc_remove_required_subdomains(desc, sc, i);
+
+	return ret;
+}
+
 static int gdsc_add_subdomain_list(struct dev_pm_domain_list *pd_list,
 				   struct generic_pm_domain *subdomain)
 {
@@ -598,11 +693,14 @@ static void gdsc_pm_subdomain_remove(struct gdsc_desc *desc, size_t num)
 int gdsc_register(struct gdsc_desc *desc,
 		  struct reset_controller_dev *rcdev, struct regmap *regmap)
 {
+	unsigned int parent_flags = desc->no_external_parent ?
+		GENPD_SUBDOMAIN_NO_PERF_STATE_PROPAGATION : 0;
 	int i, ret;
 	struct genpd_onecell_data *data;
 	struct device *dev = desc->dev;
 	struct gdsc **scs = desc->scs;
 	size_t num = desc->num;
+	size_t initialized = 0, linked = 0;
 
 	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
 	if (!data)
@@ -647,13 +745,24 @@ int gdsc_register(struct gdsc_desc *desc,
 			continue;
 		scs[i]->regmap = regmap;
 		scs[i]->rcdev = rcdev;
-		ret = gdsc_init(scs[i]);
+		ret = gdsc_get_rail_voters(desc, scs[i]);
 		if (ret)
-			return ret;
-		data->domains[i] = &scs[i]->pd;
+			goto err_remove_domains;
+
+		ret = gdsc_init(scs[i]);
+		if (!ret) {
+			data->domains[i] = &scs[i]->pd;
+			initialized = i + 1;
+			ret = gdsc_add_required_subdomains(desc, scs[i]);
+		}
+		/* A GDSC that is on keeps its rails through the links. */
+		gdsc_put_rail_voters(desc, scs[i], scs[i]->num_required_pds);
+		if (ret)
+			goto err_remove_domains;
+		linked = i + 1;
 	}
 
-	/* Add subdomains */
+	/* Add explicit collapse parents and legacy inferred parents. */
 	for (i = 0; i < num; i++) {
 		ret = 0;
 
@@ -661,7 +770,8 @@ int gdsc_register(struct gdsc_desc *desc,
 			continue;
 
 		if (scs[i]->parent)
-			ret = pm_genpd_add_subdomain(scs[i]->parent, &scs[i]->pd);
+			ret = pm_genpd_add_subdomain_with_flags(scs[i]->parent,
+								&scs[i]->pd, parent_flags);
 		else if (!desc->no_external_parent &&
 			 !IS_ERR_OR_NULL(dev->pm_domain))
 			ret = pm_genpd_add_subdomain(pd_to_genpd(dev->pm_domain), &scs[i]->pd);
@@ -669,13 +779,25 @@ int gdsc_register(struct gdsc_desc *desc,
 			ret = gdsc_add_subdomain_list(desc->pd_list, &scs[i]->pd);
 
 		if (ret)
-			goto err_pm_subdomain_remove;
+			goto err_remove_parents;
 	}
 
-	return of_genpd_add_provider_onecell(dev->of_node, data);
+	ret = of_genpd_add_provider_onecell(dev->of_node, data);
+	if (!ret)
+		return 0;
 
-err_pm_subdomain_remove:
+err_remove_parents:
 	gdsc_pm_subdomain_remove(desc, i);
+err_remove_domains:
+	while (linked--) {
+		if (scs[linked])
+			gdsc_remove_required_subdomains(desc, scs[linked],
+							scs[linked]->num_required_pds);
+	}
+	while (initialized--) {
+		if (scs[initialized])
+			pm_genpd_remove(&scs[initialized]->pd);
+	}
 
 	return ret;
 }
@@ -693,6 +815,7 @@ void gdsc_unregister(struct gdsc_desc *desc)
 	for (i = 0; i < num; i++) {
 		if (!scs[i])
 			continue;
+		gdsc_remove_required_subdomains(desc, scs[i], scs[i]->num_required_pds);
 		pm_genpd_remove(&scs[i]->pd);
 	}
 }
