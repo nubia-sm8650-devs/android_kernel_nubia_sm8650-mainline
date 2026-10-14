@@ -16,6 +16,7 @@
 #include "common.h"
 #include "clk-alpha-pll.h"
 #include "clk-branch.h"
+#include "clk-dvfs.h"
 #include "clk-rcg.h"
 #include "clk-regmap.h"
 #include "reset.h"
@@ -25,7 +26,6 @@ struct qcom_cc {
 	struct qcom_reset_controller reset;
 	struct clk_regmap **rclks;
 	size_t num_rclks;
-	struct dev_pm_domain_list *pd_list;
 };
 
 const
@@ -332,14 +332,31 @@ int qcom_cc_really_probe(struct device *dev,
 	struct clk_regmap **rclks = desc->clks;
 	size_t num_clk_hws = desc->num_clk_hws;
 	struct clk_hw **clk_hws = desc->clk_hws;
+	struct dev_pm_domain_list *pd_list;
+	const struct dev_pm_domain_attach_data pd_data = {
+		.pd_indices = desc->pd_indices,
+		.num_pd_indices = desc->num_pd_indices,
+		.pd_suffix = "access",
+	};
 
 	cc = devm_kzalloc(dev, sizeof(*cc), GFP_KERNEL);
 	if (!cc)
 		return -ENOMEM;
 
-	ret = devm_pm_domain_attach_list(dev, NULL, &cc->pd_list);
-	if (ret < 0 && ret != -EEXIST)
-		return ret;
+	if (desc->num_dvfs_rail_voters) {
+		ret = qcom_clk_dvfs_register(dev, desc->num_dvfs_rail_voters, rclks,
+					     num_clks);
+		if (ret)
+			return ret;
+	}
+
+	if (!desc->num_dvfs_rail_voters || desc->num_pd_indices) {
+		ret = devm_pm_domain_attach_list(dev,
+				desc->num_pd_indices ? &pd_data : NULL,
+				&pd_list);
+		if (ret < 0 && ret != -EEXIST)
+			return ret;
+	}
 
 	if (desc->use_rpm) {
 		ret = devm_pm_runtime_enable(dev);
@@ -380,7 +397,6 @@ int qcom_cc_really_probe(struct device *dev,
 		scd->dev = dev;
 		scd->scs = desc->gdscs;
 		scd->num = desc->num_gdscs;
-		scd->pd_list = cc->pd_list;
 		ret = gdsc_register(scd, &reset->rcdev, regmap);
 		if (ret)
 			goto put_rpm;

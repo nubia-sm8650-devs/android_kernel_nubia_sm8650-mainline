@@ -49,6 +49,9 @@ struct qcom_cc_desc {
 	size_t num_icc_hws;
 	unsigned int icc_first_node_id;
 	bool use_rpm;
+	const unsigned int *pd_indices;
+	size_t num_pd_indices;
+	size_t num_dvfs_rail_voters;
 	const struct qcom_cc_driver_data *driver_data;
 };
 

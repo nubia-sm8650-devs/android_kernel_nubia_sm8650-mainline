@@ -7,6 +7,8 @@
 #include <linux/clk-provider.h>
 
 struct regmap;
+struct qcom_clk_dvfs_clock;
+struct qcom_clk_dvfs_data;
 
 /**
  * struct clk_regmap - regmap supporting clock
@@ -16,6 +18,8 @@ struct regmap;
  * @enable_mask: mask when using regmap enable/disable ops
  * @enable_is_inverted: flag to indicate set enable_mask bits to disable
  *                      when using clock_enable_regmap and friends APIs.
+ * @dvfs_data: immutable clock-owned DVFS requirements
+ * @dvfs: clock-owned DVFS runtime state
  */
 struct clk_regmap {
 	struct clk_hw hw;
@@ -23,6 +27,8 @@ struct clk_regmap {
 	unsigned int enable_reg;
 	unsigned int enable_mask;
 	bool enable_is_inverted;
+	const struct qcom_clk_dvfs_data *dvfs_data;
+	struct qcom_clk_dvfs_clock *dvfs;
 };
 
 static inline struct clk_regmap *to_clk_regmap(struct clk_hw *hw)

@@ -21,6 +21,7 @@
 #include <asm/div64.h>
 
 #include "clk-rcg.h"
+#include "clk-dvfs.h"
 #include "common.h"
 
 #define CMD_REG			0x0
@@ -799,6 +800,10 @@ static int clk_rcg2_set_duty_cycle(struct clk_hw *hw, struct clk_duty *duty)
 }
 
 const struct clk_ops clk_rcg2_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.is_enabled = clk_rcg2_is_enabled,
 	.get_parent = clk_rcg2_get_parent,
 	.set_parent = clk_rcg2_set_parent,
@@ -812,6 +817,10 @@ const struct clk_ops clk_rcg2_ops = {
 EXPORT_SYMBOL_GPL(clk_rcg2_ops);
 
 const struct clk_ops clk_rcg2_gp_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.is_enabled = clk_rcg2_is_enabled,
 	.get_parent = clk_rcg2_get_parent,
 	.set_parent = clk_rcg2_set_parent,
@@ -824,6 +833,10 @@ const struct clk_ops clk_rcg2_gp_ops = {
 EXPORT_SYMBOL_GPL(clk_rcg2_gp_ops);
 
 const struct clk_ops clk_rcg2_floor_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.is_enabled = clk_rcg2_is_enabled,
 	.get_parent = clk_rcg2_get_parent,
 	.set_parent = clk_rcg2_set_parent,
@@ -837,6 +850,10 @@ const struct clk_ops clk_rcg2_floor_ops = {
 EXPORT_SYMBOL_GPL(clk_rcg2_floor_ops);
 
 const struct clk_ops clk_rcg2_fm_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.is_enabled = clk_rcg2_is_enabled,
 	.get_parent = clk_rcg2_get_parent,
 	.set_parent = clk_rcg2_set_parent,
@@ -850,6 +867,10 @@ const struct clk_ops clk_rcg2_fm_ops = {
 EXPORT_SYMBOL_GPL(clk_rcg2_fm_ops);
 
 const struct clk_ops clk_rcg2_mux_closest_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.determine_rate = __clk_mux_determine_rate_closest,
 	.get_parent = clk_rcg2_get_parent,
 	.set_parent = clk_rcg2_set_parent,
@@ -973,6 +994,10 @@ static int clk_edp_pixel_determine_rate(struct clk_hw *hw,
 }
 
 const struct clk_ops clk_edp_pixel_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.is_enabled = clk_rcg2_is_enabled,
 	.get_parent = clk_rcg2_get_parent,
 	.set_parent = clk_rcg2_set_parent,
@@ -1031,6 +1056,10 @@ static int clk_byte_set_rate_and_parent(struct clk_hw *hw,
 }
 
 const struct clk_ops clk_byte_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.is_enabled = clk_rcg2_is_enabled,
 	.get_parent = clk_rcg2_get_parent,
 	.set_parent = clk_rcg2_set_parent,
@@ -1101,6 +1130,10 @@ static int clk_byte2_set_rate_and_parent(struct clk_hw *hw,
 }
 
 const struct clk_ops clk_byte2_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.is_enabled = clk_rcg2_is_enabled,
 	.get_parent = clk_rcg2_get_parent,
 	.set_parent = clk_rcg2_set_parent,
@@ -1194,6 +1227,10 @@ static int clk_pixel_set_rate_and_parent(struct clk_hw *hw, unsigned long rate,
 }
 
 const struct clk_ops clk_pixel_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.is_enabled = clk_rcg2_is_enabled,
 	.get_parent = clk_rcg2_get_parent,
 	.set_parent = clk_rcg2_set_parent,
@@ -1309,6 +1346,10 @@ static int clk_gfx3d_set_rate(struct clk_hw *hw, unsigned long rate,
 }
 
 const struct clk_ops clk_gfx3d_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.is_enabled = clk_rcg2_is_enabled,
 	.get_parent = clk_rcg2_get_parent,
 	.set_parent = clk_rcg2_set_parent,
@@ -1354,17 +1395,21 @@ static int
 clk_rcg2_shared_force_enable_clear(struct clk_hw *hw, const struct freq_tbl *f)
 {
 	struct clk_rcg2 *rcg = to_clk_rcg2(hw);
-	int ret;
+	int ret, cleanup_ret;
 
 	ret = clk_rcg2_set_force_enable(hw);
 	if (ret)
-		return ret;
+		goto clear_force_enable;
 
 	ret = clk_rcg2_configure(rcg, f);
-	if (ret)
-		return ret;
 
-	return clk_rcg2_clear_force_enable(hw);
+clear_force_enable:
+	cleanup_ret = clk_rcg2_clear_force_enable(hw);
+	if (cleanup_ret)
+		pr_warn("%s: failed to clear force-enable: %d\n",
+			clk_hw_get_name(hw), cleanup_ret);
+
+	return ret ?: cleanup_ret;
 }
 
 static int __clk_rcg2_shared_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -1423,7 +1468,7 @@ static int clk_rcg2_shared_set_floor_rate_and_parent(struct clk_hw *hw,
 static int clk_rcg2_shared_enable(struct clk_hw *hw)
 {
 	struct clk_rcg2 *rcg = to_clk_rcg2(hw);
-	int ret;
+	int ret, cleanup_ret;
 
 	/*
 	 * Set the update bit because required configuration has already
@@ -1431,18 +1476,22 @@ static int clk_rcg2_shared_enable(struct clk_hw *hw)
 	 */
 	ret = clk_rcg2_set_force_enable(hw);
 	if (ret)
-		return ret;
+		goto clear_force_enable;
 
 	/* Write back the stored configuration corresponding to current rate */
 	ret = regmap_write(rcg->clkr.regmap, rcg->cmd_rcgr + CFG_REG, rcg->parked_cfg);
 	if (ret)
-		return ret;
+		goto clear_force_enable;
 
 	ret = update_config(rcg);
-	if (ret)
-		return ret;
 
-	return clk_rcg2_clear_force_enable(hw);
+clear_force_enable:
+	cleanup_ret = clk_rcg2_clear_force_enable(hw);
+	if (cleanup_ret)
+		pr_warn("%s: failed to clear force-enable: %d\n",
+			clk_hw_get_name(hw), cleanup_ret);
+
+	return ret ?: cleanup_ret;
 }
 
 static void clk_rcg2_shared_disable(struct clk_hw *hw)
@@ -1543,6 +1592,10 @@ static int clk_rcg2_shared_init(struct clk_hw *hw)
 }
 
 const struct clk_ops clk_rcg2_shared_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.init = clk_rcg2_shared_init,
 	.enable = clk_rcg2_shared_enable,
 	.disable = clk_rcg2_shared_disable,
@@ -1556,6 +1609,10 @@ const struct clk_ops clk_rcg2_shared_ops = {
 EXPORT_SYMBOL_GPL(clk_rcg2_shared_ops);
 
 const struct clk_ops clk_rcg2_shared_floor_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.enable = clk_rcg2_shared_enable,
 	.disable = clk_rcg2_shared_disable,
 	.get_parent = clk_rcg2_shared_get_parent,
@@ -1585,6 +1642,10 @@ static int clk_rcg2_shared_no_init_park(struct clk_hw *hw)
  * unchanged at registration time.
  */
 const struct clk_ops clk_rcg2_shared_no_init_park_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.init = clk_rcg2_shared_no_init_park,
 	.enable = clk_rcg2_shared_enable,
 	.disable = clk_rcg2_shared_disable,
@@ -1729,6 +1790,10 @@ clk_rcg2_dfs_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
 }
 
 static const struct clk_ops clk_rcg2_dfs_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.is_enabled = clk_rcg2_is_enabled,
 	.get_parent = clk_rcg2_get_parent,
 	.determine_rate = clk_rcg2_dfs_determine_rate,
@@ -1850,6 +1915,10 @@ static int clk_rcg2_dp_determine_rate(struct clk_hw *hw,
 }
 
 const struct clk_ops clk_dp_ops = {
+	.resource_acquire = qcom_clk_dvfs_resource_acquire,
+	.resource_release = qcom_clk_dvfs_resource_release,
+	.prepare = qcom_clk_dvfs_prepare,
+	.unprepare = qcom_clk_dvfs_unprepare,
 	.is_enabled = clk_rcg2_is_enabled,
 	.get_parent = clk_rcg2_get_parent,
 	.set_parent = clk_rcg2_set_parent,
