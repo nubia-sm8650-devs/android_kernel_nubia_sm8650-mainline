@@ -268,7 +268,11 @@ struct gpd_link {
 	/* Sub-domain's per-master domain performance state */
 	unsigned int performance_state;
 	unsigned int prev_performance_state;
+	unsigned int flags;
 };
+
+/* Preserve power ordering and accounting, but do not forward performance states. */
+#define GENPD_SUBDOMAIN_NO_PERF_STATE_PROPAGATION	BIT(0)
 
 struct gpd_timing_data {
 	s64 suspend_latency_ns;
@@ -314,6 +318,9 @@ int pm_genpd_add_device(struct generic_pm_domain *genpd, struct device *dev);
 int pm_genpd_remove_device(struct device *dev);
 int pm_genpd_add_subdomain(struct generic_pm_domain *genpd,
 			   struct generic_pm_domain *subdomain);
+int pm_genpd_add_subdomain_with_flags(struct generic_pm_domain *genpd,
+				      struct generic_pm_domain *subdomain,
+				      unsigned int flags);
 int pm_genpd_remove_subdomain(struct generic_pm_domain *genpd,
 			      struct generic_pm_domain *subdomain);
 int pm_genpd_init(struct generic_pm_domain *genpd,
@@ -355,6 +362,13 @@ static inline int pm_genpd_remove_device(struct device *dev)
 }
 static inline int pm_genpd_add_subdomain(struct generic_pm_domain *genpd,
 					 struct generic_pm_domain *subdomain)
+{
+	return -ENOSYS;
+}
+static inline int pm_genpd_add_subdomain_with_flags(
+					struct generic_pm_domain *genpd,
+					struct generic_pm_domain *subdomain,
+					unsigned int flags)
 {
 	return -ENOSYS;
 }

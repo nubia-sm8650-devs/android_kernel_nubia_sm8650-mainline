@@ -412,6 +412,9 @@ static void _genpd_rollback_parent_state(struct gpd_link *link, int depth)
 	struct generic_pm_domain *parent = link->parent;
 	int parent_state;
 
+	if (link->flags & GENPD_SUBDOMAIN_NO_PERF_STATE_PROPAGATION)
+		return;
+
 	genpd_lock_nested(parent, depth + 1);
 
 	parent_state = link->prev_performance_state;
@@ -432,6 +435,9 @@ static int _genpd_set_parent_state(struct generic_pm_domain *genpd,
 {
 	struct generic_pm_domain *parent = link->parent;
 	int parent_state, ret;
+
+	if (link->flags & GENPD_SUBDOMAIN_NO_PERF_STATE_PROPAGATION)
+		return 0;
 
 	/* Find parent's performance state */
 	ret = genpd_xlate_performance_state(genpd, parent, state);
@@ -2143,13 +2149,16 @@ int dev_pm_genpd_remove_notifier(struct device *dev)
 EXPORT_SYMBOL_GPL(dev_pm_genpd_remove_notifier);
 
 static int genpd_add_subdomain(struct generic_pm_domain *genpd,
-			       struct generic_pm_domain *subdomain)
+			       struct generic_pm_domain *subdomain,
+			       unsigned int flags)
 {
 	struct gpd_link *link, *itr;
 	int ret = 0;
 
 	if (IS_ERR_OR_NULL(genpd) || IS_ERR_OR_NULL(subdomain)
 	    || genpd == subdomain)
+		return -EINVAL;
+	if (flags & ~GENPD_SUBDOMAIN_NO_PERF_STATE_PROPAGATION)
 		return -EINVAL;
 
 	/*
@@ -2183,6 +2192,7 @@ static int genpd_add_subdomain(struct generic_pm_domain *genpd,
 	}
 
 	link->parent = genpd;
+	link->flags = flags;
 	list_add_tail(&link->parent_node, &genpd->parent_links);
 	link->child = subdomain;
 	list_add_tail(&link->child_node, &subdomain->child_links);
@@ -2205,15 +2215,29 @@ static int genpd_add_subdomain(struct generic_pm_domain *genpd,
 int pm_genpd_add_subdomain(struct generic_pm_domain *genpd,
 			   struct generic_pm_domain *subdomain)
 {
+	return pm_genpd_add_subdomain_with_flags(genpd, subdomain, 0);
+}
+EXPORT_SYMBOL_GPL(pm_genpd_add_subdomain);
+
+/**
+ * pm_genpd_add_subdomain_with_flags - Add a configured subdomain relationship.
+ * @genpd: Leader PM domain to add the subdomain to.
+ * @subdomain: Subdomain to be added.
+ * @flags: Subdomain-link configuration flags.
+ */
+int pm_genpd_add_subdomain_with_flags(struct generic_pm_domain *genpd,
+				      struct generic_pm_domain *subdomain,
+				      unsigned int flags)
+{
 	int ret;
 
 	mutex_lock(&gpd_list_lock);
-	ret = genpd_add_subdomain(genpd, subdomain);
+	ret = genpd_add_subdomain(genpd, subdomain, flags);
 	mutex_unlock(&gpd_list_lock);
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(pm_genpd_add_subdomain);
+EXPORT_SYMBOL_GPL(pm_genpd_add_subdomain_with_flags);
 
 /**
  * pm_genpd_remove_subdomain - Remove a subdomain from an I/O PM domain.
@@ -3153,7 +3177,7 @@ int of_genpd_add_subdomain(const struct of_phandle_args *parent_spec,
 		goto out;
 	}
 
-	ret = genpd_add_subdomain(parent, subdomain);
+	ret = genpd_add_subdomain(parent, subdomain, 0);
 
 out:
 	mutex_unlock(&gpd_list_lock);
