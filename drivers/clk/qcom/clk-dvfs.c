@@ -2,26 +2,32 @@
 
 #include <linux/device.h>
 #include <linux/device/bus.h>
+#include <linux/debugfs.h>
 #include <linux/err.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/notifier.h>
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
+#include <linux/seq_file.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 
 #include "clk-dvfs.h"
 #include "clk-regmap.h"
 
 struct qcom_clk_dvfs_vote {
 	struct list_head node;
+	const char *clock_name;
 	unsigned int level;
+	bool transition;
 };
 
 struct qcom_clk_dvfs_rail_voter {
 	struct device *dev;
 	struct device_link *link;
 	struct notifier_block nb;
+	const char *name;
 	/* Serializes the vote list and rail voter state. */
 	struct mutex lock;
 	struct list_head votes;
@@ -55,8 +61,12 @@ struct qcom_clk_dvfs {
 	size_t num_clocks;
 };
 
-static int qcom_clk_dvfs_find_level(const struct qcom_clk_dvfs_data *data,
-				unsigned long rate, unsigned int *level)
+static DEFINE_MUTEX(qcom_clk_dvfs_debugfs_lock);
+static struct dentry *qcom_clk_dvfs_debugfs_root;
+
+static int
+qcom_clk_dvfs_find_level(const struct qcom_clk_dvfs_data *data, unsigned long rate,
+			 unsigned int *level)
 {
 	for (size_t i = 0; i < data->num_rates; i++) {
 		/* PLL-derived rates are not Hz-precise. */
@@ -80,6 +90,36 @@ qcom_clk_dvfs_aggregate(struct qcom_clk_dvfs_rail_voter *rail_voter)
 		level = max(level, vote->level);
 
 	return max(level, rail_voter->safety_floor_level);
+}
+
+static int qcom_clk_dvfs_debugfs_show(struct seq_file *s, void *data)
+{
+	struct qcom_clk_dvfs *dvfs = dev_get_drvdata(s->private);
+
+	for (size_t i = 0; i < dvfs->num_rail_voters; i++) {
+		struct qcom_clk_dvfs_rail_voter *rail_voter = &dvfs->rail_voters[i];
+		struct qcom_clk_dvfs_vote *vote;
+
+		guard(mutex)(&rail_voter->lock);
+		seq_printf(s, "%s (aggregate=%u)\n", rail_voter->name,
+			   qcom_clk_dvfs_aggregate(rail_voter));
+		seq_printf(s, "  last_successful=%u safety_floor=%u must_contribute=%u\n",
+			   rail_voter->last_successful_vote_level,
+			   rail_voter->safety_floor_level, rail_voter->must_contribute);
+		list_for_each_entry(vote, &rail_voter->votes, node) {
+			int padding;
+
+			if (!vote->level)
+				continue;
+
+			padding = max(32 - (int)strlen(vote->clock_name), 0);
+			seq_printf(s, "  %s:%*s%s level=%u\n", vote->clock_name,
+				   padding, "",
+				   vote->transition ? "transition" : "prepared", vote->level);
+		}
+	}
+
+	return 0;
 }
 
 static int qcom_clk_dvfs_activate(struct qcom_clk_dvfs_rail_voter *rail_voter)
@@ -293,6 +333,8 @@ int qcom_clk_dvfs_resource_acquire(struct clk_hw *hw,
 	for (i = 0; i < dvfs_transition->num_votes; i++) {
 		unsigned int pd_index = clock->data->pd_indices[i];
 
+		dvfs_transition->votes[i].clock_name = clk_hw_get_name(hw);
+		dvfs_transition->votes[i].transition = true;
 		ret = qcom_clk_dvfs_add_vote(&clock->rail_voters[pd_index],
 						  &dvfs_transition->votes[i], level);
 		if (ret)
@@ -517,6 +559,7 @@ int qcom_clk_dvfs_register(struct device *dev,
 			ret = rail_voter->dev ? PTR_ERR(rail_voter->dev) : -ENODEV;
 			goto err_cleanup;
 		}
+		rail_voter->name = pd_to_genpd(rail_voter->dev->pm_domain)->name;
 
 		rail_voter->link = device_link_add(dev, rail_voter->dev,
 						     DL_FLAG_STATELESS);
@@ -555,6 +598,7 @@ int qcom_clk_dvfs_register(struct device *dev,
 
 			pd_index = data->pd_indices[j];
 			rail_voter = &dvfs->rail_voters[pd_index];
+			clock->votes[j].clock_name = clock->rclk->hw.init->name;
 			guard(mutex)(&rail_voter->lock);
 			list_add_tail(&clock->votes[j].node, &rail_voter->votes);
 		}
@@ -565,7 +609,20 @@ int qcom_clk_dvfs_register(struct device *dev,
 
 	dev_set_drvdata(dev, dvfs);
 
-	return devm_add_action_or_reset(dev, qcom_clk_dvfs_cleanup, dvfs);
+	ret = devm_add_action_or_reset(dev, qcom_clk_dvfs_cleanup, dvfs);
+	if (ret)
+		return ret;
+
+	scoped_guard(mutex, &qcom_clk_dvfs_debugfs_lock) {
+		if (!qcom_clk_dvfs_debugfs_root)
+			qcom_clk_dvfs_debugfs_root = debugfs_create_dir("qcom_clk_dvfs", NULL);
+
+		debugfs_create_devm_seqfile(dvfs->dev, dev_name(dvfs->dev),
+					    qcom_clk_dvfs_debugfs_root,
+					    qcom_clk_dvfs_debugfs_show);
+	}
+
+	return 0;
 
 err_cleanup:
 	qcom_clk_dvfs_cleanup(dvfs);
