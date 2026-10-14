@@ -244,10 +244,9 @@ static int qcom_clk_dvfs_remove_vote(struct qcom_clk_dvfs_rail_voter *rail_voter
 	return ret;
 }
 
-int qcom_clk_dvfs_prepare(struct clk_hw *hw)
+int qcom_clk_dvfs_prepare_rate(struct clk_hw *hw, unsigned long rate)
 {
 	struct qcom_clk_dvfs_clock *clock = to_clk_regmap(hw)->dvfs;
-	unsigned long rate = clk_hw_get_rate(hw);
 	unsigned int level;
 	size_t i;
 	int ret;
@@ -279,6 +278,11 @@ unwind:
 	}
 
 	return ret;
+}
+
+int qcom_clk_dvfs_prepare(struct clk_hw *hw)
+{
+	return qcom_clk_dvfs_prepare_rate(hw, clk_hw_get_rate(hw));
 }
 
 void qcom_clk_dvfs_unprepare(struct clk_hw *hw)

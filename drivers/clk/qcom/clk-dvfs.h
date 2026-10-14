@@ -28,6 +28,7 @@ int qcom_clk_dvfs_resource_release(struct clk_hw *hw,
 				 void *cookie,
 				 enum clk_resource_change_result result);
 int qcom_clk_dvfs_prepare(struct clk_hw *hw);
+int qcom_clk_dvfs_prepare_rate(struct clk_hw *hw, unsigned long rate);
 void qcom_clk_dvfs_unprepare(struct clk_hw *hw);
 
 int qcom_clk_dvfs_register(struct device *dev,

@@ -4,6 +4,7 @@
  * Copyright (c) 2021, 2023-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
+#include <linux/bitfield.h>
 #include <linux/kernel.h>
 #include <linux/export.h>
 #include <linux/clk-provider.h>
@@ -369,6 +370,7 @@ EXPORT_SYMBOL_GPL(clk_alpha_pll_regs);
 #define LUCID_EVO_ENABLE_VOTE_RUN       BIT(25)
 #define LUCID_EVO_PLL_L_VAL_MASK        GENMASK(15, 0)
 #define LUCID_EVO_PLL_CAL_L_VAL_SHIFT	16
+#define LUCID_EVO_PLL_CAL_L_VAL_MASK	GENMASK(23, 16)
 #define LUCID_OLE_PLL_RINGOSC_CAL_L_VAL_SHIFT	24
 
 /* PONGO ELU PLL specific setting and offsets */
@@ -2577,7 +2579,7 @@ static int alpha_pll_lucid_evo_enable(struct clk_hw *hw)
 	return ret;
 }
 
-static void _alpha_pll_lucid_evo_disable(struct clk_hw *hw, bool reset)
+static int alpha_pll_lucid_evo_disable_checked(struct clk_hw *hw, bool reset)
 {
 	struct clk_alpha_pll *pll = to_clk_alpha_pll(hw);
 	struct regmap *regmap = pll->clkr.regmap;
@@ -2586,29 +2588,45 @@ static void _alpha_pll_lucid_evo_disable(struct clk_hw *hw, bool reset)
 
 	ret = regmap_read(regmap, PLL_USER_CTL(pll), &val);
 	if (ret)
-		return;
+		return ret;
 
 	/* If in FSM mode, just unvote it */
 	if (val & LUCID_EVO_ENABLE_VOTE_RUN) {
-		clk_disable_regmap(hw);
-		return;
+		return regmap_update_bits(regmap, pll->clkr.enable_reg,
+					  pll->clkr.enable_mask,
+					  pll->clkr.enable_is_inverted ?
+					  pll->clkr.enable_mask : 0);
 	}
 
 	/* Disable the global PLL output */
 	ret = regmap_update_bits(regmap, PLL_MODE(pll), PLL_OUTCTRL, 0);
 	if (ret)
-		return;
+		return ret;
 
 	/* Disable the PLL outputs */
 	ret = regmap_update_bits(regmap, PLL_USER_CTL(pll), PLL_OUT_MASK, 0);
 	if (ret)
-		return;
+		return ret;
 
 	/* Place the PLL mode in STANDBY */
-	regmap_write(regmap, PLL_OPMODE(pll), PLL_STANDBY);
+	ret = regmap_write(regmap, PLL_OPMODE(pll), PLL_STANDBY);
+	if (ret)
+		return ret;
 
 	if (reset)
-		regmap_update_bits(regmap, PLL_MODE(pll), PLL_RESET_N, 0);
+		return regmap_update_bits(regmap, PLL_MODE(pll), PLL_RESET_N, 0);
+
+	return 0;
+}
+
+static void _alpha_pll_lucid_evo_disable(struct clk_hw *hw, bool reset)
+{
+	int ret;
+
+	ret = alpha_pll_lucid_evo_disable_checked(hw, reset);
+	if (ret)
+		pr_warn("%s: failed to disable PLL: %d\n",
+			clk_hw_get_name(hw), ret);
 }
 
 static int _alpha_pll_lucid_evo_prepare(struct clk_hw *hw, bool reset)
@@ -2616,10 +2634,12 @@ static int _alpha_pll_lucid_evo_prepare(struct clk_hw *hw, bool reset)
 	struct clk_alpha_pll *pll = to_clk_alpha_pll(hw);
 	struct clk_hw *p;
 	u32 val = 0;
-	int ret;
+	int ret, cleanup_ret;
 
 	/* Return early if calibration is not needed. */
-	regmap_read(pll->clkr.regmap, PLL_MODE(pll), &val);
+	ret = regmap_read(pll->clkr.regmap, PLL_MODE(pll), &val);
+	if (ret)
+		return ret;
 	if (!(val & LUCID_EVO_PCAL_NOT_DONE))
 		return 0;
 
@@ -2628,12 +2648,9 @@ static int _alpha_pll_lucid_evo_prepare(struct clk_hw *hw, bool reset)
 		return -EINVAL;
 
 	ret = alpha_pll_lucid_evo_enable(hw);
-	if (ret)
-		return ret;
+	cleanup_ret = alpha_pll_lucid_evo_disable_checked(hw, reset);
 
-	_alpha_pll_lucid_evo_disable(hw, reset);
-
-	return 0;
+	return ret ?: cleanup_ret;
 }
 
 static void alpha_pll_lucid_evo_disable(struct clk_hw *hw)
@@ -2641,19 +2658,67 @@ static void alpha_pll_lucid_evo_disable(struct clk_hw *hw)
 	_alpha_pll_lucid_evo_disable(hw, false);
 }
 
-static int alpha_pll_lucid_evo_prepare(struct clk_hw *hw)
+/*
+ * Calibration runs at CAL_L * parent_rate, which may exceed the operating rate
+ * covered by the normal DVFS vote. Raise the vote temporarily to keep the
+ * hardware in-spec during that step.
+ */
+static int alpha_pll_lucid_evo_dvfs_prepare(struct clk_hw *hw, bool reset)
 {
+	struct clk_alpha_pll *pll = to_clk_alpha_pll(hw);
+	unsigned long rate = clk_hw_get_rate(hw);
+	unsigned long cal_rate = 0;
+	struct clk_hw *p;
+	u32 val;
 	int ret;
 
 	ret = qcom_clk_dvfs_prepare(hw);
 	if (ret)
 		return ret;
 
-	ret = _alpha_pll_lucid_evo_prepare(hw, false);
+	ret = regmap_read(pll->clkr.regmap, PLL_MODE(pll), &val);
 	if (ret)
-		qcom_clk_dvfs_unprepare(hw);
+		goto err_unprepare;
 
+	if (val & LUCID_EVO_PCAL_NOT_DONE) {
+		p = clk_hw_get_parent(hw);
+		if (!p) {
+			ret = -EINVAL;
+			goto err_unprepare;
+		}
+
+		ret = regmap_read(pll->clkr.regmap, PLL_L_VAL(pll), &val);
+		if (ret)
+			goto err_unprepare;
+
+		cal_rate = (unsigned long)FIELD_GET(LUCID_EVO_PLL_CAL_L_VAL_MASK, val) *
+			   clk_hw_get_rate(p);
+	}
+
+	if (cal_rate > rate) {
+		ret = qcom_clk_dvfs_prepare_rate(hw, cal_rate);
+		if (ret)
+			goto err_unprepare;
+	}
+
+	ret = _alpha_pll_lucid_evo_prepare(hw, reset);
+	if (ret)
+		goto err_unprepare;
+
+	if (cal_rate > rate && qcom_clk_dvfs_prepare_rate(hw, rate))
+		pr_warn("%s: failed to drop calibration DVFS vote\n",
+			clk_hw_get_name(hw));
+
+	return 0;
+
+err_unprepare:
+	qcom_clk_dvfs_unprepare(hw);
 	return ret;
+}
+
+static int alpha_pll_lucid_evo_prepare(struct clk_hw *hw)
+{
+	return alpha_pll_lucid_evo_dvfs_prepare(hw, false);
 }
 
 static void alpha_pll_reset_lucid_evo_disable(struct clk_hw *hw)
@@ -2663,17 +2728,7 @@ static void alpha_pll_reset_lucid_evo_disable(struct clk_hw *hw)
 
 static int alpha_pll_reset_lucid_evo_prepare(struct clk_hw *hw)
 {
-	int ret;
-
-	ret = qcom_clk_dvfs_prepare(hw);
-	if (ret)
-		return ret;
-
-	ret = _alpha_pll_lucid_evo_prepare(hw, true);
-	if (ret)
-		qcom_clk_dvfs_unprepare(hw);
-
-	return ret;
+	return alpha_pll_lucid_evo_dvfs_prepare(hw, true);
 }
 
 static unsigned long alpha_pll_lucid_evo_recalc_rate(struct clk_hw *hw,
