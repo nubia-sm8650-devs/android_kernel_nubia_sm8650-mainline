@@ -5653,7 +5653,8 @@
 				 <&bi_tcxo_ao_div2>,
 				 <&sleep_clk>;
 			power-domains = <&rpmhpd RPMHPD_MMCX>,
-					<&rpmhpd RPMHPD_MXC>;
+					<&rpmhpd RPMHPD_MXC>,
+					<&rpmhpd RPMHPD_MX>;
 			#clock-cells = <1>;
 			#reset-cells = <1>;
 			#power-domain-cells = <1>;
