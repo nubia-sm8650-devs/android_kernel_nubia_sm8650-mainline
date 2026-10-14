@@ -29,6 +29,7 @@ static const struct clk_ops empty_clk_ops = { };
 struct clk_dummy_context {
 	struct clk_hw hw;
 	unsigned long rate;
+	int set_rate_error;
 	struct clk_spread_spectrum sscs;
 };
 
@@ -82,7 +83,7 @@ static int clk_dummy_set_rate(struct clk_hw *hw,
 		container_of(hw, struct clk_dummy_context, hw);
 
 	ctx->rate = rate;
-	return 0;
+	return ctx->set_rate_error;
 }
 
 static int clk_dummy_set_spread_spectrum(struct clk_hw *hw,
@@ -236,6 +237,18 @@ static void clk_test_exit(struct kunit *test)
 	clk_hw_unregister(&ctx->hw);
 }
 
+static void clk_set_rate_error_test(struct kunit *test)
+{
+	struct clk_dummy_context *ctx = test->priv;
+	struct clk *clk = clk_hw_get_clk_kunit(test, &ctx->hw, NULL);
+
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, clk);
+	ctx->set_rate_error = -EIO;
+
+	KUNIT_EXPECT_EQ(test, -EIO, clk_set_rate(clk, DUMMY_CLOCK_RATE_1));
+	KUNIT_EXPECT_EQ(test, DUMMY_CLOCK_RATE_1, clk_get_rate(clk));
+}
+
 /*
  * Test that the actual rate matches what is returned by clk_get_rate()
  */
@@ -338,6 +351,7 @@ static struct kunit_case clk_test_cases[] = {
 	KUNIT_CASE(clk_test_get_rate),
 	KUNIT_CASE(clk_test_set_get_rate),
 	KUNIT_CASE(clk_test_set_set_get_rate),
+	KUNIT_CASE(clk_set_rate_error_test),
 	KUNIT_CASE(clk_test_round_set_get_rate),
 	{}
 };
