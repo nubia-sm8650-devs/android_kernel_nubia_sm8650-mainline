@@ -26,6 +26,183 @@ static const struct clk_ops empty_clk_ops = { };
 #define DUMMY_CLOCK_RATE_1		(142 * HZ_PER_MHZ)
 #define DUMMY_CLOCK_RATE_2		(242 * HZ_PER_MHZ)
 
+enum clk_resource_test_event {
+	CLK_RESOURCE_TEST_PREPARE,
+	CLK_RESOURCE_TEST_UNPREPARE,
+	CLK_RESOURCE_TEST_ACQUIRE,
+	CLK_RESOURCE_TEST_SET_RATE,
+	CLK_RESOURCE_TEST_RELEASE,
+};
+
+struct clk_resource_test_context {
+	struct clk_hw hw;
+	struct clk *clk;
+	enum clk_resource_test_event events[16];
+	unsigned int num_events;
+	int resource_release_error;
+	unsigned long rate;
+};
+
+static void clk_resource_test_record(struct clk_resource_test_context *ctx,
+				     enum clk_resource_test_event event)
+{
+	ctx->events[ctx->num_events++] = event;
+}
+
+static int clk_resource_test_prepare(struct clk_hw *hw)
+{
+	struct clk_resource_test_context *ctx =
+		container_of(hw, struct clk_resource_test_context, hw);
+
+	clk_resource_test_record(ctx, CLK_RESOURCE_TEST_PREPARE);
+
+	return 0;
+}
+
+static void clk_resource_test_unprepare(struct clk_hw *hw)
+{
+	struct clk_resource_test_context *ctx =
+		container_of(hw, struct clk_resource_test_context, hw);
+
+	clk_resource_test_record(ctx, CLK_RESOURCE_TEST_UNPREPARE);
+}
+
+static int
+clk_resource_test_acquire(struct clk_hw *hw,
+			  const struct clk_resource_transition *transition,
+			  void **cookie)
+{
+	struct clk_resource_test_context *ctx =
+		container_of(hw, struct clk_resource_test_context, hw);
+
+	clk_resource_test_record(ctx, CLK_RESOURCE_TEST_ACQUIRE);
+
+	return 0;
+}
+
+static int
+clk_resource_test_release(struct clk_hw *hw,
+			  const struct clk_resource_transition *transition,
+			  void *cookie,
+			  enum clk_resource_change_result result)
+{
+	struct clk_resource_test_context *ctx =
+		container_of(hw, struct clk_resource_test_context, hw);
+
+	clk_resource_test_record(ctx, CLK_RESOURCE_TEST_RELEASE);
+
+	return ctx->resource_release_error;
+}
+
+static unsigned long
+clk_resource_test_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
+{
+	struct clk_resource_test_context *ctx =
+		container_of(hw, struct clk_resource_test_context, hw);
+
+	return ctx->rate;
+}
+
+static int clk_resource_test_determine_rate(struct clk_hw *hw,
+					    struct clk_rate_request *req)
+{
+	return 0;
+}
+
+static int clk_resource_test_set_rate(struct clk_hw *hw, unsigned long rate,
+				      unsigned long parent_rate)
+{
+	struct clk_resource_test_context *ctx =
+		container_of(hw, struct clk_resource_test_context, hw);
+
+	clk_resource_test_record(ctx, CLK_RESOURCE_TEST_SET_RATE);
+	ctx->rate = rate;
+
+	return 0;
+}
+
+static const struct clk_ops clk_resource_test_ops = {
+	.prepare = clk_resource_test_prepare,
+	.unprepare = clk_resource_test_unprepare,
+	.recalc_rate = clk_resource_test_recalc_rate,
+	.determine_rate = clk_resource_test_determine_rate,
+	.set_rate = clk_resource_test_set_rate,
+	.resource_acquire = clk_resource_test_acquire,
+	.resource_release = clk_resource_test_release,
+};
+
+static int clk_resource_test_init(struct kunit *test)
+{
+	struct clk_resource_test_context *ctx;
+	struct clk_init_data init = {
+		.name = "clk_resource_test",
+		.ops = &clk_resource_test_ops,
+	};
+	int ret;
+
+	ctx = kunit_kzalloc(test, sizeof(*ctx), GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+
+	ctx->hw.init = &init;
+	ctx->rate = DUMMY_CLOCK_INIT_RATE;
+	test->priv = ctx;
+
+	ret = clk_hw_register_kunit(test, NULL, &ctx->hw);
+	if (ret)
+		return ret;
+
+	ctx->clk = clk_hw_get_clk_kunit(test, &ctx->hw, NULL);
+	if (IS_ERR(ctx->clk))
+		return PTR_ERR(ctx->clk);
+
+	return 0;
+}
+
+static void clk_resource_set_rate_test(struct kunit *test)
+{
+	struct clk_resource_test_context *ctx = test->priv;
+
+	KUNIT_ASSERT_EQ(test, 0, clk_set_rate(ctx->clk, DUMMY_CLOCK_RATE_1));
+	KUNIT_ASSERT_EQ(test, 3, ctx->num_events);
+	KUNIT_EXPECT_EQ(test, CLK_RESOURCE_TEST_ACQUIRE, ctx->events[0]);
+	KUNIT_EXPECT_EQ(test, CLK_RESOURCE_TEST_SET_RATE, ctx->events[1]);
+	KUNIT_EXPECT_EQ(test, CLK_RESOURCE_TEST_RELEASE, ctx->events[2]);
+}
+
+static void clk_resource_set_rate_release_failure_test(struct kunit *test)
+{
+	struct clk_resource_test_context *ctx = test->priv;
+	unsigned int first_event = ctx->num_events;
+
+	ctx->resource_release_error = -EIO;
+	KUNIT_EXPECT_EQ(test, -EIO,
+			clk_set_rate(ctx->clk, DUMMY_CLOCK_RATE_1));
+	KUNIT_EXPECT_EQ(test, DUMMY_CLOCK_RATE_1, clk_get_rate(ctx->clk));
+
+	ctx->resource_release_error = 0;
+	KUNIT_EXPECT_EQ(test, 0, clk_set_rate(ctx->clk, DUMMY_CLOCK_RATE_1));
+	KUNIT_ASSERT_EQ(test, first_event + 6, ctx->num_events);
+	KUNIT_EXPECT_EQ(test, CLK_RESOURCE_TEST_ACQUIRE,
+			ctx->events[first_event + 3]);
+	KUNIT_EXPECT_EQ(test, CLK_RESOURCE_TEST_SET_RATE,
+			ctx->events[first_event + 4]);
+	KUNIT_EXPECT_EQ(test, CLK_RESOURCE_TEST_RELEASE,
+			ctx->events[first_event + 5]);
+}
+
+static struct kunit_case clk_resource_test_cases[] = {
+	KUNIT_CASE(clk_resource_set_rate_test),
+	KUNIT_CASE(clk_resource_set_rate_release_failure_test),
+	{}
+};
+
+static struct kunit_suite clk_resource_test_suite = {
+	.name = "clk-resource",
+	.init = clk_resource_test_init,
+	.test_cases = clk_resource_test_cases,
+};
+
 struct clk_dummy_context {
 	struct clk_hw hw;
 	unsigned long rate;
@@ -3757,6 +3934,7 @@ kunit_test_suites(
 	&clk_assigned_rates_suite,
 	&clk_assigned_sscs_suite,
 	&clk_hw_get_dev_of_node_test_suite,
+	&clk_resource_test_suite,
 	&clk_leaf_mux_set_rate_parent_test_suite,
 	&clk_test_suite,
 	&clk_multiple_parents_mux_test_suite,

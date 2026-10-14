@@ -117,6 +117,21 @@ struct clk_spread_spectrum {
 	enum clk_ssc_method method;
 };
 
+enum clk_resource_change_result {
+	CLK_RESOURCE_NO_HW_CHANGE,
+	CLK_RESOURCE_HW_CHANGED,
+	CLK_RESOURCE_COMPLETE,
+};
+
+struct clk_resource_transition {
+	unsigned long old_rate;
+	unsigned long new_rate;
+	unsigned long actual_rate;
+	struct clk_hw *old_parent;
+	struct clk_hw *new_parent;
+	struct clk_hw *actual_parent;
+};
+
 /**
  * struct clk_ops -  Callback operations for hardware clocks; these are to
  * be provided by the clock implementation, and will be called by drivers
@@ -262,6 +277,24 @@ struct clk_spread_spectrum {
  *		requirements that were needed while the clock and its tree
  *		was changing states. Returns 0 on success, -EERROR otherwise.
  *
+ * @resource_acquire: Acquire the resources required for a planned rate or parent
+ *		transition. Called for the affected tree before PRE rate notifiers.
+ * @resource_release: Reconcile resource requirements and release temporary
+ *		resources after the whole affected tree has completed or stopped.
+ *		The result describes whether hardware was untouched, may have
+ *		changed, or completed successfully. The actual clock state is
+ *		reported in the transition.
+ *
+ * The resource operations allow a clock provider to describe resources which
+ * must remain available during a rate or parent transition. Callback pairs are
+ * mandatory: a provider defining @resource_acquire must define
+ * @resource_release. Both callbacks may sleep and run under the CCF prepare
+ * lock. A successful @resource_acquire transfers ownership of the cookie to
+ * @resource_release, which must consume it for every result even when
+ * release returns an error. For CLK_RESOURCE_HW_CHANGED, the actual fields
+ * contain CCF's best configured state and may not describe partially programmed
+ * hardware.
+ *
  * The clk_enable/clk_disable and clk_prepare/clk_unprepare pairs allow
  * implementations to split any work between atomic (enable) and sleepable
  * (prepare) contexts.  If enabling a clock requires code that might sleep,
@@ -314,6 +347,13 @@ struct clk_ops {
 	int		(*post_rate_change)(struct clk_hw *hw,
 					    unsigned long old_rate,
 					    unsigned long rate);
+	int		(*resource_acquire)(struct clk_hw *hw,
+				const struct clk_resource_transition *transition,
+				void **cookie);
+	int		(*resource_release)(struct clk_hw *hw,
+				 const struct clk_resource_transition *transition,
+				 void *cookie,
+				 enum clk_resource_change_result result);
 };
 
 /**
