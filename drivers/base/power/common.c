@@ -179,9 +179,9 @@ EXPORT_SYMBOL_GPL(dev_pm_domain_attach_by_name);
  *
  * This function helps to attach a device to its multiple PM domains. The
  * caller, which is typically a driver's probe function, may provide a list of
- * names for the PM domains that we should try to attach the device to, but it
- * may also provide an empty list, in case the attach should be done for all of
- * the available PM domains.
+ * names or indices for the PM domains that we should try to attach the device
+ * to, but it may also provide an empty list, in case the attach should be done
+ * for all of the available PM domains.
  *
  * Callers must ensure proper synchronization of this function with power
  * management callbacks.
@@ -211,9 +211,14 @@ int dev_pm_domain_attach_list(struct device *dev,
 	if (!np)
 		return 0;
 
+	if (data && data->pd_names && data->pd_indices)
+		return -EINVAL;
+
 	if (data && data->pd_names) {
 		num_pds = data->num_pd_names;
 		by_id = false;
+	} else if (data && data->pd_indices) {
+		num_pds = data->num_pd_indices;
 	} else {
 		num_pds = of_count_phandle_with_args(np, "power-domains",
 						     "#power-domain-cells");
@@ -240,13 +245,18 @@ int dev_pm_domain_attach_list(struct device *dev,
 		link_flags |= DL_FLAG_RPM_ACTIVE;
 
 	for (i = 0; i < num_pds; i++) {
-		if (by_id)
+		if (by_id) {
+			unsigned int pd_index = data && data->pd_indices ?
+				data->pd_indices[i] : i;
+
 			pd_dev = data && data->pd_suffix ?
-				genpd_dev_pm_attach_by_id_suffix(dev, i, data->pd_suffix) :
-				dev_pm_domain_attach_by_id(dev, i);
-		else
+				genpd_dev_pm_attach_by_id_suffix(dev, pd_index,
+							    data->pd_suffix) :
+				dev_pm_domain_attach_by_id(dev, pd_index);
+		} else {
 			pd_dev = dev_pm_domain_attach_by_name(dev,
 							data->pd_names[i]);
+		}
 		if (IS_ERR_OR_NULL(pd_dev)) {
 			ret = pd_dev ? PTR_ERR(pd_dev) : -ENODEV;
 			goto err_attach;

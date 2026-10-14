@@ -32,9 +32,9 @@
  *
  * PD_FLAG_REQUIRED_OPP:	Assign required_devs for the required OPPs. The
  *				index of the required OPP must correspond to the
- *				index in the array of the pd_names. If pd_names
- *				isn't specified, the index just follows the
- *				index for the attached PM domain.
+ *				index in the pd_names or pd_indices array. If neither
+ *				is specified, the index just follows the index for the
+ *				attached PM domain.
  *
  * PD_FLAG_ATTACH_POWER_ON:	Power on the domain during attach.
  *
@@ -50,6 +50,8 @@
 struct dev_pm_domain_attach_data {
 	const char * const *pd_names;
 	u32 num_pd_names;
+	const unsigned int *pd_indices;
+	u32 num_pd_indices;
 	const char *pd_suffix;
 	u32 pd_flags;
 };
