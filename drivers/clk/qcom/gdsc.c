@@ -587,9 +587,10 @@ static void gdsc_pm_subdomain_remove(struct gdsc_desc *desc, size_t num)
 			continue;
 		if (scs[i]->parent)
 			pm_genpd_remove_subdomain(scs[i]->parent, &scs[i]->pd);
-		else if (!IS_ERR_OR_NULL(dev->pm_domain))
+		else if (!desc->no_external_parent &&
+			 !IS_ERR_OR_NULL(dev->pm_domain))
 			pm_genpd_remove_subdomain(pd_to_genpd(dev->pm_domain), &scs[i]->pd);
-		else if (desc->pd_list)
+		else if (!desc->no_external_parent && desc->pd_list)
 			gdsc_remove_subdomain_list(desc->pd_list, &scs[i]->pd);
 	}
 }
@@ -654,13 +655,17 @@ int gdsc_register(struct gdsc_desc *desc,
 
 	/* Add subdomains */
 	for (i = 0; i < num; i++) {
+		ret = 0;
+
 		if (!scs[i])
 			continue;
+
 		if (scs[i]->parent)
 			ret = pm_genpd_add_subdomain(scs[i]->parent, &scs[i]->pd);
-		else if (!IS_ERR_OR_NULL(dev->pm_domain))
+		else if (!desc->no_external_parent &&
+			 !IS_ERR_OR_NULL(dev->pm_domain))
 			ret = pm_genpd_add_subdomain(pd_to_genpd(dev->pm_domain), &scs[i]->pd);
-		else if (desc->pd_list)
+		else if (!desc->no_external_parent && desc->pd_list)
 			ret = gdsc_add_subdomain_list(desc->pd_list, &scs[i]->pd);
 
 		if (ret)
