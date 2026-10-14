@@ -50,6 +50,7 @@
 struct dev_pm_domain_attach_data {
 	const char * const *pd_names;
 	u32 num_pd_names;
+	const char *pd_suffix;
 	u32 pd_flags;
 };
 
@@ -475,6 +476,9 @@ int of_genpd_remove_child_ids(struct device_node *np,
 int genpd_dev_pm_attach(struct device *dev);
 struct device *genpd_dev_pm_attach_by_id(struct device *dev,
 					 unsigned int index);
+struct device *genpd_dev_pm_attach_by_id_suffix(struct device *dev,
+						unsigned int index,
+						const char *suffix);
 struct device *genpd_dev_pm_attach_by_name(struct device *dev,
 					   const char *name);
 #else /* !CONFIG_PM_GENERIC_DOMAINS_OF */
@@ -525,6 +529,13 @@ static inline int genpd_dev_pm_attach(struct device *dev)
 
 static inline struct device *genpd_dev_pm_attach_by_id(struct device *dev,
 						       unsigned int index)
+{
+	return NULL;
+}
+
+static inline struct device *
+genpd_dev_pm_attach_by_id_suffix(struct device *dev, unsigned int index,
+				 const char *suffix)
 {
 	return NULL;
 }

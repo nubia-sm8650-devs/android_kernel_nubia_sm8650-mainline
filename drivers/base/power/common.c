@@ -241,7 +241,9 @@ int dev_pm_domain_attach_list(struct device *dev,
 
 	for (i = 0; i < num_pds; i++) {
 		if (by_id)
-			pd_dev = dev_pm_domain_attach_by_id(dev, i);
+			pd_dev = data && data->pd_suffix ?
+				genpd_dev_pm_attach_by_id_suffix(dev, i, data->pd_suffix) :
+				dev_pm_domain_attach_by_id(dev, i);
 		else
 			pd_dev = dev_pm_domain_attach_by_name(dev,
 							data->pd_names[i]);

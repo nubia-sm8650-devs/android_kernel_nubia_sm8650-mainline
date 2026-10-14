@@ -3478,8 +3478,9 @@ EXPORT_SYMBOL_GPL(genpd_dev_pm_attach);
  * turned on, then ERR_PTR(-EPROBE_DEFER) is returned to ensure that the device
  * is not probed and to re-try again later.
  */
-struct device *genpd_dev_pm_attach_by_id(struct device *dev,
-					 unsigned int index)
+static struct device *__genpd_dev_pm_attach_by_id(struct device *dev,
+						  unsigned int index,
+						  const char *suffix)
 {
 	struct device *virt_dev;
 	int num_domains;
@@ -3502,7 +3503,11 @@ struct device *genpd_dev_pm_attach_by_id(struct device *dev,
 	if (!virt_dev)
 		return ERR_PTR(-ENOMEM);
 
-	dev_set_name(virt_dev, "genpd:%u:%s", index, dev_name(dev));
+	if (suffix)
+		dev_set_name(virt_dev, "genpd:%u:%s:%s", index, dev_name(dev),
+			     suffix);
+	else
+		dev_set_name(virt_dev, "genpd:%u:%s", index, dev_name(dev));
 	virt_dev->bus = &genpd_bus_type;
 	virt_dev->release = genpd_release_dev;
 	virt_dev->of_node = of_node_get(dev->of_node);
@@ -3525,7 +3530,24 @@ struct device *genpd_dev_pm_attach_by_id(struct device *dev,
 
 	return virt_dev;
 }
+
+struct device *genpd_dev_pm_attach_by_id(struct device *dev,
+					 unsigned int index)
+{
+	return __genpd_dev_pm_attach_by_id(dev, index, NULL);
+}
 EXPORT_SYMBOL_GPL(genpd_dev_pm_attach_by_id);
+
+struct device *genpd_dev_pm_attach_by_id_suffix(struct device *dev,
+						unsigned int index,
+						const char *suffix)
+{
+	if (!suffix || !*suffix)
+		return ERR_PTR(-EINVAL);
+
+	return __genpd_dev_pm_attach_by_id(dev, index, suffix);
+}
+EXPORT_SYMBOL_GPL(genpd_dev_pm_attach_by_id_suffix);
 
 /**
  * genpd_dev_pm_attach_by_name - Associate a device with one of its PM domains.
