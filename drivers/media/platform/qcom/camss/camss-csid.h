@@ -76,6 +76,7 @@ struct csid_phy_config {
 	u8 lane_cnt;
 	u32 lane_assign;
 	u32 en_vc;
+	bool cphy;
 };
 
 struct csid_device;
