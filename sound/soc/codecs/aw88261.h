@@ -564,6 +564,8 @@ enum {
 enum {
 	AW88261_DEV_PW_OFF = 0,
 	AW88261_DEV_PW_ON,
+	/* powered up and configured, amplifier off: waits for the bit clock */
+	AW88261_DEV_PW_READY,
 };
 
 enum {
@@ -607,6 +609,8 @@ struct aw88261 {
 	unsigned int rxr_slotvld_mask;
 
 	bool phase_sync;
+	/* the trigger may sleep: the start is split between DAPM and unmute */
+	bool nonatomic;
 };
 
 #endif

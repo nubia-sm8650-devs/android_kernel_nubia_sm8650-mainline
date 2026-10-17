@@ -187,12 +187,8 @@ static int aw88261_dev_configure_syspll(struct aw88261 *aw88261)
 		return ret;
 
 	/* The polarity of the bit clock (BCK) */
-	ret = regmap_update_bits(aw_dev->regmap, AW88261_SYSCTRL_REG,
+	return regmap_update_bits(aw_dev->regmap, AW88261_SYSCTRL_REG,
 			~AW88261_BCKINV_MASK, aw88261->bck_inv_value);
-	if (ret)
-		return ret;
-
-	return aw88261_dev_check_pll(aw_dev);
 }
 
 static int aw88261_dev_check_sysst(struct aw_device *aw_dev)
@@ -497,15 +493,15 @@ static int aw88261_dev_fw_update(struct aw88261 *aw88261)
 	return ret;
 }
 
-static int aw88261_dev_start(struct aw88261 *aw88261)
+/*
+ * First part of the start, which does not need the bit clock: power up and
+ * configure the I2S interface and the PLL. The amplifier stays powered down
+ * (AMPPD) and muted.
+ */
+static int aw88261_dev_power_up(struct aw88261 *aw88261)
 {
 	struct aw_device *aw_dev = aw88261->aw_pa;
 	int ret;
-
-	if (aw_dev->status == AW88261_DEV_PW_ON) {
-		dev_dbg(aw_dev->dev, "already power on");
-		return 0;
-	}
 
 	/* power on */
 	aw88261_dev_pwd(aw_dev, false);
@@ -513,8 +509,31 @@ static int aw88261_dev_start(struct aw88261 *aw88261)
 
 	ret = aw88261_dev_configure_syspll(aw88261);
 	if (ret) {
+		aw88261_dev_pwd(aw_dev, true);
+		return ret;
+	}
+
+	aw88261_reg_force_set(aw88261);
+
+	aw_dev->status = AW88261_DEV_PW_READY;
+
+	return 0;
+}
+
+/*
+ * Second part of the start, which needs the bit clock as the PLL locks to
+ * it: check the lock, enable the amplifier and the feedback, and unmute.
+ * On failure the device is left as aw88261_dev_power_up() left it.
+ */
+static int aw88261_dev_enable(struct aw88261 *aw88261)
+{
+	struct aw_device *aw_dev = aw88261->aw_pa;
+	int ret;
+
+	ret = aw88261_dev_check_pll(aw_dev);
+	if (ret) {
 		dev_dbg(aw_dev->dev, "pll check failed");
-		goto pll_check_fail;
+		return ret;
 	}
 
 	/* amppd on */
@@ -525,7 +544,10 @@ static int aw88261_dev_start(struct aw88261 *aw88261)
 	ret = aw88261_dev_check_sysst(aw_dev);
 	if (ret) {
 		dev_dbg(aw_dev->dev, "sysst check failed");
-		goto sysst_check_fail;
+		aw88261_dev_i2s_tx_enable(aw_dev, false);
+		aw88261_dev_clear_int_status(aw_dev);
+		aw88261_dev_amppd(aw_dev, true);
+		return ret;
 	}
 
 	/* enable tx feedback */
@@ -533,8 +555,6 @@ static int aw88261_dev_start(struct aw88261 *aw88261)
 
 	if (aw88261->amppd_st)
 		aw88261_dev_amppd(aw_dev, true);
-
-	aw88261_reg_force_set(aw88261);
 
 	/* close uls mute */
 	aw88261_dev_uls_hmute(aw_dev, false);
@@ -548,26 +568,12 @@ static int aw88261_dev_start(struct aw88261 *aw88261)
 	aw_dev->status = AW88261_DEV_PW_ON;
 
 	return 0;
-
-sysst_check_fail:
-	aw88261_dev_i2s_tx_enable(aw_dev, false);
-	aw88261_dev_clear_int_status(aw_dev);
-	aw88261_dev_amppd(aw_dev, true);
-pll_check_fail:
-	aw88261_dev_pwd(aw_dev, true);
-	aw_dev->status = AW88261_DEV_PW_OFF;
-
-	return ret;
 }
 
-static int aw88261_dev_stop(struct aw_device *aw_dev)
+/* Undo aw88261_dev_enable() */
+static void aw88261_dev_disable(struct aw_device *aw_dev)
 {
-	if (aw_dev->status == AW88261_DEV_PW_OFF) {
-		dev_info(aw_dev->dev, "already power off");
-		return 0;
-	}
-
-	aw_dev->status = AW88261_DEV_PW_OFF;
+	aw_dev->status = AW88261_DEV_PW_READY;
 
 	/* clear inturrupt */
 	aw88261_dev_clear_int_status(aw_dev);
@@ -582,6 +588,37 @@ static int aw88261_dev_stop(struct aw_device *aw_dev)
 
 	/* enable amppd */
 	aw88261_dev_amppd(aw_dev, true);
+}
+
+static int aw88261_dev_start(struct aw88261 *aw88261, bool enable)
+{
+	struct aw_device *aw_dev = aw88261->aw_pa;
+	int ret;
+
+	ret = aw88261_dev_power_up(aw88261);
+	if (ret || !enable)
+		return ret;
+
+	ret = aw88261_dev_enable(aw88261);
+	if (ret) {
+		aw88261_dev_pwd(aw_dev, true);
+		aw_dev->status = AW88261_DEV_PW_OFF;
+	}
+
+	return ret;
+}
+
+static int aw88261_dev_stop(struct aw_device *aw_dev)
+{
+	if (aw_dev->status == AW88261_DEV_PW_OFF) {
+		dev_dbg(aw_dev->dev, "already power off");
+		return 0;
+	}
+
+	if (aw_dev->status == AW88261_DEV_PW_ON)
+		aw88261_dev_disable(aw_dev);
+
+	aw_dev->status = AW88261_DEV_PW_OFF;
 
 	/* set power down */
 	aw88261_dev_pwd(aw_dev, true);
@@ -618,7 +655,7 @@ static int aw88261_reg_update(struct aw88261 *aw88261, bool force)
 	return ret;
 }
 
-static void aw88261_start_pa(struct aw88261 *aw88261)
+static void aw88261_start_pa(struct aw88261 *aw88261, bool enable)
 {
 	int ret, i;
 
@@ -629,7 +666,7 @@ static void aw88261_start_pa(struct aw88261 *aw88261)
 				"aw88261_reg_update failed, cnt:%d, ret:%d\n", i, ret);
 			continue;
 		}
-		ret = aw88261_dev_start(aw88261);
+		ret = aw88261_dev_start(aw88261, enable);
 		if (ret) {
 			dev_dbg(aw88261->aw_pa->dev,
 				"aw88261_dev_start failed, cnt:%d, ret:%d\n", i, ret);
@@ -643,15 +680,15 @@ static void aw88261_start_pa(struct aw88261 *aw88261)
 		dev_err(aw88261->aw_pa->dev, "start failure (%d)\n", ret);
 }
 
-static void aw88261_start(struct aw88261 *aw88261)
+static void aw88261_start(struct aw88261 *aw88261, bool enable)
 {
 	if (aw88261->aw_pa->fw_status != AW88261_DEV_FW_OK)
 		return;
 
-	if (aw88261->aw_pa->status == AW88261_DEV_PW_ON)
+	if (aw88261->aw_pa->status != AW88261_DEV_PW_OFF)
 		return;
 
-	aw88261_start_pa(aw88261);
+	aw88261_start_pa(aw88261, enable);
 }
 
 static int aw88261_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
@@ -865,10 +902,50 @@ static int aw88261_set_tdm_slot(struct snd_soc_dai *dai,
 	return 0;
 }
 
+static int aw88261_startup(struct snd_pcm_substream *substream,
+			   struct snd_soc_dai *dai)
+{
+	struct aw88261 *aw88261 = snd_soc_component_get_drvdata(dai->component);
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		aw88261->nonatomic = substream->pcm->nonatomic;
+
+	return 0;
+}
+
+static int aw88261_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
+{
+	struct aw88261 *aw88261 = snd_soc_component_get_drvdata(dai->component);
+	struct aw_device *aw_dev = aw88261->aw_pa;
+	int ret;
+
+	/* No I2C in an atomic trigger: the start was completed from DAPM */
+	if (!aw88261->nonatomic)
+		return 0;
+
+	guard(mutex)(&aw88261->lock);
+
+	if (mute) {
+		if (aw_dev->status == AW88261_DEV_PW_ON)
+			aw88261_dev_disable(aw_dev);
+	} else if (aw_dev->status == AW88261_DEV_PW_READY) {
+		ret = aw88261_dev_enable(aw88261);
+		if (ret)
+			dev_err(aw_dev->dev, "start failure (%d)\n", ret);
+	}
+
+	return 0;
+}
+
 static const struct snd_soc_dai_ops aw88261_dai_ops = {
+	.startup = aw88261_startup,
 	.set_fmt = aw88261_set_fmt,
 	.hw_params = aw88261_hw_params,
 	.set_tdm_slot = aw88261_set_tdm_slot,
+	.mute_stream = aw88261_mute_stream,
+	/* unmuted after the trigger of the CPU DAI, which may start the BCK */
+	.mute_unmute_on_trigger = true,
+	.no_capture_mute = 1,
 };
 
 static struct snd_soc_dai_driver aw88261_dai[] = {
@@ -969,8 +1046,10 @@ static int aw88261_profile_set(struct snd_kcontrol *kcontrol,
 	}
 
 	if (aw88261->aw_pa->status) {
+		bool enable = aw88261->aw_pa->status == AW88261_DEV_PW_ON;
+
 		aw88261_dev_stop(aw88261->aw_pa);
-		aw88261_start(aw88261);
+		aw88261_start(aw88261, enable);
 	}
 
 	return 1;
@@ -1068,7 +1147,11 @@ static int aw88261_playback_event(struct snd_soc_dapm_widget *w,
 	guard(mutex)(&aw88261->lock);
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
-		aw88261_start(aw88261);
+		/*
+		 * Some hosts only start the bit clock in their trigger: when
+		 * the trigger may sleep, the unmute completes the start there.
+		 */
+		aw88261_start(aw88261, !aw88261->nonatomic);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		aw88261_dev_stop(aw88261->aw_pa);
