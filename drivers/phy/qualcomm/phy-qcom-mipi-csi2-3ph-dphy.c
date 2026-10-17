@@ -627,6 +627,8 @@ const struct mipi_csi2phy_soc_cfg mipi_csi2_dphy_sc7280 = {
 		.lane_array_size = ARRAY_SIZE(lane_regs_sc7280),
 		.common_regs_offset = 0x800,
 	},
+	.ops_cphy = &phy_qcom_mipi_csi2_ops_3ph_cphy,
+	.reg_info_cphy = &mipi_csi2_3ph_cphy_regs_sc7280,
 	.supply_names = (const char **)sc7280_supplies,
 	.num_supplies = ARRAY_SIZE(sc7280_supplies),
 	.clk_names = (const char **)sc7280_clks,
