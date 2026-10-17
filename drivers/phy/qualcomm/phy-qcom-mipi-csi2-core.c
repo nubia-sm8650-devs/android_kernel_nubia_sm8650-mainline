@@ -14,6 +14,7 @@
 #include <linux/pm_opp.h>
 #include <linux/phy/phy.h>
 #include <linux/phy/phy-mipi-dphy.h>
+#include <linux/phy/phy-mipi-cphy.h>
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
@@ -96,11 +97,10 @@ unset_pstate:
 	return ret;
 }
 
-static int phy_qcom_mipi_csi2_configure(struct phy *phy,
-					union phy_configure_opts *opts)
+static int
+phy_qcom_mipi_csi2_configure_dphy(struct mipi_csi2phy_device *csi2phy,
+				  struct phy_configure_opts_mipi_dphy *dphy_cfg)
 {
-	struct mipi_csi2phy_device *csi2phy = phy_get_drvdata(phy);
-	struct phy_configure_opts_mipi_dphy *dphy_cfg = &opts->mipi_dphy;
 	struct mipi_csi2phy_stream_cfg *stream_cfg = &csi2phy->stream_cfg;
 	int ret;
 
@@ -119,23 +119,72 @@ static int phy_qcom_mipi_csi2_configure(struct phy *phy,
 	return 0;
 }
 
+static int
+phy_qcom_mipi_csi2_configure_cphy(struct mipi_csi2phy_device *csi2phy,
+				  struct phy_configure_opts_mipi_cphy *cphy_cfg)
+{
+	struct mipi_csi2phy_stream_cfg *stream_cfg = &csi2phy->stream_cfg;
+	int ret;
+
+	ret = phy_mipi_cphy_config_validate(cphy_cfg);
+	if (ret)
+		return ret;
+
+	if (cphy_cfg->lanes < 1 || cphy_cfg->lanes > CSI2_MAX_DATA_LANES)
+		return -EINVAL;
+
+	if (cphy_cfg->lanes != stream_cfg->num_data_lanes)
+		return -EINVAL;
+
+	stream_cfg->link_freq = cphy_cfg->hs_clk_rate;
+
+	return 0;
+}
+
+static int phy_qcom_mipi_csi2_configure(struct phy *phy,
+					union phy_configure_opts *opts)
+{
+	struct mipi_csi2phy_device *csi2phy = phy_get_drvdata(phy);
+
+	if (csi2phy->phy_mode == PHY_MODE_MIPI_CPHY)
+		return phy_qcom_mipi_csi2_configure_cphy(csi2phy, &opts->mipi_cphy);
+
+	return phy_qcom_mipi_csi2_configure_dphy(csi2phy, &opts->mipi_dphy);
+}
+
+static const struct mipi_csi2phy_hw_ops *
+phy_qcom_mipi_csi2_get_ops(struct mipi_csi2phy_device *csi2phy)
+{
+	if (csi2phy->phy_mode == PHY_MODE_MIPI_CPHY)
+		return csi2phy->soc_cfg->ops_cphy;
+
+	return csi2phy->soc_cfg->ops;
+}
+
 static int phy_qcom_mipi_csi2_set_mode(struct phy *phy,
 				       enum phy_mode mode, int submode)
 {
 	struct mipi_csi2phy_device *csi2phy = phy_get_drvdata(phy);
 
-	if (mode != PHY_MODE_MIPI_DPHY)
-		return -EOPNOTSUPP;
+	/*
+	 * The phy mode is derived once from the DT bus-type in
+	 * phy_qcom_mipi_csi2_parse_routing() at probe time; consumers must
+	 * request the same mode the devicetree describes.
+	 */
+	if (mode != csi2phy->phy_mode)
+		return -EINVAL;
 
-	csi2phy->phy_mode = mode;
 	return 0;
 }
 
 static int phy_qcom_mipi_csi2_power_on(struct phy *phy)
 {
 	struct mipi_csi2phy_device *csi2phy = phy_get_drvdata(phy);
-	const struct mipi_csi2phy_hw_ops *ops = csi2phy->soc_cfg->ops;
+	const struct mipi_csi2phy_hw_ops *ops = phy_qcom_mipi_csi2_get_ops(csi2phy);
 	int i, ret;
+
+	if (!ops)
+		return -EOPNOTSUPP;
 
 	ret = regulator_bulk_enable(csi2phy->soc_cfg->num_supplies,
 				    csi2phy->supplies);
@@ -194,10 +243,11 @@ disable_regulators:
 static int phy_qcom_mipi_csi2_power_off(struct phy *phy)
 {
 	struct mipi_csi2phy_device *csi2phy = phy_get_drvdata(phy);
-	const struct mipi_csi2phy_hw_ops *ops = csi2phy->soc_cfg->ops;
+	const struct mipi_csi2phy_hw_ops *ops = phy_qcom_mipi_csi2_get_ops(csi2phy);
 	int i;
 
-	ops->lanes_disable(csi2phy, &csi2phy->stream_cfg);
+	if (ops)
+		ops->lanes_disable(csi2phy, &csi2phy->stream_cfg);
 
 	clk_bulk_disable_unprepare(csi2phy->soc_cfg->num_clk,
 				   csi2phy->clks);
@@ -282,7 +332,14 @@ static int phy_qcom_mipi_csi2_parse_routing(struct mipi_csi2phy_device *csi2phy)
 	bus_type = MEDIA_BUS_TYPE_CSI2_DPHY;
 	fwnode_property_read_u32(ep, "bus-type", &bus_type);
 
-	if (bus_type != MEDIA_BUS_TYPE_CSI2_DPHY) {
+	switch (bus_type) {
+	case MEDIA_BUS_TYPE_CSI2_DPHY:
+		csi2phy->phy_mode = PHY_MODE_MIPI_DPHY;
+		break;
+	case MEDIA_BUS_TYPE_CSI2_CPHY:
+		csi2phy->phy_mode = PHY_MODE_MIPI_CPHY;
+		break;
+	default:
 		ret = -EOPNOTSUPP;
 		dev_err(dev, "Unsupported bus-type %u\n", bus_type);
 		goto out_put;
@@ -303,14 +360,24 @@ static int phy_qcom_mipi_csi2_parse_routing(struct mipi_csi2phy_device *csi2phy)
 		goto out_put;
 	}
 
-	/* lane-polarities: optional, up to num_data_lanes + 1 entries */
+	/*
+	 * lane-polarities: optional. D-PHY has a separate clock lane, so its
+	 * array is up to num_data_lanes + 1 entries (clock lane first,
+	 * matching the video-interfaces.yaml convention); C-PHY has no clock
+	 * lane, so its array is up to num_data_lanes entries.
+	 */
 	memset(lane_polarities, 0x00, sizeof(lane_polarities));
 	num_polarities = fwnode_property_count_u32(ep, "lane-polarities");
 	if (num_polarities > 0) {
-		if (num_polarities != stream_cfg->num_data_lanes + 1) {
+		unsigned int expected = stream_cfg->num_data_lanes;
+
+		if (csi2phy->phy_mode == PHY_MODE_MIPI_DPHY)
+			expected += 1;
+
+		if (num_polarities != expected) {
 			ret = -EINVAL;
-			dev_err(dev, "clock+data-lane %d/polarities %d mismatch\n",
-				stream_cfg->num_data_lanes + 1, num_polarities);
+			dev_err(dev, "lane %d/polarities %d mismatch\n",
+				expected, num_polarities);
 			goto out_put;
 		}
 
@@ -322,19 +389,33 @@ static int phy_qcom_mipi_csi2_parse_routing(struct mipi_csi2phy_device *csi2phy)
 		}
 	}
 
-	csi2phy->stream_cfg.lane_cfg.clk.pos = CSI2_DEFAULT_CLK_LANE;
-	csi2phy->stream_cfg.lane_cfg.clk.pol = lane_polarities[0];
+	if (csi2phy->phy_mode == PHY_MODE_MIPI_DPHY) {
+		csi2phy->stream_cfg.lane_cfg.clk.pos = CSI2_DEFAULT_CLK_LANE;
+		csi2phy->stream_cfg.lane_cfg.clk.pol = lane_polarities[0];
 
-	for (i = 0; i < csi2phy->stream_cfg.num_data_lanes; i++) {
-		if (data_lanes[i] < 1 || data_lanes[i] > CSI2_MAX_DATA_LANES) {
-			dev_err(dev, "Invalid lane %d\n", data_lanes[i]);
-			ret = -EINVAL;
-			goto out_put;
+		for (i = 0; i < csi2phy->stream_cfg.num_data_lanes; i++) {
+			if (data_lanes[i] < 1 || data_lanes[i] > CSI2_MAX_DATA_LANES) {
+				dev_err(dev, "Invalid lane %d\n", data_lanes[i]);
+				ret = -EINVAL;
+				goto out_put;
+			}
+
+			/* Convert data-lanes = <1 2 3 4> to bit positions */
+			csi2phy->stream_cfg.lane_cfg.data[i].pos = data_lanes[i] - 1;
+			csi2phy->stream_cfg.lane_cfg.data[i].pol = lane_polarities[i + 1];
 		}
+	} else {
+		/* C-PHY has no clock lane; all entries map data trios. */
+		for (i = 0; i < csi2phy->stream_cfg.num_data_lanes; i++) {
+			if (data_lanes[i] < 1 || data_lanes[i] > CSI2_MAX_DATA_LANES) {
+				dev_err(dev, "Invalid lane %d\n", data_lanes[i]);
+				ret = -EINVAL;
+				goto out_put;
+			}
 
-		/* Convert data-lanes = <1 2 3 4> to bit positions */
-		csi2phy->stream_cfg.lane_cfg.data[i].pos = data_lanes[i] - 1;
-		csi2phy->stream_cfg.lane_cfg.data[i].pol = lane_polarities[i + 1];
+			csi2phy->stream_cfg.lane_cfg.data[i].pos = data_lanes[i] - 1;
+			csi2phy->stream_cfg.lane_cfg.data[i].pol = lane_polarities[i];
+		}
 	}
 
 	ret = 0;

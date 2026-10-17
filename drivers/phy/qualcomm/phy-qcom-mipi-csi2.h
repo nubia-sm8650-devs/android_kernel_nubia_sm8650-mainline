@@ -47,10 +47,31 @@ struct mipi_csi2phy_lane_regs {
 	const u32 param_type;
 };
 
+/**
+ * struct mipi_csi2phy_datarate_regs - bandwidth-keyed register overrides
+ * @bandwidth: data rate, in bits/s, this entry applies to
+ * @reg_array: register writes to apply on top of the base init_seq
+ * @reg_array_size: number of entries in reg_array
+ *
+ * Some C-PHY configurations need small register tweaks (impedance, deskew,
+ * timing calibration) that vary with the link data rate. A
+ * mipi_csi2phy_device_regs may carry an array of these, sorted by ascending
+ * bandwidth; the hw_ops picks the first entry whose bandwidth is >= the
+ * configured link rate (falling back to the highest entry if none
+ * qualifies).
+ */
+struct mipi_csi2phy_datarate_regs {
+	const u64 bandwidth;
+	const struct mipi_csi2phy_lane_regs *reg_array;
+	const size_t reg_array_size;
+};
+
 struct mipi_csi2phy_device_regs {
 	const struct mipi_csi2phy_lane_regs *init_seq;
 	const int lane_array_size;
 	const u32 common_regs_offset;
+	const struct mipi_csi2phy_datarate_regs *datarate_regs;
+	const unsigned int num_datarate_regs;
 };
 
 struct mipi_csi2_genpd {
@@ -61,6 +82,9 @@ struct mipi_csi2_genpd {
 struct mipi_csi2phy_soc_cfg {
 	const struct mipi_csi2phy_hw_ops *ops;
 	const struct mipi_csi2phy_device_regs reg_info;
+
+	const struct mipi_csi2phy_hw_ops *ops_cphy;
+	const struct mipi_csi2phy_device_regs *reg_info_cphy;
 
 	const char ** const supply_names;
 	const unsigned int num_supplies;
@@ -98,5 +122,11 @@ struct mipi_csi2phy_device {
 extern const struct mipi_csi2phy_soc_cfg mipi_csi2_dphy_4nm_x1e;
 extern const struct mipi_csi2phy_soc_cfg mipi_csi2_dphy_sa8775p;
 extern const struct mipi_csi2phy_soc_cfg mipi_csi2_dphy_sc7280;
+
+extern const struct mipi_csi2phy_hw_ops phy_qcom_mipi_csi2_ops_3ph_cphy;
+extern const struct mipi_csi2phy_device_regs mipi_csi2_3ph_cphy_regs_sa8775p;
+
+void phy_qcom_mipi_csi2_hw_version_read(struct mipi_csi2phy_device *csi2phy);
+void phy_qcom_mipi_csi2_reset(struct mipi_csi2phy_device *csi2phy);
 
 #endif /* __PHY_QCOM_MIPI_CSI2_H__ */
