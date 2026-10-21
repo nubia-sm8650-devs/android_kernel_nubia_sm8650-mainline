@@ -1,0 +1,96 @@
+// SPDX-License-Identifier: BSD-3-Clause
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/arm/qcom,ids.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+
+/ {
+	qcom,msm-id = <QCOM_ID_SM8650 0x20000>, <577 0x20000>;
+	qcom,board-id = <8 0>;
+};
+
+&{/} {
+	model = "ZTE nubia Z60 Ultra";
+	compatible = "zte,nx721j", "qcom,sm8650";
+	chassis-type = "handset";
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		pinctrl-0 = <&volume_up_n>;
+		pinctrl-names = "default";
+
+		key-volume-up {
+			label = "Volume Up";
+			linux,code = <KEY_VOLUMEUP>;
+			gpios = <&pm8550_gpios 6 GPIO_ACTIVE_LOW>;
+			debounce-interval = <15>;
+			linux,can-disable;
+			wakeup-source;
+		};
+	};
+};
+
+&chosen {
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	framebuffer@d5100000 {
+		compatible = "simple-framebuffer";
+		reg = <0x0 0xd5100000 0x0 0x2b00000>;
+		width = <1116>;
+		height = <2480>;
+		stride = <(1116 * 4)>;
+		format = "a8r8g8b8";
+
+		vci-supply = <&vreg_l13b_3p0>;
+		vdd-supply = <&vreg_l11b_1p2>;
+		vddio-supply = <&vreg_l12b_1p8>;
+	};
+};
+
+&pm8550_gpios {
+	volume_up_n: volume-up-n-state {
+		pins = "gpio6";
+		function = "normal";
+		bias-pull-up;
+		input-enable;
+		power-source = <1>;
+	};
+};
+
+&pm8550b_eusb2_repeater {
+	qcom,tune-usb2-amplitude = /bits/ 8 <0xc>;
+	qcom,tune-usb2-preem = /bits/ 8 <0x7>;
+};
+
+&pon_resin {
+	linux,code = <KEY_VOLUMEDOWN>;
+
+	status = "okay";
+};
+
+&remoteproc_adsp {
+	firmware-name = "adsp.mdt", "adsp_dtb.mdt";
+
+	status = "okay";
+};
+
+&remoteproc_cdsp {
+	firmware-name = "cdsp.mdt", "cdsp_dtb.mdt";
+
+	status = "okay";
+};
+
+&remoteproc_mpss {
+	firmware-name = "modem.mdt", "modem_dtb.mdt";
+
+	status = "okay";
+};
+
+&tlmm {
+	gpio-reserved-ranges = <36 4>, <74 1>;
+};
