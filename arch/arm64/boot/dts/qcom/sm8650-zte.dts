@@ -29,6 +29,13 @@
 		ranges;
 	};
 
+	firmware {
+		android {
+			compatible = "android,firmware";
+			boot_devices = "soc@0/1d84000.ufshc";
+		};
+	};
+
 	vph_pwr: vph-pwr-regulator {
 		compatible = "regulator-fixed";
 
