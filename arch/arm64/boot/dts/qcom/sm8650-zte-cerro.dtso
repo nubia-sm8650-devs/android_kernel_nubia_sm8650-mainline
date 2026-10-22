@@ -401,6 +401,14 @@
 	status = "okay";
 };
 
+&lpass_wsa2macro {
+	status = "disabled";
+};
+
+&lpass_wsamacro {
+	status = "disabled";
+};
+
 &mdss {
 	status = "okay";
 };
