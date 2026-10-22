@@ -27,6 +27,7 @@ struct ipa_smp2p;
  * @version:		IPA hardware version
  * @dev:		IPA device pointer
  * @completion:		Used to signal pipeline clear transfer complete
+ * @firmware_done:	Completed once no GSI firmware request is pending
  * @nb:			Notifier block used for remoteproc SSR
  * @notifier:		Remoteproc SSR notifier
  * @smp2p:		SMP2P information
@@ -76,6 +77,7 @@ struct ipa {
 	enum ipa_version version;
 	struct device *dev;
 	struct completion completion;
+	struct completion firmware_done;
 	struct notifier_block nb;
 	void *notifier;
 	struct ipa_smp2p *smp2p;

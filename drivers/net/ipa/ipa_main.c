@@ -104,9 +104,10 @@ enum ipa_firmware_loader {
  * Perform initialization that requires issuing immediate commands on
  * the command TX endpoint.  If the modem is doing GSI firmware load
  * and initialization, this function will be called when an SMP2P
- * interrupt has been signaled by the modem.  Otherwise it will be
- * called from ipa_probe() after GSI firmware has been successfully
- * loaded, authenticated, and started by Trust Zone.
+ * interrupt has been signaled by the modem.  If the AP loads GSI
+ * firmware, it will be called from the firmware request callback after
+ * the firmware has been successfully loaded, authenticated, and started
+ * by Trust Zone.  Otherwise it will be called from ipa_probe().
  */
 int ipa_setup(struct ipa *ipa)
 {
@@ -583,9 +584,24 @@ static void ipa_deconfig(struct ipa *ipa)
 	ipa_hardware_deconfig(ipa);
 }
 
-static int ipa_firmware_load(struct device *dev)
+static const char *ipa_firmware_path(struct device *dev)
 {
-	const struct firmware *fw;
+	const char *path;
+	int ret;
+
+	/* Use name from DTB if specified; use default for *any* error */
+	ret = of_property_read_string(dev->of_node, "firmware-name", &path);
+	if (ret) {
+		dev_dbg(dev, "error %d getting \"firmware-name\" resource\n",
+			ret);
+		path = IPA_FW_PATH_DEFAULT;
+	}
+
+	return path;
+}
+
+static int ipa_firmware_load(struct device *dev, const struct firmware *fw)
+{
 	struct resource res;
 	phys_addr_t phys;
 	const char *path;
@@ -600,27 +616,14 @@ static int ipa_firmware_load(struct device *dev)
 		return ret;
 	}
 
-	/* Use name from DTB if specified; use default for *any* error */
-	ret = of_property_read_string(dev->of_node, "firmware-name", &path);
-	if (ret) {
-		dev_dbg(dev, "error %d getting \"firmware-name\" resource\n",
-			ret);
-		path = IPA_FW_PATH_DEFAULT;
-	}
-
-	ret = request_firmware(&fw, path, dev);
-	if (ret) {
-		dev_err(dev, "error %d requesting \"%s\"\n", ret, path);
-		return ret;
-	}
+	path = ipa_firmware_path(dev);
 
 	phys = res.start;
 	size = (size_t)resource_size(&res);
 	virt = memremap(phys, size, MEMREMAP_WC);
 	if (!virt) {
 		dev_err(dev, "unable to remap firmware memory\n");
-		ret = -ENOMEM;
-		goto out_release_firmware;
+		return -ENOMEM;
 	}
 
 	ret = qcom_mdt_load(dev, fw, path, IPA_PAS_ID, virt, phys, size, NULL);
@@ -633,10 +636,38 @@ static int ipa_firmware_load(struct device *dev)
 	}
 
 	memunmap(virt);
-out_release_firmware:
-	release_firmware(fw);
 
 	return ret;
+}
+
+static void ipa_firmware_ready(const struct firmware *fw, void *context)
+{
+	struct ipa *ipa = context;
+	struct device *dev = ipa->dev;
+	int ret;
+
+	if (!fw) {
+		dev_err(dev, "error requesting \"%s\"\n", ipa_firmware_path(dev));
+		goto out_complete;
+	}
+
+	ret = pm_runtime_get_sync(dev);
+	if (ret < 0) {
+		dev_err(dev, "error %d getting power for setup\n", ret);
+		goto out_power_put;
+	}
+
+	ret = ipa_firmware_load(dev, fw);
+	if (!ret) {
+		ret = ipa_setup(ipa);
+		WARN(ret != 0, "error %d from ipa_setup()\n", ret);
+	}
+
+out_power_put:
+	(void)pm_runtime_put_autosuspend(dev);
+	release_firmware(fw);
+out_complete:
+	complete(&ipa->firmware_done);
 }
 
 static const struct of_device_id ipa_match[] = {
@@ -850,6 +881,9 @@ static int ipa_probe(struct platform_device *pdev)
 	ipa->version = data->version;
 	ipa->modem_route_count = data->modem_route_count;
 	init_completion(&ipa->completion);
+	init_completion(&ipa->firmware_done);
+	if (loader != IPA_LOADER_SELF)
+		complete(&ipa->firmware_done);
 
 	ret = ipa_reg_init(ipa, pdev);
 	if (ret)
@@ -898,11 +932,17 @@ static int ipa_probe(struct platform_device *pdev)
 	if (loader == IPA_LOADER_MODEM)
 		goto done;
 
+	/* The AP loads GSI firmware from a firmware request callback, which
+	 * also performs setup once the firmware is running.
+	 */
 	if (loader == IPA_LOADER_SELF) {
-		/* The AP is loading GSI firmware; do so now */
-		ret = ipa_firmware_load(dev);
+		ret = request_firmware_nowait(THIS_MODULE, FW_ACTION_UEVENT,
+					      ipa_firmware_path(dev), dev,
+					      GFP_KERNEL, ipa,
+					      ipa_firmware_ready);
 		if (ret)
 			goto err_deconfig;
+		goto done;
 	} /* Otherwise loader == IPA_LOADER_SKIP */
 
 	/* GSI firmware is loaded; proceed to setup */
@@ -953,6 +993,8 @@ static void ipa_remove(struct platform_device *pdev)
 
 	power = ipa->power;
 	interrupt = ipa->interrupt;
+
+	wait_for_completion(&ipa->firmware_done);
 
 	/* Prevent the modem from triggering a call to ipa_setup().  This
 	 * also ensures a modem-initiated setup that's underway completes.
