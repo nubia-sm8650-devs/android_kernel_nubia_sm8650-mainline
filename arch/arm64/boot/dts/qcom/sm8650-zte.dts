@@ -504,11 +504,6 @@
 	};
 };
 
-&dispcc {
-	/* Disable for now so simple-framebuffer continues working */
-	status = "disabled";
-};
-
 &pm8010_n {
 	status = "disabled";
 };
