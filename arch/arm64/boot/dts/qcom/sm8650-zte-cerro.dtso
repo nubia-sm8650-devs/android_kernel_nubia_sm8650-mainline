@@ -38,9 +38,9 @@
 	#address-cells = <2>;
 	#size-cells = <2>;
 
-	framebuffer@d5100000 {
+	framebuffer@e3940000 {
 		compatible = "simple-framebuffer";
-		reg = <0x0 0xd5100000 0x0 0x2b00000>;
+		reg = <0x0 0xe3940000 0x0 0x2b00000>;
 		width = <1116>;
 		height = <2480>;
 		stride = <(1116 * 4)>;

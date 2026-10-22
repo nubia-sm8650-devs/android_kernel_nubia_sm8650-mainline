@@ -572,8 +572,12 @@
 		no-map;
 	};
 
-	splash_region: splash-region@d5100000 {
-		reg = <0x0 0xd5100000 0x0 0x2b00000>;
+	/*
+	 * ABL is powering down display and controller if this node is
+	 * not named exactly "splash_region".
+	 */
+	splash_region: splash_region@e3940000 {
+		reg = <0x0 0xe3940000 0x0 0x2b00000>;
 		no-map;
 	};
 };
