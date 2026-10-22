@@ -561,6 +561,20 @@
 		reg = <0x0 0xe3940000 0x0 0x2b00000>;
 		no-map;
 	};
+
+	qseecom_mem: qcom,qseecom {
+		compatible = "shared-dma-pool";
+		alloc-ranges = <0x0 0x0 0x0 0xffffffff>;
+		reusable;
+		size = <0x0 0x1400000>;
+	};
+
+	qseecom_ta_mem: qcom,qseecom-ta {
+		compatible = "shared-dma-pool";
+		alloc-ranges = <0x0 0x0 0x0 0xffffffff>;
+		reusable;
+		size = <0x0 0x1000000>;
+	};
 };
 
 &sleep_clk {
