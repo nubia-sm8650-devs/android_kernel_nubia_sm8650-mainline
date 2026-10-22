@@ -211,6 +211,8 @@ static int ufs_qcom_ice_init(struct ufs_qcom_host *host)
 		cap.reg_val = cpu_to_le32(ufshcd_readl(hba,
 						       REG_UFS_CRYPTOCAP +
 						       i * sizeof(__le32)));
+		dev_info(dev, "crypto cap %d: alg %u sdus 0x%02x key_size %u\n",
+			 i, cap.algorithm_id, cap.sdus_mask, cap.key_size);
 		if (cap.algorithm_id == UFS_CRYPTO_ALG_AES_XTS &&
 		    cap.key_size == UFS_CRYPTO_KEY_SIZE_256)
 			profile->modes_supported[BLK_ENCRYPTION_MODE_AES_256_XTS] |=
