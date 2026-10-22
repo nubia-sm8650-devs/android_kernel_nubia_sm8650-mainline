@@ -27,6 +27,14 @@
 #define IPA_NETDEV_TAILROOM	0	/* for padding by mux layer */
 #define IPA_NETDEV_TIMEOUT	10	/* seconds */
 
+/* Room for an IPA_MTU packet once rmnet adds the QMAP header and the
+ * uplink checksum header, which MAPv4 and MAPv5 size alike.
+ */
+#define IPA_NETDEV_MTU		(IPA_MTU + sizeof(struct rmnet_map_header) + \
+				 sizeof(struct rmnet_map_ul_csum_header))
+static_assert(sizeof(struct rmnet_map_ul_csum_header) ==
+	      sizeof(struct rmnet_map_v5_csum_header));
+
 enum ipa_modem_state {
 	IPA_MODEM_STATE_STOPPED	= 0,
 	IPA_MODEM_STATE_STARTING,
@@ -225,7 +233,7 @@ static void ipa_modem_netdev_setup(struct net_device *netdev)
 	netdev->hard_header_len = 0;
 	netdev->min_header_len = ETH_HLEN;
 	netdev->min_mtu = ETH_MIN_MTU;
-	netdev->max_mtu = IPA_MTU;
+	netdev->max_mtu = IPA_NETDEV_MTU;
 	netdev->mtu = netdev->max_mtu;
 	netdev->addr_len = 0;
 	netdev->tx_queue_len = DEFAULT_TX_QUEUE_LEN;
