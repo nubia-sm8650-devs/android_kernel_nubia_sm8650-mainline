@@ -11,6 +11,8 @@
 #include <linux/netdevice.h>
 #include <linux/pm_runtime.h>
 #include <linux/skbuff.h>
+#include <linux/string.h>
+#include <linux/uaccess.h>
 #include <net/pkt_sched.h>
 
 #include <linux/remoteproc/qcom_rproc.h>
@@ -261,10 +263,108 @@ void ipa_modem_skb_rx(struct net_device *netdev, struct sk_buff *skb)
 	}
 }
 
+#if IS_ENABLED(CONFIG_QCOM_IPA_RMNET_IOCTL)
+#define RMNET_IOCTL_SET_LLP_ETHERNET	0x89f1
+#define RMNET_IOCTL_SET_LLP_IP		0x89f2
+#define RMNET_IOCTL_OPEN		0x89f8
+#define RMNET_IOCTL_CLOSE		0x89f9
+#define RMNET_IOCTL_EXTENDED		0x89fd
+
+#define RMNET_IOCTL_GET_SUPPORTED_FEATURES	0x00
+#define RMNET_IOCTL_SET_MRU			0x01
+#define RMNET_IOCTL_GET_EPID			0x03
+#define RMNET_IOCTL_GET_DRIVER_NAME		0x04
+#define RMNET_IOCTL_GET_EP_PAIR			0x10
+#define RMNET_IOCTL_SET_SLEEP_STATE		0x14
+#define RMNET_IOCTL_SET_XLAT_DEV_INFO		0x15
+#define RMNET_IOCTL_GET_SG_SUPPORT		0x17
+#define RMNET_IOCTL_SET_MTU			0x20
+#define RMNET_IOCTL_GET_EPID_LL			0x21
+
+/* Peripheral id of the embedded IPA data port, fixed by the downstream driver */
+#define RMNET_IPA_EPID		1
+#define RMNET_IPA_EPID_LL	5
+
+struct rmnet_ioctl_extended {
+	u32 extended_ioctl;
+	union {
+		u32 data;
+		char if_name[IFNAMSIZ];
+		struct {
+			u32 consumer_pipe_num;
+			u32 producer_pipe_num;
+		} ipa_ep_pair;
+		u8 raw[20];
+	} u;
+};
+
+static_assert(sizeof(struct rmnet_ioctl_extended) == 24);
+
+static int ipa_modem_rmnet_ioctl(struct net_device *netdev, void __user *data)
+{
+	struct ipa_priv *priv = netdev_priv(netdev);
+	struct rmnet_ioctl_extended ext;
+
+	if (copy_from_user(&ext, data, sizeof(ext)))
+		return -EFAULT;
+
+	switch (ext.extended_ioctl) {
+	case RMNET_IOCTL_GET_SUPPORTED_FEATURES:
+		ext.u.data = 0;
+		break;
+	case RMNET_IOCTL_GET_SG_SUPPORT:
+		ext.u.data = 1;
+		break;
+	case RMNET_IOCTL_GET_EPID:
+		ext.u.data = RMNET_IPA_EPID;
+		break;
+	case RMNET_IOCTL_GET_EPID_LL:
+		ext.u.data = RMNET_IPA_EPID_LL;
+		break;
+	case RMNET_IOCTL_GET_EP_PAIR:
+		ext.u.ipa_ep_pair.consumer_pipe_num = priv->tx->endpoint_id;
+		ext.u.ipa_ep_pair.producer_pipe_num = priv->rx->endpoint_id;
+		break;
+	case RMNET_IOCTL_GET_DRIVER_NAME:
+		strscpy(ext.u.if_name, netdev->name, sizeof(ext.u.if_name));
+		break;
+	case RMNET_IOCTL_SET_MRU:
+	case RMNET_IOCTL_SET_SLEEP_STATE:
+	case RMNET_IOCTL_SET_XLAT_DEV_INFO:
+	case RMNET_IOCTL_SET_MTU:
+		return 0;
+	default:
+		return -EINVAL;
+	}
+
+	return copy_to_user(data, &ext, sizeof(ext)) ? -EFAULT : 0;
+}
+
+static int ipa_siocdevprivate(struct net_device *netdev, struct ifreq *ifr,
+			      void __user *data, int cmd)
+{
+	switch (cmd) {
+	case RMNET_IOCTL_SET_LLP_IP:
+	case RMNET_IOCTL_OPEN:
+	case RMNET_IOCTL_CLOSE:
+		return 0;
+	case RMNET_IOCTL_SET_LLP_ETHERNET:
+		return -EINVAL;
+	case RMNET_IOCTL_EXTENDED:
+		return ipa_modem_rmnet_ioctl(netdev, data);
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+#endif
+
 static const struct net_device_ops ipa_modem_ops = {
 	.ndo_open	= ipa_open,
 	.ndo_stop	= ipa_stop,
 	.ndo_start_xmit	= ipa_start_xmit,
+#if IS_ENABLED(CONFIG_QCOM_IPA_RMNET_IOCTL)
+	.ndo_siocdevprivate = ipa_siocdevprivate,
+#endif
 };
 
 /** ipa_modem_netdev_setup() - netdev setup function for the modem */

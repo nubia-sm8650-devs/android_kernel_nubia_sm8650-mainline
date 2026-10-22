@@ -21,3 +21,15 @@ config QCOM_IPA
 	  of QCOM_Q6V5_COMMON (Y or M).
 
 	  If unsure, say N.
+
+config QCOM_IPA_RMNET_IOCTL
+	bool "Downstream RMNET ioctls on the IPA modem device"
+	depends on QCOM_IPA
+	help
+	  Answer the RMNET_IOCTL_* private ioctls of the downstream rmnet_ipa
+	  driver on the IPA modem network device, so that vendor data
+	  daemons written against that driver can configure the data path.
+	  The answers describe the fixed upstream configuration and change
+	  nothing.
+
+	  If unsure, say N.
