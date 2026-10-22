@@ -66,6 +66,19 @@ config DRM_PANEL_BOE_BF060Y8M_AJ0
 	  uses 24 bit RGB per pixel. It provides a MIPI DSI interface to
 	  the host and backlight is controlled through DSI commands.
 
+config DRM_PANEL_BOE_BF068_RM692H0
+	tristate "BOE BF068 RM692H0 panel"
+	depends on OF
+	depends on DRM_MIPI_DSI
+	depends on BACKLIGHT_CLASS_DEVICE
+	select DRM_DISPLAY_DSC_HELPER
+	select DRM_DISPLAY_HELPER
+	help
+	  Say Y here if you want to enable support for the BOE BF068 6.8"
+	  AMOLED panel driven by a Raydium RM692H0 controller, as found in
+	  the ZTE nubia Z60 Ultra. The panel has a 1116x2480 resolution and
+	  runs in DSC compressed command mode over a 4 lane MIPI DSI link.
+
 config DRM_PANEL_BOE_HIMAX8279D
 	tristate "Boe Himax8279d panel"
 	depends on OF
