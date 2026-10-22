@@ -136,7 +136,11 @@
 				"TX SWR_INPUT0", "ADC1_OUTPUT",
 				"TX SWR_INPUT1", "ADC2_OUTPUT",
 				"TX SWR_INPUT2", "ADC3_OUTPUT",
-				"TX SWR_INPUT3", "ADC4_OUTPUT";
+				"TX SWR_INPUT3", "ADC4_OUTPUT",
+				"VA SWR_MIC0", "ADC1_OUTPUT",
+				"VA SWR_MIC1", "ADC2_OUTPUT",
+				"VA SWR_MIC2", "ADC3_OUTPUT",
+				"VA SWR_MIC3", "ADC4_OUTPUT";
 
 		pinctrl-0 = <&i2s0_default_state>;
 		pinctrl-names = "default";
@@ -198,6 +202,22 @@
 
 			codec {
 				sound-dai = <&wcd939x 1>, <&swr2 0>, <&lpass_txmacro 0>;
+			};
+
+			platform {
+				sound-dai = <&q6apm>;
+			};
+		};
+
+		va-capture-dai-link {
+			link-name = "VA Capture";
+
+			cpu {
+				sound-dai = <&q6apmbedai VA_CODEC_DMA_TX_0>;
+			};
+
+			codec {
+				sound-dai = <&wcd939x 1>, <&swr2 0>, <&lpass_vamacro 0>;
 			};
 
 			platform {
