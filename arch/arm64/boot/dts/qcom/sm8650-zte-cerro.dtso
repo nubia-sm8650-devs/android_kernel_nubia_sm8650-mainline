@@ -7,6 +7,7 @@
 #include <dt-bindings/clock/qcom,sm8650-gcc.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/interconnect/qcom,icc.h>
 #include <dt-bindings/interconnect/qcom,sm8650-rpmh.h>
 
@@ -34,6 +35,18 @@
 			linux,can-disable;
 			wakeup-source;
 		};
+	};
+
+	ts_avdd: regulator-ts-avdd {
+		compatible = "regulator-fixed";
+
+		regulator-name = "ts_avdd";
+
+		gpio = <&tlmm 28 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+
+		pinctrl-0 = <&ts_avdd_en>;
+		pinctrl-names = "default";
 	};
 };
 
@@ -65,6 +78,10 @@
 	};
 };
 
+&gpi_dma1 {
+	status = "okay";
+};
+
 &pm8550_gpios {
 	volume_up_n: volume-up-n-state {
 		pins = "gpio6";
@@ -86,6 +103,10 @@
 	status = "okay";
 };
 
+&qupv3_id_0 {
+	status = "okay";
+};
+
 &remoteproc_adsp {
 	firmware-name = "adsp.mdt", "adsp_dtb.mdt";
 
@@ -104,6 +125,55 @@
 	status = "okay";
 };
 
+&spi4 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	status = "okay";
+
+	touchscreen@0 {
+		compatible = "goodix,gt9916";
+		reg = <0>;
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <162 IRQ_TYPE_LEVEL_LOW>;
+
+		reset-gpios = <&tlmm 161 GPIO_ACTIVE_LOW>;
+
+		avdd-supply = <&ts_avdd>;
+		vddio-supply = <&vreg_l12b_1p8>;
+
+		spi-max-frequency = <1000000>;
+
+		touchscreen-size-x = <17856>;
+		touchscreen-size-y = <39680>;
+
+		pinctrl-0 = <&ts_irq>, <&ts_reset>;
+		pinctrl-names = "default";
+	};
+};
+
 &tlmm {
 	gpio-reserved-ranges = <36 4>, <74 1>;
+
+	ts_avdd_en: ts-avdd-en-state {
+		pins = "gpio28";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	ts_irq: ts-irq-state {
+		pins = "gpio162";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+
+	ts_reset: ts-reset-state {
+		pins = "gpio161";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
 };
