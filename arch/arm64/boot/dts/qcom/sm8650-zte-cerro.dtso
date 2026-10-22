@@ -4,8 +4,11 @@
 /plugin/;
 
 #include <dt-bindings/arm/qcom,ids.h>
+#include <dt-bindings/clock/qcom,sm8650-gcc.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/interconnect/qcom,icc.h>
+#include <dt-bindings/interconnect/qcom,sm8650-rpmh.h>
 
 / {
 	qcom,msm-id = <QCOM_ID_SM8650 0x20000>, <577 0x20000>;
@@ -44,11 +47,21 @@
 		width = <1116>;
 		height = <2480>;
 		stride = <(1116 * 4)>;
-		format = "a8r8g8b8";
+		format = "a8b8g8r8";
+		panel = <&panel>;
+		interconnects = <&mmss_noc MASTER_MDP QCOM_ICC_TAG_ALWAYS
+				 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
+		clocks = <&gcc GCC_DISP_HF_AXI_CLK>;
 
 		vci-supply = <&vreg_l13b_3p0>;
 		vdd-supply = <&vreg_l11b_1p2>;
 		vddio-supply = <&vreg_l12b_1p8>;
+
+		/* Dummy panel for simple-framebuffer dimension info */
+		panel: dummy-panel {
+			height-mm = <157>;
+			width-mm = <71>;
+		};
 	};
 };
 
