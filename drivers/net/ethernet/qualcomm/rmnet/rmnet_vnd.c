@@ -64,29 +64,24 @@ static netdev_tx_t rmnet_vnd_start_xmit(struct sk_buff *skb,
 	return NETDEV_TX_OK;
 }
 
-static int rmnet_vnd_headroom(struct rmnet_port *port)
+static int rmnet_vnd_headroom(u32 data_format)
 {
 	u32 headroom;
 
 	headroom = sizeof(struct rmnet_map_header);
 
-	if (port->data_format & RMNET_FLAGS_EGRESS_MAP_CKSUMV4)
+	if (data_format & RMNET_FLAGS_EGRESS_MAP_CKSUMV4)
 		headroom += sizeof(struct rmnet_map_ul_csum_header);
-	else if (port->data_format & RMNET_FLAGS_EGRESS_MAP_CKSUMV5)
+	else if (data_format & RMNET_FLAGS_EGRESS_MAP_CKSUMV5)
 		headroom += sizeof(struct rmnet_map_v5_csum_header);
 
 	return headroom;
 }
 
-static int rmnet_vnd_change_mtu(struct net_device *rmnet_dev, int new_mtu)
+static int rmnet_vnd_set_mtu(struct net_device *rmnet_dev, u32 headroom,
+			     int new_mtu)
 {
 	struct rmnet_priv *priv = netdev_priv(rmnet_dev);
-	struct rmnet_port *port;
-	u32 headroom;
-
-	port = rmnet_get_port_rtnl(priv->real_dev);
-
-	headroom = rmnet_vnd_headroom(port);
 
 	if (new_mtu < 0 || new_mtu > RMNET_MAX_PACKET_SIZE ||
 	    new_mtu > (priv->real_dev->mtu - headroom))
@@ -94,6 +89,17 @@ static int rmnet_vnd_change_mtu(struct net_device *rmnet_dev, int new_mtu)
 
 	WRITE_ONCE(rmnet_dev->mtu, new_mtu);
 	return 0;
+}
+
+static int rmnet_vnd_change_mtu(struct net_device *rmnet_dev, int new_mtu)
+{
+	struct rmnet_priv *priv = netdev_priv(rmnet_dev);
+	struct rmnet_port *port;
+
+	port = rmnet_get_port_rtnl(priv->real_dev);
+
+	return rmnet_vnd_set_mtu(rmnet_dev, rmnet_vnd_headroom(port->data_format),
+				 new_mtu);
 }
 
 static int rmnet_vnd_get_iflink(const struct net_device *dev)
@@ -300,7 +306,7 @@ void rmnet_vnd_setup(struct net_device *rmnet_dev)
 int rmnet_vnd_newlink(u8 id, struct net_device *rmnet_dev,
 		      struct rmnet_port *port,
 		      struct net_device *real_dev,
-		      struct rmnet_endpoint *ep,
+		      struct rmnet_endpoint *ep, u32 data_format,
 		      struct netlink_ext_ack *extack)
 
 {
@@ -319,9 +325,9 @@ int rmnet_vnd_newlink(u8 id, struct net_device *rmnet_dev,
 
 	priv->real_dev = real_dev;
 
-	headroom = rmnet_vnd_headroom(port);
+	headroom = rmnet_vnd_headroom(data_format);
 
-	if (rmnet_vnd_change_mtu(rmnet_dev, real_dev->mtu - headroom)) {
+	if (rmnet_vnd_set_mtu(rmnet_dev, headroom, real_dev->mtu - headroom)) {
 		NL_SET_ERR_MSG_MOD(extack, "Invalid MTU on real dev");
 		return -EINVAL;
 	}
@@ -378,7 +384,7 @@ int rmnet_vnd_validate_real_dev_mtu(struct net_device *real_dev)
 
 	port = rmnet_get_port_rtnl(real_dev);
 
-	headroom = rmnet_vnd_headroom(port);
+	headroom = rmnet_vnd_headroom(port->data_format);
 
 	hash_for_each_safe(port->muxed_ep, bkt_ep, tmp_ep, ep, hlnode) {
 		if (ep->egress_dev->mtu > (real_dev->mtu - headroom))
@@ -396,7 +402,7 @@ int rmnet_vnd_update_dev_mtu(struct rmnet_port *port,
 	unsigned long bkt_ep;
 	u32 headroom;
 
-	headroom = rmnet_vnd_headroom(port);
+	headroom = rmnet_vnd_headroom(port->data_format);
 
 	hash_for_each_safe(port->muxed_ep, bkt_ep, tmp_ep, ep, hlnode) {
 		if (ep->egress_dev->mtu <= (real_dev->mtu - headroom))

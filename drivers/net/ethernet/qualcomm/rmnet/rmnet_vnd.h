@@ -11,7 +11,7 @@ int rmnet_vnd_do_flow_control(struct net_device *dev, int enable);
 int rmnet_vnd_newlink(u8 id, struct net_device *rmnet_dev,
 		      struct rmnet_port *port,
 		      struct net_device *real_dev,
-		      struct rmnet_endpoint *ep,
+		      struct rmnet_endpoint *ep, u32 data_format,
 		      struct netlink_ext_ack *extack);
 int rmnet_vnd_dellink(u8 id, struct rmnet_port *port,
 		      struct rmnet_endpoint *ep);
