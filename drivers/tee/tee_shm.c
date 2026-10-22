@@ -33,6 +33,20 @@ static void release_registered_pages(struct tee_shm *shm)
 	}
 }
 
+static void tee_shm_unimport_dmabuf(struct tee_shm_dmabuf_ref *ref)
+{
+	struct tee_shm *shm = &ref->shm;
+
+	if (!ref->attach)
+		return;
+
+	shm->ctx->teedev->desc->ops->shm_unregister_dmabuf(shm->ctx, shm);
+	dma_buf_unmap_attachment_unlocked(ref->attach, ref->sgt,
+					  DMA_BIDIRECTIONAL);
+	dma_buf_detach(ref->dmabuf, ref->attach);
+	ref->attach = NULL;
+}
+
 static void tee_shm_release(struct tee_device *teedev, struct tee_shm *shm)
 {
 	void *p = shm;
@@ -51,6 +65,7 @@ static void tee_shm_release(struct tee_device *teedev, struct tee_shm *shm)
 
 		ref = container_of(shm, struct tee_shm_dmabuf_ref, shm);
 		p = ref;
+		tee_shm_unimport_dmabuf(ref);
 		dma_buf_put(ref->dmabuf);
 	} else if (shm->flags & TEE_SHM_POOL) {
 		teedev->pool->ops->free(teedev->pool, shm);
@@ -186,6 +201,53 @@ struct tee_shm *tee_shm_alloc_kernel_buf(struct tee_context *ctx, size_t size)
 }
 EXPORT_SYMBOL_GPL(tee_shm_alloc_kernel_buf);
 
+static int tee_shm_import_dmabuf(struct tee_shm_dmabuf_ref *ref)
+{
+	struct tee_shm *shm = &ref->shm;
+	struct tee_device *teedev = shm->ctx->teedev;
+	struct dma_buf_attachment *attach;
+	struct sg_table *sgt;
+	int rc;
+
+	if (!teedev->desc->ops->shm_register_dmabuf || !teedev->dev.parent)
+		return -EINVAL;
+
+	attach = dma_buf_attach(ref->dmabuf, teedev->dev.parent);
+	if (IS_ERR(attach))
+		return PTR_ERR(attach);
+
+	sgt = dma_buf_map_attachment_unlocked(attach, DMA_BIDIRECTIONAL);
+	if (IS_ERR(sgt)) {
+		rc = PTR_ERR(sgt);
+		goto err_detach;
+	}
+
+	/* The secure world can only take one physically contiguous range. */
+	if (sgt->orig_nents != 1) {
+		rc = -EINVAL;
+		goto err_unmap;
+	}
+
+	shm->paddr = sg_phys(sgt->sgl);
+	shm->size = sgt->sgl->length;
+
+	rc = teedev->desc->ops->shm_register_dmabuf(shm->ctx, shm);
+	if (rc)
+		goto err_unmap;
+
+	ref->attach = attach;
+	ref->sgt = sgt;
+
+	return 0;
+
+err_unmap:
+	dma_buf_unmap_attachment_unlocked(attach, sgt, DMA_BIDIRECTIONAL);
+err_detach:
+	dma_buf_detach(ref->dmabuf, attach);
+
+	return rc;
+}
+
 struct tee_shm *tee_shm_register_fd(struct tee_context *ctx, int fd)
 {
 	struct tee_shm_dmabuf_ref *ref;
@@ -216,6 +278,8 @@ struct tee_shm *tee_shm_register_fd(struct tee_context *ctx, int fd)
 	rc = tee_heap_update_from_dma_buf(ctx->teedev, ref->dmabuf,
 					  &ref->offset, &ref->shm,
 					  &ref->parent_shm);
+	if (rc == -EINVAL)
+		rc = tee_shm_import_dmabuf(ref);
 	if (rc)
 		goto err_put_dmabuf;
 
@@ -225,11 +289,13 @@ struct tee_shm *tee_shm_register_fd(struct tee_context *ctx, int fd)
 	mutex_unlock(&ref->shm.ctx->teedev->mutex);
 	if (ref->shm.id < 0) {
 		rc = ref->shm.id;
-		goto err_put_dmabuf;
+		goto err_unimport;
 	}
 
 	return &ref->shm;
 
+err_unimport:
+	tee_shm_unimport_dmabuf(ref);
 err_put_dmabuf:
 	dma_buf_put(ref->dmabuf);
 err_kfree_ref:
