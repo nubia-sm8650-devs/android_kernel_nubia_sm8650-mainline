@@ -1905,6 +1905,14 @@
 			reg = <0 0xff800000 0 0x600000>;
 			no-map;
 		};
+
+		adsp_rpc_remote_heap_mem: adsp-rpc-remote-heap {
+			compatible = "shared-dma-pool";
+			alloc-ranges = <0 0x00000000 0 0xffffffff>;
+			alignment = <0 0x400000>;
+			size = <0 0xc00000>;
+			no-map;
+		};
 	};
 
 	smp2p-adsp {
@@ -4572,6 +4580,10 @@
 					qcom,glink-channels = "fastrpcglink-apps-dsp";
 
 					label = "adsp";
+
+					memory-region = <&adsp_rpc_remote_heap_mem>;
+					qcom,vmids = <QCOM_SCM_VMID_LPASS
+						      QCOM_SCM_VMID_ADSP_HEAP>;
 
 					qcom,non-secure-domain;
 
