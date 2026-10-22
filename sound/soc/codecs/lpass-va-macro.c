@@ -210,6 +210,7 @@ struct va_macro {
 	u16 dmic_clk_div;
 	bool has_swr_master;
 	bool has_npl_clk;
+	bool has_swr_mic_mux;
 
 	int dec_mode[VA_MACRO_NUM_DECIMATORS];
 	struct regmap *regmap;
@@ -236,6 +237,7 @@ struct va_macro {
 struct va_macro_data {
 	bool has_swr_master;
 	bool has_npl_clk;
+	bool has_swr_mic_mux;
 	int version;
 };
 
@@ -258,6 +260,7 @@ static const struct va_macro_data sm8450_va_data = {
 static const struct va_macro_data sm8550_va_data = {
 	.has_swr_master = true,
 	.has_npl_clk = false,
+	.has_swr_mic_mux = true,
 };
 
 static bool va_is_volatile_register(struct device *dev, unsigned int reg)
@@ -527,6 +530,15 @@ static int va_macro_mclk_event(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+static bool va_macro_is_amic_enabled(struct snd_soc_component *comp,
+				     unsigned int decimator)
+{
+	u16 adc_mux_reg = CDC_VA_INP_MUX_ADC_MUX0_CFG1 +
+			  VA_MACRO_ADC_MUX_CFG_OFFSET * decimator;
+
+	return snd_soc_component_read(comp, adc_mux_reg) & BIT(0);
+}
+
 static int va_macro_put_dec_enum(struct snd_kcontrol *kcontrol,
 				 struct snd_ctl_elem_value *ucontrol)
 {
@@ -534,23 +546,24 @@ static int va_macro_put_dec_enum(struct snd_kcontrol *kcontrol,
 	struct snd_soc_component *component =
 		snd_soc_dapm_to_component(widget->dapm);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
-	unsigned int val;
+	unsigned int val, decimator;
+	bool smic_mux;
 	u16 mic_sel_reg;
 
 	val = ucontrol->value.enumerated.item[0];
 
 	switch (e->reg) {
 	case CDC_VA_INP_MUX_ADC_MUX0_CFG0:
-		mic_sel_reg = CDC_VA_TX0_TX_PATH_CFG0;
+		decimator = 0;
 		break;
 	case CDC_VA_INP_MUX_ADC_MUX1_CFG0:
-		mic_sel_reg = CDC_VA_TX1_TX_PATH_CFG0;
+		decimator = 1;
 		break;
 	case CDC_VA_INP_MUX_ADC_MUX2_CFG0:
-		mic_sel_reg = CDC_VA_TX2_TX_PATH_CFG0;
+		decimator = 2;
 		break;
 	case CDC_VA_INP_MUX_ADC_MUX3_CFG0:
-		mic_sel_reg = CDC_VA_TX3_TX_PATH_CFG0;
+		decimator = 3;
 		break;
 	default:
 		dev_err(component->dev, "%s: e->reg: 0x%x not expected\n",
@@ -558,10 +571,19 @@ static int va_macro_put_dec_enum(struct snd_kcontrol *kcontrol,
 		return -EINVAL;
 	}
 
-	if (val != 0)
+	mic_sel_reg = CDC_VA_TX0_TX_PATH_CFG0 + VA_MACRO_TX_PATH_OFFSET * decimator;
+
+	/*
+	 * The SoundWire mic mux sits in the low nibble of CFG0 and the DMIC
+	 * mux in the high one. Both feed the same ADC/DMIC select, so only
+	 * the mux the decimator is routed through may program it.
+	 */
+	smic_mux = e->shift_l == 0;
+	if (val != 0 && smic_mux == va_macro_is_amic_enabled(component, decimator))
 		snd_soc_component_update_bits(component, mic_sel_reg,
 					      CDC_VA_TX_PATH_ADC_DMIC_SEL_MASK,
-					      CDC_VA_TX_PATH_ADC_DMIC_SEL_DMIC);
+					      smic_mux ? CDC_VA_TX_PATH_ADC_DMIC_SEL_ADC :
+							 CDC_VA_TX_PATH_ADC_DMIC_SEL_DMIC);
 
 	return snd_soc_dapm_put_enum_double(kcontrol, ucontrol);
 }
@@ -766,6 +788,11 @@ static int va_macro_enable_dec(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		snd_soc_component_update_bits(comp, dec_cfg_reg,
+					      CDC_VA_TX_PATH_ADC_DMIC_SEL_MASK,
+					      va_macro_is_amic_enabled(comp, decimator) ?
+					      CDC_VA_TX_PATH_ADC_DMIC_SEL_ADC :
+					      CDC_VA_TX_PATH_ADC_DMIC_SEL_DMIC);
 		snd_soc_component_update_bits(comp,
 			dec_cfg_reg, CDC_VA_ADC_MODE_MASK,
 			va->dec_mode[decimator] << CDC_VA_ADC_MODE_SHIFT);
@@ -776,9 +803,10 @@ static int va_macro_enable_dec(struct snd_soc_dapm_widget *w,
 		snd_soc_component_update_bits(comp, tx_vol_ctl_reg,
 					      CDC_VA_TX_PATH_CLK_EN_MASK,
 					      CDC_VA_TX_PATH_CLK_EN);
-		snd_soc_component_update_bits(comp, hpf_gate_reg,
-					      CDC_VA_TX_HPF_ZERO_GATE_MASK,
-					      CDC_VA_TX_HPF_ZERO_GATE);
+		if (!va_macro_is_amic_enabled(comp, decimator))
+			snd_soc_component_update_bits(comp, hpf_gate_reg,
+						      CDC_VA_TX_HPF_ZERO_GATE_MASK,
+						      CDC_VA_TX_HPF_ZERO_GATE);
 
 		usleep_range(1000, 1010);
 		hpf_cut_off_freq = (snd_soc_component_read(comp, dec_cfg_reg) &
@@ -1055,6 +1083,40 @@ static const struct snd_kcontrol_new va_dmic3_mux = SOC_DAPM_ENUM_EXT("va_dmic3"
 			 va_dmic3_enum, snd_soc_dapm_get_enum_double,
 			 va_macro_put_dec_enum);
 
+static const char * const smic_mux_text[] = {
+	"ZERO", "SWR_MIC0", "SWR_MIC1", "SWR_MIC2", "SWR_MIC3",
+	"SWR_MIC4", "SWR_MIC5", "SWR_MIC6", "SWR_MIC7",
+	"SWR_MIC8", "SWR_MIC9", "SWR_MIC10", "SWR_MIC11"
+};
+
+static SOC_ENUM_SINGLE_DECL(va_smic0_enum, CDC_VA_INP_MUX_ADC_MUX0_CFG0,
+			0, smic_mux_text);
+
+static SOC_ENUM_SINGLE_DECL(va_smic1_enum, CDC_VA_INP_MUX_ADC_MUX1_CFG0,
+			0, smic_mux_text);
+
+static SOC_ENUM_SINGLE_DECL(va_smic2_enum, CDC_VA_INP_MUX_ADC_MUX2_CFG0,
+			0, smic_mux_text);
+
+static SOC_ENUM_SINGLE_DECL(va_smic3_enum, CDC_VA_INP_MUX_ADC_MUX3_CFG0,
+			0, smic_mux_text);
+
+static const struct snd_kcontrol_new va_smic0_mux = SOC_DAPM_ENUM_EXT("va_smic0",
+			 va_smic0_enum, snd_soc_dapm_get_enum_double,
+			 va_macro_put_dec_enum);
+
+static const struct snd_kcontrol_new va_smic1_mux = SOC_DAPM_ENUM_EXT("va_smic1",
+			 va_smic1_enum, snd_soc_dapm_get_enum_double,
+			 va_macro_put_dec_enum);
+
+static const struct snd_kcontrol_new va_smic2_mux = SOC_DAPM_ENUM_EXT("va_smic2",
+			 va_smic2_enum, snd_soc_dapm_get_enum_double,
+			 va_macro_put_dec_enum);
+
+static const struct snd_kcontrol_new va_smic3_mux = SOC_DAPM_ENUM_EXT("va_smic3",
+			 va_smic3_enum, snd_soc_dapm_get_enum_double,
+			 va_macro_put_dec_enum);
+
 static const struct snd_kcontrol_new va_aif1_cap_mixer[] = {
 	SOC_SINGLE_EXT("DEC0", SND_SOC_NOPM, VA_MACRO_DEC0, 1, 0,
 			va_macro_tx_mixer_get, va_macro_tx_mixer_put),
@@ -1328,13 +1390,94 @@ static const struct snd_kcontrol_new va_macro_snd_controls[] = {
 		     va_macro_dec_mode_get, va_macro_dec_mode_put),
 };
 
+static const struct snd_soc_dapm_widget va_macro_swr_mic_widgets[] = {
+	SND_SOC_DAPM_MUX("VA SMIC MUX0", SND_SOC_NOPM, 0, 0, &va_smic0_mux),
+	SND_SOC_DAPM_MUX("VA SMIC MUX1", SND_SOC_NOPM, 0, 0, &va_smic1_mux),
+	SND_SOC_DAPM_MUX("VA SMIC MUX2", SND_SOC_NOPM, 0, 0, &va_smic2_mux),
+	SND_SOC_DAPM_MUX("VA SMIC MUX3", SND_SOC_NOPM, 0, 0, &va_smic3_mux),
+
+	SND_SOC_DAPM_INPUT("VA SWR_MIC8"),
+	SND_SOC_DAPM_INPUT("VA SWR_MIC9"),
+	SND_SOC_DAPM_INPUT("VA SWR_MIC10"),
+	SND_SOC_DAPM_INPUT("VA SWR_MIC11"),
+};
+
+static const struct snd_soc_dapm_route va_macro_swr_mic_routes[] = {
+	{"VA DEC0 MUX", "SWR_MIC", "VA SMIC MUX0"},
+	{"VA SMIC MUX0", "SWR_MIC0", "VA SWR_MIC0"},
+	{"VA SMIC MUX0", "SWR_MIC1", "VA SWR_MIC1"},
+	{"VA SMIC MUX0", "SWR_MIC2", "VA SWR_MIC2"},
+	{"VA SMIC MUX0", "SWR_MIC3", "VA SWR_MIC3"},
+	{"VA SMIC MUX0", "SWR_MIC4", "VA SWR_MIC4"},
+	{"VA SMIC MUX0", "SWR_MIC5", "VA SWR_MIC5"},
+	{"VA SMIC MUX0", "SWR_MIC6", "VA SWR_MIC6"},
+	{"VA SMIC MUX0", "SWR_MIC7", "VA SWR_MIC7"},
+	{"VA SMIC MUX0", "SWR_MIC8", "VA SWR_MIC8"},
+	{"VA SMIC MUX0", "SWR_MIC9", "VA SWR_MIC9"},
+	{"VA SMIC MUX0", "SWR_MIC10", "VA SWR_MIC10"},
+	{"VA SMIC MUX0", "SWR_MIC11", "VA SWR_MIC11"},
+
+	{"VA DEC1 MUX", "SWR_MIC", "VA SMIC MUX1"},
+	{"VA SMIC MUX1", "SWR_MIC0", "VA SWR_MIC0"},
+	{"VA SMIC MUX1", "SWR_MIC1", "VA SWR_MIC1"},
+	{"VA SMIC MUX1", "SWR_MIC2", "VA SWR_MIC2"},
+	{"VA SMIC MUX1", "SWR_MIC3", "VA SWR_MIC3"},
+	{"VA SMIC MUX1", "SWR_MIC4", "VA SWR_MIC4"},
+	{"VA SMIC MUX1", "SWR_MIC5", "VA SWR_MIC5"},
+	{"VA SMIC MUX1", "SWR_MIC6", "VA SWR_MIC6"},
+	{"VA SMIC MUX1", "SWR_MIC7", "VA SWR_MIC7"},
+	{"VA SMIC MUX1", "SWR_MIC8", "VA SWR_MIC8"},
+	{"VA SMIC MUX1", "SWR_MIC9", "VA SWR_MIC9"},
+	{"VA SMIC MUX1", "SWR_MIC10", "VA SWR_MIC10"},
+	{"VA SMIC MUX1", "SWR_MIC11", "VA SWR_MIC11"},
+
+	{"VA DEC2 MUX", "SWR_MIC", "VA SMIC MUX2"},
+	{"VA SMIC MUX2", "SWR_MIC0", "VA SWR_MIC0"},
+	{"VA SMIC MUX2", "SWR_MIC1", "VA SWR_MIC1"},
+	{"VA SMIC MUX2", "SWR_MIC2", "VA SWR_MIC2"},
+	{"VA SMIC MUX2", "SWR_MIC3", "VA SWR_MIC3"},
+	{"VA SMIC MUX2", "SWR_MIC4", "VA SWR_MIC4"},
+	{"VA SMIC MUX2", "SWR_MIC5", "VA SWR_MIC5"},
+	{"VA SMIC MUX2", "SWR_MIC6", "VA SWR_MIC6"},
+	{"VA SMIC MUX2", "SWR_MIC7", "VA SWR_MIC7"},
+	{"VA SMIC MUX2", "SWR_MIC8", "VA SWR_MIC8"},
+	{"VA SMIC MUX2", "SWR_MIC9", "VA SWR_MIC9"},
+	{"VA SMIC MUX2", "SWR_MIC10", "VA SWR_MIC10"},
+	{"VA SMIC MUX2", "SWR_MIC11", "VA SWR_MIC11"},
+
+	{"VA DEC3 MUX", "SWR_MIC", "VA SMIC MUX3"},
+	{"VA SMIC MUX3", "SWR_MIC0", "VA SWR_MIC0"},
+	{"VA SMIC MUX3", "SWR_MIC1", "VA SWR_MIC1"},
+	{"VA SMIC MUX3", "SWR_MIC2", "VA SWR_MIC2"},
+	{"VA SMIC MUX3", "SWR_MIC3", "VA SWR_MIC3"},
+	{"VA SMIC MUX3", "SWR_MIC4", "VA SWR_MIC4"},
+	{"VA SMIC MUX3", "SWR_MIC5", "VA SWR_MIC5"},
+	{"VA SMIC MUX3", "SWR_MIC6", "VA SWR_MIC6"},
+	{"VA SMIC MUX3", "SWR_MIC7", "VA SWR_MIC7"},
+	{"VA SMIC MUX3", "SWR_MIC8", "VA SWR_MIC8"},
+	{"VA SMIC MUX3", "SWR_MIC9", "VA SWR_MIC9"},
+	{"VA SMIC MUX3", "SWR_MIC10", "VA SWR_MIC10"},
+	{"VA SMIC MUX3", "SWR_MIC11", "VA SWR_MIC11"},
+};
+
 static int va_macro_component_probe(struct snd_soc_component *component)
 {
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	struct va_macro *va = snd_soc_component_get_drvdata(component);
+	int ret;
 
 	snd_soc_component_init_regmap(component, va->regmap);
 
-	return 0;
+	if (!va->has_swr_mic_mux)
+		return 0;
+
+	ret = snd_soc_dapm_new_controls(dapm, va_macro_swr_mic_widgets,
+					ARRAY_SIZE(va_macro_swr_mic_widgets));
+	if (ret)
+		return ret;
+
+	return snd_soc_dapm_add_routes(dapm, va_macro_swr_mic_routes,
+				       ARRAY_SIZE(va_macro_swr_mic_routes));
 }
 
 static const struct snd_soc_component_driver va_macro_component_drv = {
@@ -1603,6 +1746,7 @@ static int va_macro_probe(struct platform_device *pdev)
 	data = of_device_get_match_data(dev);
 	va->has_swr_master = data->has_swr_master;
 	va->has_npl_clk = data->has_npl_clk;
+	va->has_swr_mic_mux = data->has_swr_mic_mux;
 
 	/* mclk rate */
 	ret = clk_set_rate(va->mclk, 2 * VA_MACRO_MCLK_FREQ);
