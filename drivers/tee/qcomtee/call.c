@@ -688,6 +688,8 @@ static const struct tee_driver_ops qcomtee_ops = {
 	.object_invoke_func = qcomtee_object_invoke,
 	.supp_recv = qcomtee_supp_recv,
 	.supp_send = qcomtee_supp_send,
+	.shm_register_dmabuf = qcomtee_shm_register_dmabuf,
+	.shm_unregister_dmabuf = qcomtee_shm_unregister_dmabuf,
 };
 
 static const struct tee_desc qcomtee_desc = {
@@ -716,7 +718,7 @@ static int qcomtee_probe(struct platform_device *pdev)
 		goto err_free_qcomtee;
 	}
 
-	teedev = tee_device_alloc(&qcomtee_desc, NULL, pool, qcomtee);
+	teedev = tee_device_alloc(&qcomtee_desc, &pdev->dev, pool, qcomtee);
 	if (IS_ERR(teedev)) {
 		err = PTR_ERR(teedev);
 

@@ -44,6 +44,9 @@ struct qcomtee_object *qcomtee_idx_erase(struct qcomtee_object_invoke_ctx *oic,
 					 u32 idx);
 
 struct tee_shm_pool *qcomtee_shm_pool_alloc(void);
+int qcomtee_shm_register_dmabuf(struct tee_context *ctx, struct tee_shm *shm);
+void qcomtee_shm_unregister_dmabuf(struct tee_context *ctx,
+				   struct tee_shm *shm);
 void qcomtee_msg_buffers_free(struct qcomtee_object_invoke_ctx *oic);
 int qcomtee_msg_buffers_alloc(struct qcomtee_object_invoke_ctx *oic,
 			      struct qcomtee_arg *u);

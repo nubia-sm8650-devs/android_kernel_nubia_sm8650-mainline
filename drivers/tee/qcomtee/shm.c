@@ -6,7 +6,10 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/firmware/qcom/qcom_tzmem.h>
+#include <linux/list.h>
 #include <linux/mm.h>
+#include <linux/mutex.h>
+#include <linux/slab.h>
 
 #include "qcomtee.h"
 
@@ -112,6 +115,84 @@ static int qcomtee_shm_unregister(struct tee_context *ctx, struct tee_shm *shm)
 	qcom_tzmem_shm_bridge_delete(shm->sec_world_id);
 
 	return 0;
+}
+
+/*
+ * A dma-buf can be registered more than once, through several fds or by
+ * several clients, and every registration covers the same range. Share one
+ * SHM bridge per range instead of asking QTEE for overlapping ones.
+ */
+struct qcomtee_dmabuf_bridge {
+	struct list_head node;
+	phys_addr_t paddr;
+	size_t size;
+	u64 handle;
+	unsigned int users;
+};
+
+static LIST_HEAD(qcomtee_dmabuf_bridges);
+static DEFINE_MUTEX(qcomtee_dmabuf_bridges_lock);
+
+static struct qcomtee_dmabuf_bridge *qcomtee_dmabuf_bridge_find(phys_addr_t paddr,
+								size_t size)
+{
+	struct qcomtee_dmabuf_bridge *bridge;
+
+	list_for_each_entry(bridge, &qcomtee_dmabuf_bridges, node)
+		if (bridge->paddr == paddr && bridge->size == size)
+			return bridge;
+
+	return NULL;
+}
+
+int qcomtee_shm_register_dmabuf(struct tee_context *ctx, struct tee_shm *shm)
+{
+	struct qcomtee_dmabuf_bridge *bridge;
+	int ret;
+
+	guard(mutex)(&qcomtee_dmabuf_bridges_lock);
+
+	bridge = qcomtee_dmabuf_bridge_find(shm->paddr, shm->size);
+	if (bridge) {
+		bridge->users++;
+		shm->sec_world_id = bridge->handle;
+		return 0;
+	}
+
+	bridge = kzalloc_obj(*bridge);
+	if (!bridge)
+		return -ENOMEM;
+
+	ret = qcom_tzmem_shm_bridge_create(shm->paddr, shm->size,
+					   &bridge->handle);
+	if (ret) {
+		kfree(bridge);
+		return ret;
+	}
+
+	bridge->paddr = shm->paddr;
+	bridge->size = shm->size;
+	bridge->users = 1;
+	list_add(&bridge->node, &qcomtee_dmabuf_bridges);
+	shm->sec_world_id = bridge->handle;
+
+	return 0;
+}
+
+void qcomtee_shm_unregister_dmabuf(struct tee_context *ctx,
+				   struct tee_shm *shm)
+{
+	struct qcomtee_dmabuf_bridge *bridge;
+
+	guard(mutex)(&qcomtee_dmabuf_bridges_lock);
+
+	bridge = qcomtee_dmabuf_bridge_find(shm->paddr, shm->size);
+	if (WARN_ON(!bridge) || --bridge->users)
+		return;
+
+	qcom_tzmem_shm_bridge_delete(bridge->handle);
+	list_del(&bridge->node);
+	kfree(bridge);
 }
 
 static int pool_op_alloc(struct tee_shm_pool *pool, struct tee_shm *shm,
