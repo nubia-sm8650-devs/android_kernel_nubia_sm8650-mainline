@@ -178,6 +178,12 @@
 	status = "okay";
 };
 
+&ipa {
+	firmware-name = "ipa_fws.mdt";
+
+	status = "okay";
+};
+
 &mdss {
 	status = "okay";
 };
