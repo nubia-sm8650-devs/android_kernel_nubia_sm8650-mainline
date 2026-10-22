@@ -359,6 +359,14 @@ static const struct blk_mq_ops bsg_mq_ops = {
  * @timeout: timeout handler function pointer
  * @dd_job_size: size of LLD data needed for each job
  */
+/*
+ * A bsg job runs inside the SRCU read section of the bsg tag set and may
+ * runtime-resume the transport device, which takes locks that the device's
+ * own blocking tag set nests under. Nothing synchronizes the bsg SRCU under
+ * those locks, so keep it out of the class shared by all blocking tag sets.
+ */
+static struct lock_class_key bsg_srcu_key;
+
 struct request_queue *bsg_setup_queue(struct device *dev, const char *name,
 		struct queue_limits *lim, bsg_job_fn *job_fn,
 		bsg_timeout_fn *timeout, int dd_job_size)
@@ -384,6 +392,8 @@ struct request_queue *bsg_setup_queue(struct device *dev, const char *name,
 	set->flags = BLK_MQ_F_BLOCKING;
 	if (blk_mq_alloc_tag_set(set))
 		goto out_tag_set;
+
+	lockdep_init_map(&set->srcu->dep_map, "&bsg_set->srcu", &bsg_srcu_key, 0);
 
 	q = blk_mq_alloc_queue(set, lim, dev);
 	if (IS_ERR(q)) {
