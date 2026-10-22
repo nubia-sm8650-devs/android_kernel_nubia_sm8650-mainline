@@ -442,7 +442,7 @@ static const struct of_device_id qcom_cpufreq_hw_match[] = {
 };
 MODULE_DEVICE_TABLE(of, qcom_cpufreq_hw_match);
 
-static int qcom_cpufreq_hw_lmh_init(struct cpufreq_policy *policy, int index)
+static int qcom_cpufreq_hw_lmh_init(struct cpufreq_policy *policy)
 {
 	struct qcom_cpufreq_data *data = policy->driver_data;
 	struct platform_device *pdev = cpufreq_get_driver_data();
@@ -452,7 +452,6 @@ static int qcom_cpufreq_hw_lmh_init(struct cpufreq_policy *policy, int index)
 	 * Look for LMh interrupt. If no interrupt line is specified /
 	 * if there is an error, allow cpufreq to be enabled as usual.
 	 */
-	data->throttle_irq = platform_get_irq_optional(pdev, index);
 	if (data->throttle_irq == -ENXIO)
 		return 0;
 	if (data->throttle_irq < 0)
@@ -583,7 +582,7 @@ static int qcom_cpufreq_hw_cpu_init(struct cpufreq_policy *policy)
 		return -ENODEV;
 	}
 
-	return qcom_cpufreq_hw_lmh_init(policy, index);
+	return qcom_cpufreq_hw_lmh_init(policy);
 }
 
 static void qcom_cpufreq_hw_cpu_exit(struct cpufreq_policy *policy)
@@ -711,6 +710,10 @@ static int qcom_cpufreq_hw_driver_probe(struct platform_device *pdev)
 		}
 
 		data->base = base;
+
+		data->throttle_irq = platform_get_irq_optional(pdev, i);
+		if (data->throttle_irq == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
 
 		/* Register CPU clock for each frequency domain */
 		clk_init.name = kasprintf(GFP_KERNEL, "qcom_cpufreq%d", i);
