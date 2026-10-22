@@ -111,6 +111,10 @@
 	status = "okay";
 };
 
+&gpu {
+	status = "okay";
+};
+
 &mdss {
 	status = "okay";
 };
