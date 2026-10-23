@@ -51,6 +51,13 @@ properties:
       codes defined in include/dt-bindings/input/linux-event-codes.h.
       When property is omitted KEY_POWER is assumed.
 
+  qcom,s2-warm-reset:
+    description:
+      Make the stage 2 reset of a long press a warm reset, which keeps DRAM
+      contents, instead of the type the bootloader configured. Only gen3 PON
+      blocks with a PBS register region support it.
+    $ref: /schemas/types.yaml#/definitions/flag
+
 allOf:
   - $ref: input.yaml#
   - if:
