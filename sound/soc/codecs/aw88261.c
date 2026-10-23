@@ -1107,6 +1107,8 @@ static int aw88261_mute_put(struct snd_kcontrol *kcontrol,
 	struct aw88261 *aw88261 = snd_soc_component_get_drvdata(codec);
 	bool mute = !ucontrol->value.integer.value[0];
 
+	guard(mutex)(&aw88261->lock);
+
 	if (aw88261->mute_st == mute)
 		return 0;
 
