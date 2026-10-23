@@ -15,6 +15,7 @@
 #include "pmr735d_a.dtsi"
 
 /delete-node/ &hwfence_shbuf;
+/delete-node/ &rmtfs_mem;
 
 / {
 	model = "ZTE SM8650";
@@ -558,6 +559,24 @@
 	hwfence_shbuf: hwfence-shbuf@d4e23000 {
 		reg = <0x0 0xd4e23000 0x0 0x2dd000>;
 		no-map;
+	};
+
+	rmtfs_mem: rmtfs@d7a00000 {
+		compatible = "qcom,rmtfs-mem";
+		reg = <0x0 0xd7a00000 0x0 0x400000>;
+		no-map;
+
+		qcom,client-id = <1>;
+		qcom,vmid = <QCOM_SCM_VMID_MSS_MSA>;
+	};
+
+	ramoops@d7e00000 {
+		compatible = "ramoops";
+		reg = <0x0 0xd7e00000 0x0 0x200000>;
+		record-size = <0x40000>;
+		console-size = <0x100000>;
+		pmsg-size = <0x40000>;
+		ecc-size = <127>;
 	};
 
 	/*
