@@ -117,6 +117,8 @@ int qcom_snd_sdw_startup(struct snd_pcm_substream *substream)
 	return 0;
 
 err_set_stream:
+	for_each_rtd_codec_dais(rtd, j, codec_dai)
+		snd_soc_dai_set_stream(codec_dai, NULL, substream->stream);
 	sdw_release_stream(sruntime);
 
 	return ret;
@@ -188,6 +190,15 @@ EXPORT_SYMBOL_GPL(qcom_snd_sdw_get_stream);
 void qcom_snd_sdw_shutdown(struct snd_pcm_substream *substream)
 {
 	struct sdw_stream_runtime *sruntime = qcom_snd_sdw_get_stream(substream);
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai;
+	int i;
+
+	if (!sruntime)
+		return;
+
+	for_each_rtd_codec_dais(rtd, i, codec_dai)
+		snd_soc_dai_set_stream(codec_dai, NULL, substream->stream);
 
 	sdw_release_stream(sruntime);
 }
