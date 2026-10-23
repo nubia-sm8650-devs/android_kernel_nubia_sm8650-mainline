@@ -44,6 +44,11 @@
 #define  PON_PS_HOLD_TYPE_SHUTDOWN	4
 #define  PON_PS_HOLD_TYPE_HARD_RESET	7
 
+#define PON_GEN3_KPDPWR_S2_CNTL		0x42
+#define PON_GEN3_RESIN_S2_CNTL		0x46
+#define  PON_S2_CNTL_TYPE_MASK		0x0f
+#define  PON_S2_CNTL2_ENABLE		BIT(7)
+
 #define PON_PULL_CTL			0x70
 #define  PON_KPDPWR_PULL_UP		BIT(1)
 #define  PON_RESIN_PULL_UP		BIT(0)
@@ -61,6 +66,7 @@ struct pm8941_data {
 	bool		supports_debounce_config;
 	bool		has_pon_pbs;
 	bool		wakeup_source_default;
+	unsigned int	s2_cntl;
 	const char	*name;
 	const char	*phys;
 };
@@ -243,6 +249,50 @@ static int pm8941_pwrkey_resume(struct device *dev)
 static DEFINE_SIMPLE_DEV_PM_OPS(pm8941_pwr_key_pm_ops,
 				pm8941_pwrkey_suspend, pm8941_pwrkey_resume);
 
+static int pm8941_pwrkey_s2_warm_reset(struct pm8941_pwrkey *pwrkey)
+{
+	unsigned int cntl = pwrkey->pon_pbs_baseaddr + pwrkey->data->s2_cntl;
+	unsigned int en, type;
+	int error;
+
+	error = regmap_read(pwrkey->regmap, cntl + 1, &en);
+	if (error)
+		return error;
+
+	if (en & PON_S2_CNTL2_ENABLE) {
+		error = regmap_update_bits(pwrkey->regmap, cntl + 1,
+					   PON_S2_CNTL2_ENABLE, 0);
+		if (error)
+			return error;
+
+		/* The S2 enable bit needs 3 sleep clock cycles between writes. */
+		usleep_range(100, 1000);
+	}
+
+	error = regmap_update_bits(pwrkey->regmap, cntl, PON_S2_CNTL_TYPE_MASK,
+				   PON_PS_HOLD_TYPE_WARM_RESET);
+	if (error)
+		return error;
+
+	if (en & PON_S2_CNTL2_ENABLE) {
+		usleep_range(100, 1000);
+		error = regmap_update_bits(pwrkey->regmap, cntl + 1,
+					   PON_S2_CNTL2_ENABLE,
+					   PON_S2_CNTL2_ENABLE);
+		if (error)
+			return error;
+	}
+
+	error = regmap_read(pwrkey->regmap, cntl, &type);
+	if (error)
+		return error;
+
+	if ((type & PON_S2_CNTL_TYPE_MASK) != PON_PS_HOLD_TYPE_WARM_RESET)
+		return -EPERM;
+
+	return 0;
+}
+
 static int pm8941_pwrkey_probe(struct platform_device *pdev)
 {
 	struct pm8941_pwrkey *pwrkey;
@@ -365,6 +415,13 @@ static int pm8941_pwrkey_probe(struct platform_device *pdev)
 	if (error)
 		return error;
 
+	if (pwrkey->data->s2_cntl && pwrkey->pon_pbs_baseaddr &&
+	    of_property_read_bool(pdev->dev.of_node, "qcom,s2-warm-reset")) {
+		error = pm8941_pwrkey_s2_warm_reset(pwrkey);
+		if (error)
+			dev_warn(&pdev->dev, "S2 reset type unchanged: %d\n", error);
+	}
+
 	if (pwrkey->data->pull_up_bit) {
 		error = regmap_update_bits(pwrkey->regmap,
 					   pwrkey->baseaddr + PON_PULL_CTL,
@@ -450,6 +507,7 @@ static const struct pm8941_data pon_gen3_pwrkey_data = {
 	.supports_debounce_config = false,
 	.has_pon_pbs = true,
 	.wakeup_source_default = true,
+	.s2_cntl = PON_GEN3_KPDPWR_S2_CNTL,
 };
 
 static const struct pm8941_data pon_gen3_resin_data = {
@@ -460,6 +518,7 @@ static const struct pm8941_data pon_gen3_resin_data = {
 	.supports_debounce_config = false,
 	.has_pon_pbs = true,
 	.wakeup_source_default = false,
+	.s2_cntl = PON_GEN3_RESIN_S2_CNTL,
 };
 
 static const struct of_device_id pm8941_pwr_key_id_table[] = {
