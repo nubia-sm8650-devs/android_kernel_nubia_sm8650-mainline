@@ -217,7 +217,7 @@ static const char * const wcd939x_supplies[] = {
 };
 
 static const SNDRV_CTL_TLVD_DECLARE_DB_MINMAX(ear_pa_gain, 600, -1800);
-static const DECLARE_TLV_DB_SCALE(line_gain, 0, 7, 1);
+static const DECLARE_TLV_DB_SCALE(hph_gain, -3000, 150, 0);
 static const DECLARE_TLV_DB_SCALE(analog_gain, 0, 25, 1);
 
 static const struct wcd_mbhc_field wcd_mbhc_fields[WCD_MBHC_REG_FUNC_MAX] = {
@@ -2532,8 +2532,8 @@ static const struct snd_kcontrol_new wcd939x_snd_controls[] = {
 		       wcd939x_get_swr_port, wcd939x_set_swr_port),
 	SOC_SINGLE_EXT("DSD_R Switch", WCD939X_DSD_R, 0, 1, 0,
 		       wcd939x_get_swr_port, wcd939x_set_swr_port),
-	SOC_SINGLE_TLV("HPHL Volume", WCD939X_HPH_L_EN, 0, 20, 1, line_gain),
-	SOC_SINGLE_TLV("HPHR Volume", WCD939X_HPH_R_EN, 0, 20, 1, line_gain),
+	SOC_SINGLE_TLV("HPHL Volume", WCD939X_HPH_NEW_INT_PA_GAIN_CTL_L, 0, 0x18, 1, hph_gain),
+	SOC_SINGLE_TLV("HPHR Volume", WCD939X_HPH_NEW_INT_PA_GAIN_CTL_R, 0, 0x18, 1, hph_gain),
 	SOC_SINGLE_EXT("LDOH Enable Switch", SND_SOC_NOPM, 0, 1, 0,
 		       wcd939x_ldoh_get, wcd939x_ldoh_put),
 
