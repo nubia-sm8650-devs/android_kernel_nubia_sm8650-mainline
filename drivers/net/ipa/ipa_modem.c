@@ -280,6 +280,7 @@ void ipa_modem_skb_rx(struct net_device *netdev, struct sk_buff *skb)
 #define RMNET_IOCTL_GET_SG_SUPPORT		0x17
 #define RMNET_IOCTL_SET_MTU			0x20
 #define RMNET_IOCTL_GET_EPID_LL			0x21
+#define RMNET_IOCTL_GET_EP_PAIR_LL		0x22
 
 /* Peripheral id of the embedded IPA data port, fixed by the downstream driver */
 #define RMNET_IPA_EPID		1
@@ -319,11 +320,19 @@ static int ipa_modem_rmnet_ioctl(struct net_device *netdev, void __user *data)
 		ext.u.data = RMNET_IPA_EPID;
 		break;
 	case RMNET_IOCTL_GET_EPID_LL:
+		if (!priv->ll_tx)
+			return -EINVAL;
 		ext.u.data = RMNET_IPA_EPID_LL;
 		break;
 	case RMNET_IOCTL_GET_EP_PAIR:
 		ext.u.ipa_ep_pair.consumer_pipe_num = priv->tx->endpoint_id;
 		ext.u.ipa_ep_pair.producer_pipe_num = priv->rx->endpoint_id;
+		break;
+	case RMNET_IOCTL_GET_EP_PAIR_LL:
+		if (!priv->ll_tx)
+			return -EINVAL;
+		ext.u.ipa_ep_pair.consumer_pipe_num = priv->ll_tx->endpoint_id;
+		ext.u.ipa_ep_pair.producer_pipe_num = priv->ll_rx->endpoint_id;
 		break;
 	case RMNET_IOCTL_GET_DRIVER_NAME:
 		strscpy(ext.u.if_name, netdev->name, sizeof(ext.u.if_name));
