@@ -421,6 +421,26 @@
 	};
 };
 
+&i2c_hub_4 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	clock-frequency = <1000000>;
+
+	status = "okay";
+
+	vibrator@5a {
+		compatible = "awinic,aw86927";
+		reg = <0x5a>;
+
+		interrupts-extended = <&tlmm 163 IRQ_TYPE_EDGE_FALLING>;
+		reset-gpios = <&tlmm 120 GPIO_ACTIVE_LOW>;
+
+		pinctrl-0 = <&haptics_int_default>;
+		pinctrl-names = "default";
+	};
+};
+
 &i2c_master_hub_0 {
 	status = "okay";
 };
@@ -703,6 +723,13 @@
 		function = "gpio";
 		drive-strength = <2>;
 		bias-pull-down;
+	};
+
+	haptics_int_default: haptics-int-default-state {
+		pins = "gpio163";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
 	};
 
 	mdp_vsync: mdp-vsync-state {
