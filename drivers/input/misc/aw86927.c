@@ -145,7 +145,10 @@
 
 #define AW86927_CHIPIDH_REG			0x57
 #define AW86927_CHIPIDL_REG			0x58
+#define AW86925_CHIPID				0x9250
+#define AW86926_CHIPID				0x9260
 #define AW86927_CHIPID				0x9270
+#define AW86928_CHIPID				0x9280
 #define AW86938_CHIPID				0x9380
 
 #define AW86927_TMCFG_REG			0x5b
@@ -759,7 +762,10 @@ static int aw86927_detect(struct aw86927_data *haptics)
 	chip_id = be16_to_cpu(read_buf);
 
 	switch (chip_id) {
+	case AW86925_CHIPID:
+	case AW86926_CHIPID:
 	case AW86927_CHIPID:
+	case AW86928_CHIPID:
 		haptics->model = AW86927;
 		break;
 	case AW86938_CHIPID:
