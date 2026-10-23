@@ -334,6 +334,16 @@
 	status = "okay";
 };
 
+&hub_i2c3_data_clk {
+	/* Use internal I2C pull-up */
+	bias-pull-up = <2200>;
+};
+
+&hub_i2c4_data_clk {
+	/* Use internal I2C pull-up */
+	bias-pull-up = <2200>;
+};
+
 &i2c3 {
 	#address-cells = <1>;
 	#size-cells = <0>;
@@ -562,6 +572,11 @@
 		clocks = <&q6prmcc LPASS_CLK_ID_PRI_MI2S_IBIT LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
 		clock-names = "bclk";
 	};
+};
+
+&qup_i2c3_data_clk {
+	/* Use internal I2C pull-up */
+	bias-pull-up = <2200>;
 };
 
 &qupv3_id_0 {
