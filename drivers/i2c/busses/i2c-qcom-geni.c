@@ -85,9 +85,18 @@ enum geni_i2c_err_code {
 #define GENI_SE_CLK_32MHZ	(32 * HZ_PER_MHZ)
 #define GENI_SE_CLK_19P2MHZ	19200000UL
 
+struct geni_i2c_clk_fld {
+	u32	clk_freq_out;
+	u8	clk_div;
+	u8	t_high_cnt;
+	u8	t_low_cnt;
+	u8	t_cycle_cnt;
+};
+
 struct geni_i2c_desc {
 	bool no_dma_support;
 	unsigned int tx_fifo_depth;
+	const struct geni_i2c_clk_fld *clk_map;
 	int (*resources_init)(struct geni_se *se);
 	int (*set_rate)(struct geni_se *se, unsigned long freq);
 	int (*power_on)(struct geni_se *se);
@@ -163,14 +172,6 @@ static const struct geni_i2c_err_log gi2c_log[] = {
 	[GENI_TIMEOUT] = {-ETIMEDOUT, "I2C TXN timed out"},
 };
 
-struct geni_i2c_clk_fld {
-	u32	clk_freq_out;
-	u8	clk_div;
-	u8	t_high_cnt;
-	u8	t_low_cnt;
-	u8	t_cycle_cnt;
-};
-
 /*
  * Hardware uses the underlying formula to calculate time periods of
  * SCL clock cycle. Firmware uses some additional cycles excluded from the
@@ -198,6 +199,14 @@ static const struct geni_i2c_clk_fld geni_i2c_clk_map_32mhz[] = {
 	{}
 };
 
+/* I2C hub serial engines take their own SCL counters, source_clock = 19.2 MHz */
+static const struct geni_i2c_clk_fld geni_i2c_clk_map_hub[] = {
+	{ I2C_MAX_STANDARD_MODE_FREQ, 7, 10, 11, 26 },
+	{ I2C_MAX_FAST_MODE_FREQ, 2,  7, 10, 24 },
+	{ I2C_MAX_FAST_MODE_PLUS_FREQ, 1, 3,  9, 18 },
+	{}
+};
+
 static int geni_i2c_clk_map_idx(struct geni_i2c_dev *gi2c)
 {
 	const struct geni_i2c_clk_fld *itr;
@@ -214,7 +223,7 @@ static int geni_i2c_clk_map_idx(struct geni_i2c_dev *gi2c)
 		itr = geni_i2c_clk_map_32mhz;
 	} else {
 		req_freq = GENI_SE_CLK_19P2MHZ;
-		itr = geni_i2c_clk_map_19p2mhz;
+		itr = gi2c->dev_data->clk_map ?: geni_i2c_clk_map_19p2mhz;
 	}
 
 	ret = geni_se_clk_freq_match(&gi2c->se, req_freq, &gi2c->clk_idx,
@@ -1327,6 +1336,7 @@ static const struct geni_i2c_desc geni_i2c = {
 static const struct geni_i2c_desc i2c_master_hub = {
 	.no_dma_support = true,
 	.tx_fifo_depth = 16,
+	.clk_map = geni_i2c_clk_map_hub,
 	.resources_init = geni_i2c_resources_init,
 	.set_rate = qcom_geni_i2c_conf,
 	.power_on = geni_se_resources_activate,
