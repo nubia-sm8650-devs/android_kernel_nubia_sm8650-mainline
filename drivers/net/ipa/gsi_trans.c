@@ -463,7 +463,7 @@ int gsi_trans_skb_add(struct gsi_trans *trans, struct sk_buff *skb)
 	u32 used_count;
 	int ret;
 
-	if (WARN_ON(trans->rsvd_count != 1))
+	if (WARN_ON(trans->rsvd_count < 1 + skb_shinfo(skb)->nr_frags))
 		return -EINVAL;
 	if (WARN_ON(trans->used_count))
 		return -EINVAL;
