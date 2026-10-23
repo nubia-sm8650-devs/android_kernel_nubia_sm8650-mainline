@@ -23,6 +23,10 @@
 	qcom,msm-id = <QCOM_ID_SM8650 0x20000>, <577 0x20000>;
 	qcom,board-id = <0 0>;
 
+	aliases {
+		serial1 = &uart14;
+	};
+
 	chosen: chosen {
 		#address-cells = <2>;
 		#size-cells = <2>;
