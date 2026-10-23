@@ -30,6 +30,9 @@ static bool qcom_snd_is_sdw_dai(int id)
 	case TX_CODEC_DMA_TX_5:
 	case RX_CODEC_DMA_RX_6:
 	case RX_CODEC_DMA_RX_7:
+	case VA_CODEC_DMA_TX_0:
+	case VA_CODEC_DMA_TX_1:
+	case VA_CODEC_DMA_TX_2:
 	case SLIMBUS_0_RX...SLIMBUS_6_TX:
 		return true;
 	default:
@@ -69,6 +72,7 @@ int qcom_snd_sdw_startup(struct snd_pcm_substream *substream)
 	struct sdw_stream_runtime *sruntime;
 	struct snd_soc_dai *codec_dai;
 	u32 rx_ch_cnt = 0, tx_ch_cnt = 0;
+	bool has_sdw = false;
 	int ret, i, j;
 
 	if (!qcom_snd_is_sdw_dai(cpu_dai->id))
@@ -89,6 +93,8 @@ int qcom_snd_sdw_startup(struct snd_pcm_substream *substream)
 			continue;
 		}
 
+		has_sdw = true;
+
 		ret = snd_soc_dai_get_channel_map(codec_dai, &tx_ch_cnt, tx_ch,
 						  &rx_ch_cnt, rx_ch);
 		if (ret != 0 && ret != -ENOTSUPP) {
@@ -98,6 +104,11 @@ int qcom_snd_sdw_startup(struct snd_pcm_substream *substream)
 			/* Ignore unsupported */
 			continue;
 		}
+	}
+
+	if (!has_sdw) {
+		sdw_release_stream(sruntime);
+		return 0;
 	}
 
 	switch (cpu_dai->id) {
