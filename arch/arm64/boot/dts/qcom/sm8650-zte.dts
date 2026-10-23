@@ -535,6 +535,8 @@
 };
 
 &pon_pwrkey {
+	qcom,s2-warm-reset;
+
 	status = "okay";
 };
 
