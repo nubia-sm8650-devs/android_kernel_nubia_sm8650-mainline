@@ -55,6 +55,7 @@ struct gsi_trans {
 
 	u8 rsvd_count;			/* # TREs requested */
 	u8 used_count;			/* # entries used in sgl[] */
+	u8 dma_count;			/* # DMA segments mapped in sgl[] */
 	u32 len;			/* total # bytes across sgl[] */
 
 	union {

@@ -221,7 +221,7 @@ static void gsi_trans_map(struct gsi_trans *trans, u32 index)
 	struct gsi_channel *channel = &trans->gsi->channel[trans->channel_id];
 
 	/* The completion event will indicate the last TRE used */
-	index += trans->used_count - 1;
+	index += trans->dma_count - 1;
 
 	/* Note: index *must* be used modulo the ring count here */
 	channel->trans_info.map[index % channel->tre_ring.count] = trans;
@@ -411,6 +411,7 @@ void gsi_trans_cmd_add(struct gsi_trans *trans, void *buf, u32 size,
 	struct scatterlist *sg;
 
 	WARN_ON(which >= trans->rsvd_count);
+	trans->dma_count = trans->used_count;
 
 	/* Commands are quite different from data transfer requests.
 	 * Their payloads come from a pool whose memory is allocated
@@ -452,6 +453,7 @@ int gsi_trans_page_add(struct gsi_trans *trans, struct page *page, u32 size,
 		return -ENOMEM;
 
 	trans->used_count++;	/* Transaction now owns the (DMA mapped) page */
+	trans->dma_count = ret;
 
 	return 0;
 }
@@ -480,6 +482,7 @@ int gsi_trans_skb_add(struct gsi_trans *trans, struct sk_buff *skb)
 
 	/* Transaction now owns the (DMA mapped) skb */
 	trans->used_count += used_count;
+	trans->dma_count = ret;
 
 	return 0;
 }
@@ -555,7 +558,7 @@ static void __gsi_trans_commit(struct gsi_trans *trans, bool ring_db)
 	u32 avail;
 	u32 i;
 
-	WARN_ON(!trans->used_count);
+	WARN_ON(!trans->dma_count);
 
 	/* Consume the entries.  If we cross the end of the ring while
 	 * filling them we'll switch to the beginning to finish.
@@ -565,8 +568,8 @@ static void __gsi_trans_commit(struct gsi_trans *trans, bool ring_db)
 	cmd_opcode = channel->command ? &trans->cmd_opcode[0] : NULL;
 	avail = tre_ring->count - tre_ring->index % tre_ring->count;
 	dest_tre = gsi_ring_virt(tre_ring, tre_ring->index);
-	for_each_sg(trans->sgl, sg, trans->used_count, i) {
-		bool last_tre = i == trans->used_count - 1;
+	for_each_sg(trans->sgl, sg, trans->dma_count, i) {
+		bool last_tre = i == trans->dma_count - 1;
 		dma_addr_t addr = sg_dma_address(sg);
 		u32 len = sg_dma_len(sg);
 
@@ -582,7 +585,7 @@ static void __gsi_trans_commit(struct gsi_trans *trans, bool ring_db)
 	/* Associate the TRE with the transaction */
 	gsi_trans_map(trans, tre_ring->index);
 
-	tre_ring->index += trans->used_count;
+	tre_ring->index += trans->dma_count;
 
 	trans->len = byte_count;
 	if (channel->toward_ipa)
