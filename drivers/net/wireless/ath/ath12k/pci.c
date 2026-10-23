@@ -1528,81 +1528,19 @@ ath12k_get_device_family(const struct pci_device_id *pci_dev)
 	return ATH12K_DEVICE_FAMILY_MAX;
 }
 
-static int ath12k_pci_probe(struct pci_dev *pdev,
-			    const struct pci_device_id *pci_dev)
+static int ath12k_pci_init_hw(struct ath12k_base *ab)
 {
-	enum ath12k_device_family device_id;
-	struct ath12k_pci *ab_pci;
-	struct ath12k_base *ab;
+	struct ath12k_pci *ab_pci = ath12k_pci_priv(ab);
 	int ret;
-
-	ab = ath12k_core_alloc(&pdev->dev, sizeof(*ab_pci), ATH12K_BUS_PCI);
-	if (!ab) {
-		dev_err(&pdev->dev, "failed to allocate ath12k base\n");
-		return -ENOMEM;
-	}
-
-	ab->dev = &pdev->dev;
-	ab_pci = ath12k_pci_priv(ab);
-	ab_pci->dev_id = pci_dev->device;
-	ab_pci->ab = ab;
-	ab_pci->pdev = pdev;
-	ab->hif.ops = &ath12k_pci_hif_ops;
-	ab->fw_mode = ATH12K_QMI_FIRMWARE_MODE_NORMAL;
-	pci_set_drvdata(pdev, ab);
-	spin_lock_init(&ab_pci->window_lock);
-
-	ret = ath12k_pci_claim(ab_pci, pdev);
-	if (ret) {
-		ath12k_err(ab, "failed to claim device: %d\n", ret);
-		goto err_free_core;
-	}
-
-	ath12k_dbg(ab, ATH12K_DBG_BOOT, "pci probe %04x:%04x %04x:%04x\n",
-		   pdev->vendor, pdev->device,
-		   pdev->subsystem_vendor, pdev->subsystem_device);
-
-	ab->id.vendor = pdev->vendor;
-	ab->id.device = pdev->device;
-	ab->id.subsystem_vendor = pdev->subsystem_vendor;
-	ab->id.subsystem_device = pdev->subsystem_device;
-
-	device_id = ath12k_get_device_family(pci_dev);
-	if (device_id >= ATH12K_DEVICE_FAMILY_MAX) {
-		ath12k_err(ab, "failed to get device family id\n");
-		ret = -EINVAL;
-		goto err_pci_free_region;
-	}
-
-	ath12k_dbg(ab, ATH12K_DBG_PCI, "PCI device family id: %d\n", device_id);
-
-	ab_pci->device_family_ops = &ath12k_pci_family_drivers[device_id]->ops;
-	ab_pci->reg_base = ath12k_pci_family_drivers[device_id]->reg_base;
-
-	/* Call device specific probe. This is the callback that can
-	 * be used to override any ops in future
-	 * probe is validated for NULL during registration.
-	 */
-	ret = ab_pci->device_family_ops->probe(pdev, pci_dev);
-	if (ret) {
-		ath12k_err(ab, "failed to probe device: %d\n", ret);
-		goto err_pci_free_region;
-	}
-
-	ret = ath12k_pci_msi_alloc(ab_pci);
-	if (ret) {
-		ath12k_err(ab, "failed to alloc msi: %d\n", ret);
-		goto err_pci_free_region;
-	}
 
 	ret = ath12k_core_pre_init(ab);
 	if (ret)
-		goto err_pci_msi_free;
+		return ret;
 
 	ret = ath12k_pci_set_irq_affinity_hint(ab_pci, cpumask_of(0));
 	if (ret) {
 		ath12k_err(ab, "failed to set irq affinity %d\n", ret);
-		goto err_pci_msi_free;
+		return ret;
 	}
 
 	ret = ath12k_mhi_register(ab_pci);
@@ -1676,8 +1614,96 @@ err_mhi_unregister:
 err_irq_affinity_cleanup:
 	ath12k_pci_set_irq_affinity_hint(ab_pci, NULL);
 
-err_pci_msi_free:
-	ath12k_pci_msi_free(ab_pci);
+	return ret;
+}
+
+static void ath12k_pci_init_work(struct work_struct *work)
+{
+	struct ath12k_pci *ab_pci = container_of(work, struct ath12k_pci, init_work);
+	struct ath12k_base *ab = ab_pci->ab;
+	int ret;
+
+	ret = ath12k_pci_init_hw(ab);
+	if (ret) {
+		ath12k_err(ab, "failed to initialize device: %d\n", ret);
+		ath12k_fw_unmap(ab);
+		return;
+	}
+
+	ab_pci->init_ok = true;
+}
+
+static int ath12k_pci_probe(struct pci_dev *pdev,
+			    const struct pci_device_id *pci_dev)
+{
+	enum ath12k_device_family device_id;
+	struct ath12k_pci *ab_pci;
+	struct ath12k_base *ab;
+	int ret;
+
+	ab = ath12k_core_alloc(&pdev->dev, sizeof(*ab_pci), ATH12K_BUS_PCI);
+	if (!ab) {
+		dev_err(&pdev->dev, "failed to allocate ath12k base\n");
+		return -ENOMEM;
+	}
+
+	ab->dev = &pdev->dev;
+	ab_pci = ath12k_pci_priv(ab);
+	ab_pci->dev_id = pci_dev->device;
+	ab_pci->ab = ab;
+	ab_pci->pdev = pdev;
+	ab->hif.ops = &ath12k_pci_hif_ops;
+	ab->fw_mode = ATH12K_QMI_FIRMWARE_MODE_NORMAL;
+	pci_set_drvdata(pdev, ab);
+	spin_lock_init(&ab_pci->window_lock);
+
+	ret = ath12k_pci_claim(ab_pci, pdev);
+	if (ret) {
+		ath12k_err(ab, "failed to claim device: %d\n", ret);
+		goto err_free_core;
+	}
+
+	ath12k_dbg(ab, ATH12K_DBG_BOOT, "pci probe %04x:%04x %04x:%04x\n",
+		   pdev->vendor, pdev->device,
+		   pdev->subsystem_vendor, pdev->subsystem_device);
+
+	ab->id.vendor = pdev->vendor;
+	ab->id.device = pdev->device;
+	ab->id.subsystem_vendor = pdev->subsystem_vendor;
+	ab->id.subsystem_device = pdev->subsystem_device;
+
+	device_id = ath12k_get_device_family(pci_dev);
+	if (device_id >= ATH12K_DEVICE_FAMILY_MAX) {
+		ath12k_err(ab, "failed to get device family id\n");
+		ret = -EINVAL;
+		goto err_pci_free_region;
+	}
+
+	ath12k_dbg(ab, ATH12K_DBG_PCI, "PCI device family id: %d\n", device_id);
+
+	ab_pci->device_family_ops = &ath12k_pci_family_drivers[device_id]->ops;
+	ab_pci->reg_base = ath12k_pci_family_drivers[device_id]->reg_base;
+
+	/* Call device specific probe. This is the callback that can
+	 * be used to override any ops in future
+	 * probe is validated for NULL during registration.
+	 */
+	ret = ab_pci->device_family_ops->probe(pdev, pci_dev);
+	if (ret) {
+		ath12k_err(ab, "failed to probe device: %d\n", ret);
+		goto err_pci_free_region;
+	}
+
+	ret = ath12k_pci_msi_alloc(ab_pci);
+	if (ret) {
+		ath12k_err(ab, "failed to alloc msi: %d\n", ret);
+		goto err_pci_free_region;
+	}
+
+	INIT_WORK(&ab_pci->init_work, ath12k_pci_init_work);
+	queue_work(system_dfl_long_wq, &ab_pci->init_work);
+
+	return 0;
 
 err_pci_free_region:
 	ath12k_pci_free_region(ab_pci);
@@ -1692,6 +1718,14 @@ static void ath12k_pci_remove(struct pci_dev *pdev)
 {
 	struct ath12k_base *ab = pci_get_drvdata(pdev);
 	struct ath12k_pci *ab_pci = ath12k_pci_priv(ab);
+
+	cancel_work_sync(&ab_pci->init_work);
+	if (!ab_pci->init_ok) {
+		ath12k_pci_msi_free(ab_pci);
+		ath12k_pci_free_region(ab_pci);
+		ath12k_core_free(ab);
+		return;
+	}
 
 	ath12k_pci_set_irq_affinity_hint(ab_pci, NULL);
 
@@ -1749,6 +1783,10 @@ static void ath12k_pci_shutdown(struct pci_dev *pdev)
 	struct ath12k_base *ab = pci_get_drvdata(pdev);
 	struct ath12k_pci *ab_pci = ath12k_pci_priv(ab);
 
+	cancel_work_sync(&ab_pci->init_work);
+	if (!ab_pci->init_ok)
+		return;
+
 	ath12k_pci_set_irq_affinity_hint(ab_pci, NULL);
 	ath12k_pci_hw_group_power_down(ab->ag);
 }
@@ -1756,7 +1794,12 @@ static void ath12k_pci_shutdown(struct pci_dev *pdev)
 static __maybe_unused int ath12k_pci_pm_suspend(struct device *dev)
 {
 	struct ath12k_base *ab = dev_get_drvdata(dev);
+	struct ath12k_pci *ab_pci = ath12k_pci_priv(ab);
 	int ret;
+
+	flush_work(&ab_pci->init_work);
+	if (!ab_pci->init_ok)
+		return 0;
 
 	ret = ath12k_core_suspend(ab);
 	if (ret)
@@ -1770,6 +1813,9 @@ static __maybe_unused int ath12k_pci_pm_resume(struct device *dev)
 	struct ath12k_base *ab = dev_get_drvdata(dev);
 	int ret;
 
+	if (!ath12k_pci_priv(ab)->init_ok)
+		return 0;
+
 	ret = ath12k_core_resume(ab);
 	if (ret)
 		ath12k_warn(ab, "failed to resume core: %d\n", ret);
@@ -1782,6 +1828,9 @@ static __maybe_unused int ath12k_pci_pm_suspend_late(struct device *dev)
 	struct ath12k_base *ab = dev_get_drvdata(dev);
 	int ret;
 
+	if (!ath12k_pci_priv(ab)->init_ok)
+		return 0;
+
 	ret = ath12k_core_suspend_late(ab);
 	if (ret)
 		ath12k_warn(ab, "failed to late suspend core: %d\n", ret);
@@ -1793,6 +1842,9 @@ static __maybe_unused int ath12k_pci_pm_resume_early(struct device *dev)
 {
 	struct ath12k_base *ab = dev_get_drvdata(dev);
 	int ret;
+
+	if (!ath12k_pci_priv(ab)->init_ok)
+		return 0;
 
 	ret = ath12k_core_resume_early(ab);
 	if (ret)

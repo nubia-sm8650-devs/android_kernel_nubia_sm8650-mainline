@@ -136,6 +136,9 @@ struct ath12k_pci {
 	const struct ath12k_pci_reg_base *reg_base;
 
 	u32 window_reg_addr;
+
+	struct work_struct init_work;
+	bool init_ok;
 };
 
 struct ath12k_pci_driver {
