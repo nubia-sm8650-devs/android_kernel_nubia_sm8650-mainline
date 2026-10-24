@@ -18,12 +18,22 @@ description:
 
 properties:
   compatible:
-    enum:
-      - qcom,slim-ngd-v1.5.0        # for MSM8996
-      - qcom,slim-ngd-v2.1.0        # for SDM845
+    oneOf:
+      - enum:
+          - qcom,slim-ngd-v1.5.0        # for MSM8996
+          - qcom,slim-ngd-v2.1.0        # for SDM845
+      - items:
+          - enum:
+              - qcom,sm8650-slim-ngd
+          - const: qcom,slim-ngd-v1.5.0
 
   reg:
-    maxItems: 1
+    minItems: 1
+    items:
+      - description: NGD controller registers
+      - description:
+          Memory of the SLIMbus subsystem for the message queues, where the
+          BAM has no IOMMU context the OS can use
 
   "#address-cells":
     const: 1
