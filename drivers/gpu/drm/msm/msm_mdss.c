@@ -310,7 +310,7 @@ static int msm_mdss_reset(struct device *dev)
 {
 	struct reset_control *reset;
 
-	reset = reset_control_get_optional_exclusive(dev, NULL);
+	reset = of_reset_control_array_get_optional_exclusive(dev->of_node);
 	if (!reset) {
 		/* Optional reset not specified */
 		return 0;
