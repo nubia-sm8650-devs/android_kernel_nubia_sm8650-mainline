@@ -31,6 +31,7 @@ enum nci_flag {
 	NCI_DATA_EXCHANGE,
 	NCI_DATA_EXCHANGE_TO,
 	NCI_UNREG,
+	NCI_USER_CHANNEL,
 };
 
 /* NCI device states */
@@ -55,6 +56,7 @@ enum nci_state {
 #define NCI_DATA_TIMEOUT			3000
 
 struct nci_dev;
+struct sock;
 
 struct nci_driver_ops {
 	__u16 opcode;
@@ -269,6 +271,10 @@ struct nci_dev {
 	/* stored during intf_activated_ntf */
 	__u8 target_ats[NFC_ATS_MAXSIZE];
 	__u8 target_ats_len;
+
+	/* user channel */
+	struct list_head	user_list;
+	struct sock		*user_sk;
 };
 
 /* ----- NCI Devices ----- */
@@ -375,6 +381,15 @@ void nci_data_exchange_complete(struct nci_dev *ndev, struct sk_buff *skb,
 void nci_hci_data_received_cb(void *context, struct sk_buff *skb, int err);
 
 void nci_clear_target_list(struct nci_dev *ndev);
+
+/* ----- NCI user channel ----- */
+int nci_user_open(struct nci_dev *ndev, struct sock *sk);
+void nci_user_close(struct nci_dev *ndev);
+int nci_user_reset(struct nci_dev *ndev);
+void nci_user_add_device(struct nci_dev *ndev);
+void nci_user_remove_device(struct nci_dev *ndev);
+int nci_user_init(void);
+void nci_user_exit(void);
 
 /* ----- NCI requests ----- */
 #define NCI_REQ_DONE		0

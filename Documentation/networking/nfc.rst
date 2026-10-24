@@ -130,3 +130,25 @@ commands and their responses.
 The first received package is the response to the first sent package and so
 on. In order to allow valid "empty" responses, every data received has a NULL
 header of 1 byte.
+
+NCI user channel
+----------------
+
+An NCI controller can be handed to a userspace NCI stack, such as the one
+Android runs. The process creates a SOCK_SEQPACKET NFC_SOCKPROTO_NCI socket
+and binds it with a sockaddr_nfc that names the device in dev_idx, leaving
+target_idx and nfc_protocol unused. Binding requires CAP_NET_ADMIN and fails
+with EBUSY while the device is up or already bound.
+
+Binding opens the transport through the driver's open op and nothing more.
+The kernel sends no NCI command, so the process starts with CORE_RESET. Each
+message is one NCI packet including its 3 byte header. A sent packet must be
+a command or a data packet whose length byte matches its payload. Received
+packets are delivered unchanged, and the kernel does no flow control or
+reassembly. Netlink operations on the device fail while it is bound.
+
+The SIOCNCIHWRESET ioctl reopens the transport through the driver's close
+and open ops, which resets the controller on drivers whose open op pulses its
+reset line. Packets received before the reset and not yet read are dropped.
+Closing the socket closes the transport. If the device goes away
+while bound, the socket reports ENODEV.

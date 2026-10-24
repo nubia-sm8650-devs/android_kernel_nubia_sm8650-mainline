@@ -25,6 +25,7 @@
 #include <linux/bitops.h>
 #include <linux/skbuff.h>
 #include <linux/kcov.h>
+#include <net/sock.h>
 
 #include "../nfc.h"
 #include <net/nfc/nci.h>
@@ -484,6 +485,11 @@ static int nci_open_device(struct nci_dev *ndev)
 
 	if (test_bit(NCI_UP, &ndev->flags)) {
 		rc = -EALREADY;
+		goto done;
+	}
+
+	if (test_bit(NCI_USER_CHANNEL, &ndev->flags)) {
+		rc = -EBUSY;
 		goto done;
 	}
 
@@ -1294,6 +1300,8 @@ int nci_register_device(struct nci_dev *ndev)
 	if (rc)
 		goto destroy_tx_wq_exit;
 
+	nci_user_add_device(ndev);
+
 	goto exit;
 
 destroy_tx_wq_exit:
@@ -1327,6 +1335,8 @@ void nci_unregister_device(struct nci_dev *ndev)
 	 */
 	set_bit(NCI_UNREG, &ndev->flags);
 
+	nci_user_remove_device(ndev);
+
 	nci_close_device(ndev);
 
 	destroy_workqueue(ndev->cmd_wq);
@@ -1342,6 +1352,83 @@ void nci_unregister_device(struct nci_dev *ndev)
 }
 EXPORT_SYMBOL(nci_unregister_device);
 
+/* ----- NCI user channel ----- */
+
+int nci_user_open(struct nci_dev *ndev, struct sock *sk)
+{
+	int rc = 0;
+
+	mutex_lock(&ndev->req_lock);
+
+	if (test_bit(NCI_UNREG, &ndev->flags)) {
+		rc = -ENODEV;
+		goto done;
+	}
+
+	if (test_bit(NCI_UP, &ndev->flags) ||
+	    test_bit(NCI_INIT, &ndev->flags) ||
+	    test_bit(NCI_USER_CHANNEL, &ndev->flags)) {
+		rc = -EBUSY;
+		goto done;
+	}
+
+	if (ndev->ops->open(ndev)) {
+		rc = -EIO;
+		goto done;
+	}
+
+	WRITE_ONCE(ndev->user_sk, sk);
+	set_bit(NCI_USER_CHANNEL, &ndev->flags);
+
+done:
+	mutex_unlock(&ndev->req_lock);
+	return rc;
+}
+
+void nci_user_close(struct nci_dev *ndev)
+{
+	mutex_lock(&ndev->req_lock);
+
+	if (!test_and_clear_bit(NCI_USER_CHANNEL, &ndev->flags)) {
+		mutex_unlock(&ndev->req_lock);
+		return;
+	}
+
+	WRITE_ONCE(ndev->user_sk, NULL);
+	ndev->ops->close(ndev);
+
+	mutex_unlock(&ndev->req_lock);
+
+	/* The socket must outlive any rx work that still holds it */
+	flush_workqueue(ndev->rx_wq);
+	skb_queue_purge(&ndev->rx_q);
+}
+
+int nci_user_reset(struct nci_dev *ndev)
+{
+	int rc = 0;
+
+	mutex_lock(&ndev->req_lock);
+
+	if (!test_bit(NCI_USER_CHANNEL, &ndev->flags)) {
+		rc = -ENODEV;
+		goto done;
+	}
+
+	ndev->ops->close(ndev);
+
+	flush_workqueue(ndev->rx_wq);
+	skb_queue_purge(&ndev->rx_q);
+	skb_queue_purge(&ndev->user_sk->sk_receive_queue);
+
+	if (ndev->ops->open(ndev))
+		rc = -EIO;
+
+done:
+	mutex_unlock(&ndev->req_lock);
+	return rc;
+}
+
 /**
  * nci_recv_frame - receive frame from NCI drivers
  *
@@ -1353,7 +1440,8 @@ int nci_recv_frame(struct nci_dev *ndev, struct sk_buff *skb)
 	pr_debug("len %d\n", skb->len);
 
 	if (!ndev || (!test_bit(NCI_UP, &ndev->flags) &&
-	    !test_bit(NCI_INIT, &ndev->flags))) {
+	    !test_bit(NCI_INIT, &ndev->flags) &&
+	    !test_bit(NCI_USER_CHANNEL, &ndev->flags))) {
 		kfree_skb(skb);
 		return -ENXIO;
 	}
@@ -1568,6 +1656,14 @@ static void nci_rx_work(struct work_struct *work)
 		nfc_send_to_raw_sock(ndev->nfc_dev, skb,
 				     RAW_PAYLOAD_NCI, NFC_DIRECTION_RX);
 
+		if (test_bit(NCI_USER_CHANNEL, &ndev->flags)) {
+			struct sock *sk = READ_ONCE(ndev->user_sk);
+
+			if (!sk || sock_queue_rcv_skb(sk, skb))
+				kfree_skb(skb);
+			continue;
+		}
+
 		if (!nci_valid_size(skb)) {
 			kfree_skb(skb);
 			continue;
@@ -1637,6 +1733,19 @@ static void nci_cmd_work(struct work_struct *work)
 		kcov_remote_stop();
 	}
 }
+
+static int __init nci_init(void)
+{
+	return nci_user_init();
+}
+
+static void __exit nci_exit(void)
+{
+	nci_user_exit();
+}
+
+module_init(nci_init);
+module_exit(nci_exit);
 
 MODULE_DESCRIPTION("NFC Controller Interface");
 MODULE_LICENSE("GPL");
