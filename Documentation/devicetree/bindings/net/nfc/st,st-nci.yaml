@@ -11,11 +11,15 @@ maintainers:
 
 properties:
   compatible:
-    enum:
-      - st,st21nfcb-i2c
-      - st,st21nfcb-spi
-      - st,st21nfcc-i2c
-      - st,st21nfcd
+    oneOf:
+      - enum:
+          - st,st21nfcb-i2c
+          - st,st21nfcb-spi
+          - st,st21nfcc-i2c
+          - st,st21nfcd
+      - items:
+          - const: st,st54l
+          - const: st,st21nfcd
 
   reset-gpios:
     description: Output GPIO pin used for resetting the controller
@@ -45,6 +49,8 @@ properties:
   vdd-io-supply:
     description:
       Digital I/O supply (VPS_IO).
+
+  wakeup-source: true
 
 required:
   - compatible
