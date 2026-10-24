@@ -45,6 +45,11 @@ do {                                                             \
 
 int ndlc_open(struct llt_ndlc *ndlc)
 {
+	skb_queue_purge(&ndlc->rcv_q);
+	skb_queue_purge(&ndlc->send_q);
+	skb_queue_purge(&ndlc->ack_pending_q);
+	ndlc->hard_fault = 0;
+
 	/* toggle reset pin */
 	ndlc->ops->enable(ndlc->phy_id);
 	ndlc->powered = 1;
@@ -104,6 +109,7 @@ static void llt_ndlc_send_queue(struct llt_ndlc *ndlc)
 		r = ndlc->ops->write(ndlc->phy_id, skb);
 		if (r < 0) {
 			ndlc->hard_fault = r;
+			kfree_skb(skb);
 			break;
 		}
 		if (ndlc->raw_nci) {
