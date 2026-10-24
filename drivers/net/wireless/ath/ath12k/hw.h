@@ -168,6 +168,7 @@ struct ath12k_hw_params {
 	u32 qmi_service_ins_id;
 	bool internal_sleep_clock:1;
 	bool coldboot_cal:1;
+	bool single_chip_mlo_cap:1;
 
 	const struct ath12k_hw_ops *hw_ops;
 	const struct ath12k_hw_ring_mask *ring_mask;

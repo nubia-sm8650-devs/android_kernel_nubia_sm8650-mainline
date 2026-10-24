@@ -2251,6 +2251,35 @@ static void ath12k_host_cap_hw_link_id_init(struct ath12k_hw_group *ag)
 	ag->hw_link_id_init_done = true;
 }
 
+static void ath12k_host_cap_single_chip_mlo(struct ath12k_base *ab,
+					    struct qmi_wlanfw_host_cap_req_msg_v01 *req)
+{
+	struct wlfw_host_mlo_chip_info_s_v01 *info = &req->mlo_chip_info[0];
+	u8 num_links = min_t(u8, ab->hw_params->def_num_link,
+			     QMI_WLFW_MAX_NUM_MLO_LINKS_PER_CHIP_V01);
+	int i;
+
+	req->mlo_capable_valid = 1;
+	req->mlo_capable = 1;
+	req->mlo_chip_id_valid = 1;
+	req->mlo_chip_id = 0;
+	req->mlo_group_id_valid = 1;
+	req->mlo_group_id = 0;
+	req->max_mlo_peer_valid = 1;
+	req->max_mlo_peer = ab->hw_params->max_mlo_peer;
+	req->mlo_num_chips_valid = 1;
+	req->mlo_num_chips = 1;
+
+	info->chip_id = 0;
+	info->num_local_links = num_links;
+	for (i = 0; i < num_links; i++) {
+		info->hw_link_id[i] = i;
+		info->valid_mlo_link_id[i] = 1;
+	}
+
+	req->mlo_chip_info_valid = 1;
+}
+
 static int ath12k_host_cap_parse_mlo(struct ath12k_base *ab,
 				     struct qmi_wlanfw_host_cap_req_msg_v01 *req)
 {
@@ -2261,6 +2290,13 @@ static int ath12k_host_cap_parse_mlo(struct ath12k_base *ab,
 	int i, j, ret;
 
 	if (!ag->mlo_capable) {
+		if (ab->hw_params->single_chip_mlo_cap && ag->num_devices == 1) {
+			ath12k_dbg(ab, ATH12K_DBG_QMI,
+				   "MLO is disabled, advertise single chip MLO cap\n");
+			ath12k_host_cap_single_chip_mlo(ab, req);
+			return 0;
+		}
+
 		ath12k_dbg(ab, ATH12K_DBG_QMI,
 			   "MLO is disabled hence skip QMI MLO cap\n");
 		return 0;
