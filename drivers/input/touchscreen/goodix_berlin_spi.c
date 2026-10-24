@@ -8,6 +8,7 @@
  * Based on goodix_ts_berlin driver.
  */
 #include <linux/unaligned.h>
+#include <linux/cache.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/regmap.h>
@@ -32,81 +33,77 @@
 #define GOODIX_BERLIN_SPI_WRITE_FLAG		0xF0
 #define GOODIX_BERLIN_SPI_READ_FLAG		0xF1
 
+#define GOODIX_BERLIN_SPI_BUF_LEN		SZ_2K
+
+/*
+ * The regmap lock serializes all transfers, so one pair of buffers serves the
+ * device. Each sits on its own DMA cache lines.
+ */
+struct goodix_berlin_spi {
+	struct spi_device *spi;
+	const struct goodix_berlin_ic_data *ic_data;
+	u8 tx_buf[GOODIX_BERLIN_SPI_BUF_LEN] __aligned(ARCH_DMA_MINALIGN);
+	u8 rx_buf[GOODIX_BERLIN_SPI_BUF_LEN] __aligned(ARCH_DMA_MINALIGN);
+};
+
 static int goodix_berlin_spi_read(void *context, const void *reg_buf,
 				  size_t reg_size, void *val_buf,
 				  size_t val_size)
 {
-	struct spi_device *spi = context;
-	const struct goodix_berlin_ic_data *ic_data = spi_get_device_match_data(spi);
-	struct spi_transfer xfers;
-	struct spi_message spi_msg;
+	struct goodix_berlin_spi *bs = context;
+	unsigned int prefix_len = bs->ic_data->read_prefix_len;
 	const u32 *reg = reg_buf; /* reg is stored as native u32 at start of buffer */
+	struct spi_transfer xfer = {
+		.tx_buf = bs->tx_buf,
+		.rx_buf = bs->rx_buf,
+		.len = prefix_len + val_size,
+	};
 	int error;
 
-	if (reg_size != GOODIX_BERLIN_REGISTER_WIDTH)
+	if (reg_size != GOODIX_BERLIN_REGISTER_WIDTH ||
+	    xfer.len > GOODIX_BERLIN_SPI_BUF_LEN)
 		return -EINVAL;
 
-	u8 *buf __free(kfree) =
-		kzalloc(ic_data->read_prefix_len + val_size, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	spi_message_init(&spi_msg);
-	memset(&xfers, 0, sizeof(xfers));
-
 	/* buffer format: 0xF1 + addr(4bytes) + dummy(3/4bytes) + data */
-	buf[0] = GOODIX_BERLIN_SPI_READ_FLAG;
-	put_unaligned_be32(*reg, buf + GOODIX_BERLIN_SPI_TRANS_PREFIX_LEN);
-	memset(buf + GOODIX_BERLIN_SPI_TRANS_PREFIX_LEN + GOODIX_BERLIN_REGISTER_WIDTH,
-	       0xff, ic_data->read_dummy_len);
+	bs->tx_buf[0] = GOODIX_BERLIN_SPI_READ_FLAG;
+	put_unaligned_be32(*reg, bs->tx_buf + GOODIX_BERLIN_SPI_TRANS_PREFIX_LEN);
+	memset(bs->tx_buf + GOODIX_BERLIN_SPI_TRANS_PREFIX_LEN + GOODIX_BERLIN_REGISTER_WIDTH,
+	       0xff, bs->ic_data->read_dummy_len);
+	memset(bs->tx_buf + prefix_len, 0, val_size);
 
-	xfers.tx_buf = buf;
-	xfers.rx_buf = buf;
-	xfers.len = ic_data->read_prefix_len + val_size;
-	xfers.cs_change = 0;
-	spi_message_add_tail(&xfers, &spi_msg);
-
-	error = spi_sync(spi, &spi_msg);
+	error = spi_sync_transfer(bs->spi, &xfer, 1);
 	if (error < 0) {
-		dev_err(&spi->dev, "spi transfer error, %d", error);
+		dev_err(&bs->spi->dev, "spi transfer error, %d", error);
 		return error;
 	}
 
-	memcpy(val_buf, buf + ic_data->read_prefix_len, val_size);
-	return error;
+	memcpy(val_buf, bs->rx_buf + prefix_len, val_size);
+	return 0;
 }
 
 static int goodix_berlin_spi_write(void *context, const void *data,
 				   size_t count)
 {
 	unsigned int len = count - GOODIX_BERLIN_REGISTER_WIDTH;
-	struct spi_device *spi = context;
-	struct spi_transfer xfers;
-	struct spi_message spi_msg;
+	struct goodix_berlin_spi *bs = context;
 	const u32 *reg = data; /* reg is stored as native u32 at start of buffer */
+	struct spi_transfer xfer = {
+		.tx_buf = bs->tx_buf,
+		.len = GOODIX_BERLIN_SPI_WRITE_PREFIX_LEN + len,
+	};
 	int error;
 
-	u8 *buf __free(kfree) =
-		kzalloc(GOODIX_BERLIN_SPI_WRITE_PREFIX_LEN + len, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
+	if (xfer.len > GOODIX_BERLIN_SPI_BUF_LEN)
+		return -EINVAL;
 
-	spi_message_init(&spi_msg);
-	memset(&xfers, 0, sizeof(xfers));
-
-	buf[0] = GOODIX_BERLIN_SPI_WRITE_FLAG;
-	put_unaligned_be32(*reg, buf + GOODIX_BERLIN_SPI_TRANS_PREFIX_LEN);
-	memcpy(buf + GOODIX_BERLIN_SPI_WRITE_PREFIX_LEN,
+	bs->tx_buf[0] = GOODIX_BERLIN_SPI_WRITE_FLAG;
+	put_unaligned_be32(*reg, bs->tx_buf + GOODIX_BERLIN_SPI_TRANS_PREFIX_LEN);
+	memcpy(bs->tx_buf + GOODIX_BERLIN_SPI_WRITE_PREFIX_LEN,
 	       data + GOODIX_BERLIN_REGISTER_WIDTH, len);
 
-	xfers.tx_buf = buf;
-	xfers.len = GOODIX_BERLIN_SPI_WRITE_PREFIX_LEN + len;
-	xfers.cs_change = 0;
-	spi_message_add_tail(&xfers, &spi_msg);
-
-	error = spi_sync(spi, &spi_msg);
+	error = spi_sync_transfer(bs->spi, &xfer, 1);
 	if (error < 0) {
-		dev_err(&spi->dev, "spi transfer error, %d", error);
+		dev_err(&bs->spi->dev, "spi transfer error, %d", error);
 		return error;
 	}
 
@@ -129,9 +126,17 @@ static int goodix_berlin_spi_probe(struct spi_device *spi)
 {
 	const struct goodix_berlin_ic_data *ic_data = spi_get_device_match_data(spi);
 	struct regmap_config regmap_config;
+	struct goodix_berlin_spi *bs;
 	struct regmap *regmap;
 	size_t max_size;
 	int error = 0;
+
+	bs = devm_kzalloc(&spi->dev, sizeof(*bs), GFP_KERNEL);
+	if (!bs)
+		return -ENOMEM;
+
+	bs->spi = spi;
+	bs->ic_data = ic_data;
 
 	spi->mode = SPI_MODE_0;
 	spi->bits_per_word = 8;
@@ -139,13 +144,13 @@ static int goodix_berlin_spi_probe(struct spi_device *spi)
 	if (error)
 		return error;
 
-	max_size = spi_max_transfer_size(spi);
+	max_size = min(spi_max_transfer_size(spi), GOODIX_BERLIN_SPI_BUF_LEN);
 
 	regmap_config = goodix_berlin_spi_regmap_conf;
 	regmap_config.max_raw_read = max_size - ic_data->read_prefix_len;
 	regmap_config.max_raw_write = max_size - GOODIX_BERLIN_SPI_WRITE_PREFIX_LEN;
 
-	regmap = devm_regmap_init(&spi->dev, NULL, spi, &regmap_config);
+	regmap = devm_regmap_init(&spi->dev, NULL, bs, &regmap_config);
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
