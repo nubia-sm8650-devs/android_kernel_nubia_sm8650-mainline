@@ -30,6 +30,7 @@
 #define QMI_WLFW_REQUEST_MEM_IND_V01		0x0035
 #define QMI_WLFW_FW_MEM_READY_IND_V01		0x0037
 #define QMI_WLFW_FW_READY_IND_V01		0x0038
+#define QMI_WLFW_CAL_DONE_IND_V01		0x003E
 
 #define QMI_WLANFW_MAX_DATA_SIZE_V01		6144
 
@@ -142,6 +143,10 @@ struct ath12k_qmi {
 	u32 target_mem_mode;
 	bool target_mem_delayed;
 	u8 cal_done;
+	bool caldb_requested;
+	bool cal_attempted;
+	bool cal_in_progress;
+	struct delayed_work cal_work;
 
 	/* protected with struct ath12k_qmi::event_lock */
 	bool block_event;
@@ -558,6 +563,31 @@ struct qmi_wlanfw_wlan_mode_resp_msg_v01 {
 	struct qmi_response_type_v01 resp;
 };
 
+#define QMI_WLANFW_CAL_REPORT_REQ_V01			0x0026
+#define QMI_WLANFW_CAL_REPORT_REQ_MSG_V01_MAX_LEN	43
+#define QMI_WLANFW_MAX_NUM_CAL_V01			5
+#define ATH12K_QMI_COLD_BOOT_CAL_TIMEOUT		(60 * HZ)
+
+struct qmi_wlanfw_cal_report_req_msg_v01 {
+	u32 meta_data_len;
+	u32 meta_data[QMI_WLANFW_MAX_NUM_CAL_V01];
+	u8 xo_cal_data_valid;
+	u8 xo_cal_data;
+	u8 cal_remove_supported_valid;
+	u8 cal_remove_supported;
+	u8 cal_file_download_size_valid;
+	u64 cal_file_download_size;
+};
+
+struct qmi_wlanfw_cal_report_resp_msg_v01 {
+	struct qmi_response_type_v01 resp;
+};
+
+struct qmi_wlanfw_cal_done_ind_msg_v01 {
+	u8 cal_file_upload_size_valid;
+	u64 cal_file_upload_size;
+};
+
 struct qmi_wlanfw_wlan_cfg_req_msg_v01 {
 	u8 host_version_valid;
 	char host_version[QMI_WLANFW_MAX_STR_LEN_V01 + 1];
@@ -610,6 +640,9 @@ enum ath12k_qmi_firmware_mode {
 
 	/* firmware offline; values 2-3 reserved by firmware ABI */
 	ATH12K_QMI_FIRMWARE_MODE_OFF = 4,
+
+	/* cold boot calibration; values 5-6 reserved by firmware ABI */
+	ATH12K_QMI_FIRMWARE_MODE_COLD_BOOT = 7,
 };
 
 static inline void ath12k_qmi_set_event_block(struct ath12k_qmi *qmi, bool block)
