@@ -82,7 +82,12 @@ properties:
       initialized by the local processor.
 
   reg:
-    maxItems: 1
+    minItems: 1
+    items:
+      - description: BAM registers
+      - description:
+          Memory of the BAM's own subsystem for the descriptor FIFOs, for a
+          remotely controlled BAM without an IOMMU context the OS can use
 
 required:
   - compatible
