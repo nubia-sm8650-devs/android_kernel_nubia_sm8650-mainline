@@ -29,6 +29,7 @@
 
 #define ST_NCI_I2C_MIN_SIZE 4   /* PCB(1) + NCI Packet header(3) */
 #define ST_NCI_NCI_HDR_SIZE 3   /* raw NCI: MT/PBF/GID + OID + len */
+#define ST_NCI_IDLE_BYTE 0x7e
 #define ST_NCI_I2C_MAX_SIZE 250 /* req 4.2.1 */
 
 enum st_nci_i2c_proto {
@@ -118,6 +119,61 @@ static int st_nci_i2c_write(void *phy_id, struct sk_buff *skb)
 }
 
 /*
+ * The controller pads its output with ST_NCI_IDLE_BYTE when it has nothing
+ * to send, and a frame can start right after such padding. A leading idle
+ * byte is never a valid NCI header byte since GID 0xe is reserved.
+ */
+static int st_nci_i2c_read_raw(struct st_nci_i2c_phy *phy,
+			       struct sk_buff **skb)
+{
+	struct i2c_client *client = phy->i2c_dev;
+	u8 hdr[ST_NCI_NCI_HDR_SIZE];
+	unsigned int idle = 0;
+	u8 len;
+	int r;
+
+	r = i2c_master_recv(client, hdr, sizeof(hdr));
+	if (r < 0) {
+		usleep_range(1000, 4000);
+		r = i2c_master_recv(client, hdr, sizeof(hdr));
+	}
+	if (r != sizeof(hdr))
+		return -EREMOTEIO;
+
+	while (idle < sizeof(hdr) && hdr[idle] == ST_NCI_IDLE_BYTE)
+		idle++;
+
+	if (idle == sizeof(hdr))
+		return -ENODATA;
+
+	if (idle) {
+		memmove(hdr, hdr + idle, sizeof(hdr) - idle);
+		r = i2c_master_recv(client, hdr + sizeof(hdr) - idle, idle);
+		if (r != idle)
+			return -EREMOTEIO;
+	}
+
+	len = hdr[2];
+
+	*skb = alloc_skb(sizeof(hdr) + len, GFP_KERNEL);
+	if (!*skb)
+		return -ENOMEM;
+
+	skb_put_data(*skb, hdr, sizeof(hdr));
+
+	if (!len)
+		return 0;
+
+	r = i2c_master_recv(client, skb_put(*skb, len), len);
+	if (r != len) {
+		kfree_skb(*skb);
+		return -EREMOTEIO;
+	}
+
+	return 0;
+}
+
+/*
  * Reads an ndlc frame and returns it in a newly allocated sk_buff.
  * returns:
  * 0 : if received frame is complete
@@ -133,41 +189,8 @@ static int st_nci_i2c_read(struct st_nci_i2c_phy *phy,
 	u8 buf[ST_NCI_I2C_MAX_SIZE];
 	struct i2c_client *client = phy->i2c_dev;
 
-	if (phy->raw_nci) {
-		r = i2c_master_recv(client, buf, ST_NCI_NCI_HDR_SIZE);
-		if (r < 0) {
-			usleep_range(1000, 4000);
-			r = i2c_master_recv(client, buf, ST_NCI_NCI_HDR_SIZE);
-		}
-		if (r != ST_NCI_NCI_HDR_SIZE)
-			return -EREMOTEIO;
-
-		len = buf[2];
-		if (len > ST_NCI_I2C_MAX_SIZE) {
-			nfc_err(&client->dev, "invalid frame len\n");
-			return -EBADMSG;
-		}
-
-		*skb = alloc_skb(ST_NCI_NCI_HDR_SIZE + len, GFP_KERNEL);
-		if (!*skb)
-			return -ENOMEM;
-
-		skb_put(*skb, ST_NCI_NCI_HDR_SIZE);
-		memcpy((*skb)->data, buf, ST_NCI_NCI_HDR_SIZE);
-
-		if (!len)
-			return 0;
-
-		r = i2c_master_recv(client, buf, len);
-		if (r != len) {
-			kfree_skb(*skb);
-			return -EREMOTEIO;
-		}
-
-		skb_put(*skb, len);
-		memcpy((*skb)->data + ST_NCI_NCI_HDR_SIZE, buf, len);
-		return 0;
-	}
+	if (phy->raw_nci)
+		return st_nci_i2c_read_raw(phy, skb);
 
 	r = i2c_master_recv(client, buf, ST_NCI_I2C_MIN_SIZE);
 	if (r < 0) {  /* Retry, chip was in standby */
@@ -232,7 +255,7 @@ static irqreturn_t st_nci_irq_thread_fn(int irq, void *phy_id)
 	}
 
 	r = st_nci_i2c_read(phy, &skb);
-	if (r == -EREMOTEIO || r == -ENOMEM || r == -EBADMSG)
+	if (r == -EREMOTEIO || r == -ENOMEM || r == -EBADMSG || r == -ENODATA)
 		return IRQ_HANDLED;
 
 	ndlc_recv(phy->ndlc, skb);
