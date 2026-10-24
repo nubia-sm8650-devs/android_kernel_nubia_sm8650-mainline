@@ -14,6 +14,7 @@
 #include <linux/delay.h>
 #include <linux/dma/edma.h>
 #include <linux/gpio/consumer.h>
+#include <linux/iopoll.h>
 #include <linux/ioport.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
@@ -25,6 +26,8 @@
 #include "../pci-host-common.h"
 #include "../../pci.h"
 #include "pcie-designware.h"
+
+#define DW_PCIE_LINK_UP_POLL_US		1000
 
 static const char * const dw_pcie_app_clks[DW_PCIE_NUM_APP_CLKS] = {
 	[DW_PCIE_DBI_CLK] = "dbi",
@@ -767,17 +770,15 @@ const char *dw_pcie_ltssm_status_string(enum dw_pcie_ltssm ltssm)
 int dw_pcie_wait_for_link(struct dw_pcie *pci)
 {
 	u32 offset, val, ltssm;
-	int retries;
+	bool link_up;
+	int ret;
 
-	/* Check if the link is up or not */
-	for (retries = 0; retries < PCIE_LINK_WAIT_MAX_RETRIES; retries++) {
-		if (dw_pcie_link_up(pci))
-			break;
-
-		msleep(PCIE_LINK_WAIT_SLEEP_MS);
-	}
-
-	if (retries >= PCIE_LINK_WAIT_MAX_RETRIES) {
+	ret = read_poll_timeout(dw_pcie_link_up, link_up, link_up,
+				DW_PCIE_LINK_UP_POLL_US,
+				PCIE_LINK_WAIT_MAX_RETRIES *
+				PCIE_LINK_WAIT_SLEEP_MS * USEC_PER_MSEC,
+				false, pci);
+	if (ret) {
 		/*
 		 * If the link is in Detect.Quiet or Detect.Active state, it
 		 * indicates that no device is detected.
