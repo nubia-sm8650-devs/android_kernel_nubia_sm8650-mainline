@@ -172,6 +172,9 @@ struct qcom_slim_ngd_ctrl {
 	dma_addr_t tx_phys_base;
 	void *rx_base;
 	void *tx_base;
+	/* controller-side memory for the message queues, if any */
+	void __iomem *msgq_base;
+	phys_addr_t msgq_phys_base;
 	int tx_tail;
 	int tx_head;
 	u32 ver;
@@ -625,8 +628,15 @@ static void qcom_slim_ngd_rx_msgq_cb(void *args)
 {
 	struct qcom_slim_ngd_dma_desc *desc = args;
 	struct qcom_slim_ngd_ctrl *ctrl = desc->ctrl;
+	u8 buf[SLIM_MSGQ_BUF_LEN];
 
-	qcom_slim_ngd_rx(ctrl, (u8 *)desc->base);
+	if (ctrl->msgq_base) {
+		memcpy_fromio(buf, (void __iomem __force *)desc->base,
+			      SLIM_MSGQ_BUF_LEN);
+		qcom_slim_ngd_rx(ctrl, buf);
+	} else {
+		qcom_slim_ngd_rx(ctrl, (u8 *)desc->base);
+	}
 	/* Add descriptor back to the queue */
 	desc->desc = dmaengine_prep_slave_single(ctrl->dma_rx_channel,
 					desc->phys, SLIM_MSGQ_BUF_LEN,
@@ -685,8 +695,15 @@ static int qcom_slim_ngd_init_rx_msgq(struct qcom_slim_ngd_ctrl *ctrl)
 	}
 
 	size = QCOM_SLIM_NGD_DESC_NUM * SLIM_MSGQ_BUF_LEN;
-	ctrl->rx_base = dma_alloc_coherent(dev, size, &ctrl->rx_phys_base,
-					   GFP_KERNEL);
+	if (ctrl->msgq_base) {
+		ctrl->rx_base = (void __force *)ctrl->msgq_base;
+		ctrl->rx_phys_base = ctrl->msgq_phys_base;
+		memset_io(ctrl->msgq_base, 0, size);
+	} else {
+		ctrl->rx_base = dma_alloc_coherent(dev, size,
+						   &ctrl->rx_phys_base,
+						   GFP_KERNEL);
+	}
 	if (!ctrl->rx_base) {
 		ret = -ENOMEM;
 		goto rel_rx;
@@ -701,7 +718,8 @@ static int qcom_slim_ngd_init_rx_msgq(struct qcom_slim_ngd_ctrl *ctrl)
 	return 0;
 
 rx_post_err:
-	dma_free_coherent(dev, size, ctrl->rx_base, ctrl->rx_phys_base);
+	if (!ctrl->msgq_base)
+		dma_free_coherent(dev, size, ctrl->rx_base, ctrl->rx_phys_base);
 rel_rx:
 	dma_release_channel(ctrl->dma_rx_channel);
 	return ret;
@@ -723,8 +741,18 @@ static int qcom_slim_ngd_init_tx_msgq(struct qcom_slim_ngd_ctrl *ctrl)
 	}
 
 	size = ((QCOM_SLIM_NGD_DESC_NUM + 1) * SLIM_MSGQ_BUF_LEN);
-	ctrl->tx_base = dma_alloc_coherent(dev, size, &ctrl->tx_phys_base,
-					   GFP_KERNEL);
+	if (ctrl->msgq_base) {
+		/* the TX queue follows the RX queue */
+		ctrl->tx_base = (void __force *)ctrl->msgq_base +
+				QCOM_SLIM_NGD_DESC_NUM * SLIM_MSGQ_BUF_LEN;
+		ctrl->tx_phys_base = ctrl->msgq_phys_base +
+				     QCOM_SLIM_NGD_DESC_NUM * SLIM_MSGQ_BUF_LEN;
+		memset_io((void __iomem __force *)ctrl->tx_base, 0, size);
+	} else {
+		ctrl->tx_base = dma_alloc_coherent(dev, size,
+						   &ctrl->tx_phys_base,
+						   GFP_KERNEL);
+	}
 	if (!ctrl->tx_base) {
 		ret = -EINVAL;
 		goto rel_tx;
@@ -881,7 +909,10 @@ static int qcom_slim_ngd_xfer_msg(struct slim_controller *sctrl,
 		*(puc++) = (txn->ec >> 8) & 0xFF;
 	}
 
-	if (txn->msg && txn->msg->wbuf)
+	if (txn->msg && txn->msg->wbuf && ctrl->msgq_base)
+		memcpy_toio((void __iomem __force *)puc, txn->msg->wbuf,
+			    txn->msg->num_bytes);
+	else if (txn->msg && txn->msg->wbuf)
 		memcpy(puc, txn->msg->wbuf, txn->msg->num_bytes);
 
 	mutex_lock(&ctrl->tx_lock);
@@ -1588,6 +1619,34 @@ static int qcom_slim_ngd_probe(struct platform_device *pdev)
 	return ret;
 }
 
+/*
+ * Where the BAM has no IOMMU context the OS can use, the message queues
+ * have to live in memory of the SLIMbus block itself.
+ */
+static int qcom_slim_ngd_map_msgq_mem(struct qcom_slim_ngd_ctrl *ctrl,
+				      struct platform_device *pdev)
+{
+	size_t size = (2 * QCOM_SLIM_NGD_DESC_NUM + 1) * SLIM_MSGQ_BUF_LEN;
+	struct resource *res;
+
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+	if (!res)
+		return 0;
+
+	if (resource_size(res) < size)
+		return dev_err_probe(&pdev->dev, -EINVAL,
+				     "message queue memory too small\n");
+
+	ctrl->msgq_base = devm_ioremap(&pdev->dev, res->start,
+				       resource_size(res));
+	if (!ctrl->msgq_base)
+		return -ENOMEM;
+
+	ctrl->msgq_phys_base = res->start;
+
+	return 0;
+}
+
 static int qcom_slim_ngd_ctrl_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -1605,6 +1664,10 @@ static int qcom_slim_ngd_ctrl_probe(struct platform_device *pdev)
 	ctrl->base = devm_platform_get_and_ioremap_resource(pdev, 0, NULL);
 	if (IS_ERR(ctrl->base))
 		return PTR_ERR(ctrl->base);
+
+	ret = qcom_slim_ngd_map_msgq_mem(ctrl, pdev);
+	if (ret)
+		return ret;
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
