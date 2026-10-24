@@ -460,6 +460,10 @@
 };
 
 &mdss {
+	resets = <&dispcc DISP_CC_MDSS_CORE_BCR>,
+		 <&dispcc DISP_CC_MDSS_CORE_INT2_BCR>,
+		 <&dispcc DISP_CC_MDSS_RSCC_BCR>;
+
 	status = "okay";
 };
 
