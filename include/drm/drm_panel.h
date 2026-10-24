@@ -34,6 +34,7 @@ struct backlight_device;
 struct dentry;
 struct device_node;
 struct drm_connector;
+struct drm_display_mode;
 struct drm_panel_follower;
 struct drm_panel;
 struct display_timing;
@@ -137,6 +138,18 @@ struct drm_panel_funcs {
 	 */
 	int (*get_timings)(struct drm_panel *panel, unsigned int num_timings,
 			   struct display_timing *timings);
+
+	/**
+	 * @switch_mode:
+	 *
+	 * Switch a prepared panel to another of its modes without powering it
+	 * down. Only called for modes that the host can drive with the link
+	 * timings it already runs.
+	 *
+	 * This function is optional.
+	 */
+	int (*switch_mode)(struct drm_panel *panel,
+			   const struct drm_display_mode *mode);
 
 	/**
 	 * @debugfs_init:
@@ -334,6 +347,9 @@ void drm_panel_enable(struct drm_panel *panel);
 void drm_panel_disable(struct drm_panel *panel);
 
 int drm_panel_get_modes(struct drm_panel *panel, struct drm_connector *connector);
+bool drm_panel_can_switch_mode(struct drm_panel *panel);
+int drm_panel_switch_mode(struct drm_panel *panel,
+			  const struct drm_display_mode *mode);
 
 #if defined(CONFIG_OF) && defined(CONFIG_DRM_PANEL)
 struct drm_panel *of_drm_find_panel(const struct device_node *np);

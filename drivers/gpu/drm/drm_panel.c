@@ -342,6 +342,40 @@ exit:
 EXPORT_SYMBOL(drm_panel_disable);
 
 /**
+ * drm_panel_can_switch_mode - check whether a panel switches modes in place
+ * @panel: DRM panel
+ *
+ * Return: true if the panel implements &drm_panel_funcs.switch_mode.
+ */
+bool drm_panel_can_switch_mode(struct drm_panel *panel)
+{
+	return panel && panel->funcs && panel->funcs->switch_mode;
+}
+EXPORT_SYMBOL(drm_panel_can_switch_mode);
+
+/**
+ * drm_panel_switch_mode - switch a panel to another mode without a modeset
+ * @panel: DRM panel
+ * @mode: mode to switch to
+ *
+ * A panel that is not prepared picks up @mode on its next prepare.
+ *
+ * Return: 0 on success or a negative error code on failure.
+ */
+int drm_panel_switch_mode(struct drm_panel *panel,
+			  const struct drm_display_mode *mode)
+{
+	if (!drm_panel_can_switch_mode(panel))
+		return -EOPNOTSUPP;
+
+	if (!panel->prepared)
+		return 0;
+
+	return panel->funcs->switch_mode(panel, mode);
+}
+EXPORT_SYMBOL(drm_panel_switch_mode);
+
+/**
  * drm_panel_get_modes - probe the available display modes of a panel
  * @panel: DRM panel
  * @connector: DRM connector

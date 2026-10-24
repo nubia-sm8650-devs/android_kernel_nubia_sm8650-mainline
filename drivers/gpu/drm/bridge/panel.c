@@ -487,6 +487,42 @@ struct drm_connector *drm_panel_bridge_connector(struct drm_bridge *bridge)
 }
 EXPORT_SYMBOL(drm_panel_bridge_connector);
 
+/**
+ * drm_panel_bridge_can_switch_mode - check whether the panel behind a bridge
+ * switches modes in place
+ * @bridge: The drm_bridge.
+ *
+ * Returns: true if @bridge is a panel bridge whose panel implements
+ * &drm_panel_funcs.switch_mode.
+ */
+bool drm_panel_bridge_can_switch_mode(struct drm_bridge *bridge)
+{
+	if (!bridge || !drm_bridge_is_panel(bridge))
+		return false;
+
+	return drm_panel_can_switch_mode(drm_bridge_to_panel_bridge(bridge)->panel);
+}
+EXPORT_SYMBOL(drm_panel_bridge_can_switch_mode);
+
+/**
+ * drm_panel_bridge_switch_mode - switch the panel behind a bridge to another
+ * mode without a modeset
+ * @bridge: The drm_bridge.
+ * @mode: mode to switch to
+ *
+ * Returns: 0 on success or a negative error code on failure.
+ */
+int drm_panel_bridge_switch_mode(struct drm_bridge *bridge,
+				 const struct drm_display_mode *mode)
+{
+	if (!drm_panel_bridge_can_switch_mode(bridge))
+		return -EOPNOTSUPP;
+
+	return drm_panel_switch_mode(drm_bridge_to_panel_bridge(bridge)->panel,
+				     mode);
+}
+EXPORT_SYMBOL(drm_panel_bridge_switch_mode);
+
 #ifdef CONFIG_OF
 /**
  * devm_drm_of_get_bridge - Return next bridge in the chain
