@@ -715,6 +715,46 @@ void dpu_encoder_update_topology(struct drm_encoder *drm_enc,
 	}
 }
 
+bool dpu_encoder_can_switch_mode(struct drm_encoder *drm_enc,
+				 const struct drm_display_mode *old_mode,
+				 const struct drm_display_mode *new_mode)
+{
+	struct dpu_encoder_virt *dpu_enc = to_dpu_encoder_virt(drm_enc);
+	struct msm_drm_private *priv = drm_enc->dev->dev_private;
+	const struct msm_display_info *disp_info = &dpu_enc->disp_info;
+
+	if (disp_info->intf_type != INTF_DSI || disp_info->num_of_h_tiles != 1 ||
+	    !disp_info->is_cmd_mode)
+		return false;
+
+	return msm_dsi_can_switch_mode(priv->kms->dsi[disp_info->h_tile_instance[0]],
+				       old_mode, new_mode);
+}
+
+static void dpu_encoder_switch_mode(struct dpu_encoder_virt *dpu_enc,
+				    const struct drm_display_mode *mode)
+{
+	struct drm_encoder *drm_enc = &dpu_enc->base;
+	struct msm_drm_private *priv = drm_enc->dev->dev_private;
+	const struct msm_display_info *disp_info = &dpu_enc->disp_info;
+	struct dpu_encoder_phys *phys;
+	unsigned int i;
+	int ret;
+
+	for (i = 0; i < dpu_enc->num_phys_encs; i++) {
+		phys = dpu_enc->phys_encs[i];
+		phys->cached_mode = *mode;
+		if (phys->ops.restore)
+			phys->ops.restore(phys);
+	}
+
+	ret = msm_dsi_switch_mode(priv->kms->dsi[disp_info->h_tile_instance[0]],
+				  mode);
+	if (ret)
+		DPU_ERROR_ENC(dpu_enc, "failed to switch the panel mode: %d\n",
+			      ret);
+}
+
 bool dpu_encoder_needs_modeset(struct drm_encoder *drm_enc, struct drm_atomic_commit *state)
 {
 	struct drm_connector *connector;
@@ -2089,6 +2129,12 @@ void dpu_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc)
 	DPU_ATRACE_END("enc_prepare_for_kickoff");
 
 	dpu_encoder_resource_control(drm_enc, DPU_ENC_RC_EVENT_KICKOFF);
+
+	if (dpu_enc->cur_master && drm_enc->crtc &&
+	    !drm_mode_equal(&dpu_enc->cur_master->cached_mode,
+			    &drm_enc->crtc->state->adjusted_mode))
+		dpu_encoder_switch_mode(dpu_enc,
+					&drm_enc->crtc->state->adjusted_mode);
 
 	/* if any phys needs reset, reset all phys, in-order */
 	if (needs_hw_reset) {

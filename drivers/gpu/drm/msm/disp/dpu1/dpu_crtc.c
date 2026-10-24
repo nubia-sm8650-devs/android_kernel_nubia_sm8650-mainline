@@ -1545,6 +1545,37 @@ int dpu_crtc_check_mode_changed(struct drm_crtc_state *old_crtc_state,
 	return 0;
 }
 
+static bool dpu_crtc_can_switch_mode(struct drm_crtc_state *crtc_state)
+{
+	struct drm_atomic_commit *state = crtc_state->state;
+	struct drm_crtc *crtc = crtc_state->crtc;
+	struct drm_crtc_state *old_crtc_state;
+	struct drm_encoder *drm_enc;
+
+	if (!crtc_state->mode_changed || crtc_state->connectors_changed ||
+	    crtc_state->active_changed || !crtc_state->active)
+		return false;
+
+	old_crtc_state = drm_atomic_get_old_crtc_state(state, crtc);
+	if (!old_crtc_state->active ||
+	    old_crtc_state->encoder_mask != crtc_state->encoder_mask ||
+	    hweight32(crtc_state->encoder_mask) != 1 ||
+	    !old_crtc_state->ctm != !crtc_state->ctm ||
+	    (dpu_crtc_needs_dspp(crtc_state) && !dpu_crtc_has_dspp(old_crtc_state)) ||
+	    drm_crtc_in_clone_mode(old_crtc_state) ||
+	    drm_crtc_in_clone_mode(crtc_state))
+		return false;
+
+	drm_for_each_encoder_mask(drm_enc, crtc->dev, crtc_state->encoder_mask) {
+		if (dpu_encoder_needs_modeset(drm_enc, state) ||
+		    !dpu_encoder_can_switch_mode(drm_enc, &old_crtc_state->mode,
+						 &crtc_state->mode))
+			return false;
+	}
+
+	return true;
+}
+
 static int dpu_crtc_atomic_check(struct drm_crtc *crtc,
 		struct drm_atomic_commit *state)
 {
@@ -1559,6 +1590,9 @@ static int dpu_crtc_atomic_check(struct drm_crtc *crtc,
 	int rc = 0;
 
 	bool needs_dirtyfb = dpu_crtc_needs_dirtyfb(crtc_state);
+
+	if (dpu_crtc_can_switch_mode(crtc_state))
+		crtc_state->mode_changed = false;
 
 	/* don't reallocate resources if only ACTIVE has beeen changed */
 	if (crtc_state->mode_changed || crtc_state->connectors_changed) {

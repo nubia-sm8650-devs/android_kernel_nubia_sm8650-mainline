@@ -619,3 +619,34 @@ const char *msm_dsi_get_te_source(struct msm_dsi *msm_dsi)
 {
 	return msm_dsi->te_source;
 }
+
+/*
+ * A command mode link only carries the active area, at a rate set by the
+ * pixel clock and the horizontal timings, so a mode that keeps those runs
+ * on the same link configuration. The panel then switches its own refresh.
+ */
+bool msm_dsi_can_switch_mode(struct msm_dsi *msm_dsi,
+			     const struct drm_display_mode *old_mode,
+			     const struct drm_display_mode *new_mode)
+{
+	if (!msm_dsi || IS_BONDED_DSI() || !msm_dsi_is_cmd_mode(msm_dsi))
+		return false;
+
+	if (old_mode->clock != new_mode->clock ||
+	    old_mode->hdisplay != new_mode->hdisplay ||
+	    old_mode->hsync_start != new_mode->hsync_start ||
+	    old_mode->hsync_end != new_mode->hsync_end ||
+	    old_mode->htotal != new_mode->htotal ||
+	    old_mode->hskew != new_mode->hskew ||
+	    old_mode->vdisplay != new_mode->vdisplay ||
+	    old_mode->flags != new_mode->flags)
+		return false;
+
+	return drm_panel_bridge_can_switch_mode(msm_dsi->next_bridge);
+}
+
+int msm_dsi_switch_mode(struct msm_dsi *msm_dsi,
+			const struct drm_display_mode *mode)
+{
+	return drm_panel_bridge_switch_mode(msm_dsi->next_bridge, mode);
+}
