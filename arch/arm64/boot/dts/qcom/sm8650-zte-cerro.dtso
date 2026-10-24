@@ -209,6 +209,38 @@
 			};
 		};
 
+		bt-playback-dai-link {
+			link-name = "BT Playback";
+
+			cpu {
+				sound-dai = <&q6apmbedai SLIMBUS_6_RX>;
+			};
+
+			codec {
+				sound-dai = <&wcn7850_bt_slim 0>;
+			};
+
+			platform {
+				sound-dai = <&q6apm>;
+			};
+		};
+
+		bt-capture-dai-link {
+			link-name = "BT Capture";
+
+			cpu {
+				sound-dai = <&q6apmbedai SLIMBUS_6_TX>;
+			};
+
+			codec {
+				sound-dai = <&wcn7850_bt_slim 1>;
+			};
+
+			platform {
+				sound-dai = <&q6apm>;
+			};
+		};
+
 		va-capture-dai-link {
 			link-name = "VA Capture";
 
@@ -638,6 +670,36 @@
 &remoteproc_mpss {
 	firmware-name = "modem.mdt", "modem_dtb.mdt";
 
+	status = "okay";
+};
+
+&slim {
+	status = "okay";
+};
+
+&slim_ngd1 {
+	#address-cells = <2>;
+	#size-cells = <0>;
+
+	wcn7850_bt_ifd: ifd@0,0 {
+		compatible = "slim217,220";
+		reg = <0 0>;
+	};
+
+	wcn7850_bt_slim: bt@1,0 {
+		compatible = "slim217,220";
+		reg = <1 0>;
+
+		slim-ifc-dev = <&wcn7850_bt_ifd>;
+
+		qcom,rx-channels = <157>;
+		qcom,tx-channels = <159>;
+
+		#sound-dai-cells = <1>;
+	};
+};
+
+&slimbam {
 	status = "okay";
 };
 
