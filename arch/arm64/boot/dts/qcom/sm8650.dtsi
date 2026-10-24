@@ -4837,6 +4837,37 @@
 			status = "disabled";
 		};
 
+		slimbam: dma-controller@6c04000 {
+			compatible = "qcom,bam-v1.7.0";
+			reg = <0 0x06c04000 0 0x20000>,
+			      <0 0x06c8f000 0 0x1000>;
+			interrupts = <GIC_SPI 164 IRQ_TYPE_LEVEL_HIGH 0>;
+			#dma-cells = <1>;
+			qcom,controlled-remotely;
+			num-channels = <31>;
+			qcom,ee = <1>;
+			qcom,num-ees = <2>;
+			status = "disabled";
+		};
+
+		slim: slim-ngd@6c40000 {
+			compatible = "qcom,sm8650-slim-ngd", "qcom,slim-ngd-v1.5.0";
+			reg = <0 0x06c40000 0 0x2c000>,
+			      <0 0x06c8e000 0 0x1000>;
+			interrupts = <GIC_SPI 163 IRQ_TYPE_LEVEL_HIGH 0>;
+			dmas = <&slimbam 3>, <&slimbam 4>;
+			dma-names = "rx", "tx";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+
+			slim_ngd1: slim@1 {
+				reg = <1>;
+				#address-cells = <2>;
+				#size-cells = <0>;
+			};
+		};
+
 		swr2: soundwire@6d30000 {
 			compatible = "qcom,soundwire-v2.0.0";
 			reg = <0 0x06d30000 0 0x10000>;
