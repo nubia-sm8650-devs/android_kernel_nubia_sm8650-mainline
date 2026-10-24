@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/net/nfc/st,st54l-ese.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: STMicroelectronics ST54L embedded secure element
+
+maintainers:
+  - Cosmin Tanislav <demonsingur@gmail.com>
+
+description:
+  The ST54L pairs an NFC controller with an embedded secure element. The
+  secure element has its own SPI interface, over which the host exchanges
+  ISO/IEC 7816-3 T=1 blocks with it from userspace. Its power request input
+  belongs to the NFC controller, see st,st-nci.yaml.
+
+allOf:
+  - $ref: /schemas/spi/spi-peripheral-props.yaml#
+
+properties:
+  compatible:
+    const: st,st54l-ese
+
+  reg:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    spi {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        ese@0 {
+            compatible = "st,st54l-ese";
+            reg = <0>;
+
+            spi-max-frequency = <1000000>;
+            spi-cs-setup-delay-ns = <20000>;
+        };
+    };
