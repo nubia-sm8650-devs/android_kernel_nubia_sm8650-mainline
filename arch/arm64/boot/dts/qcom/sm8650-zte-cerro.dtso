@@ -643,6 +643,8 @@
 		avdd-supply = <&ts_avdd>;
 		vddio-supply = <&vreg_l12b_1p8>;
 
+		panel = <&display_panel>;
+
 		spi-max-frequency = <20000000>;
 
 		touchscreen-size-x = <17856>;
