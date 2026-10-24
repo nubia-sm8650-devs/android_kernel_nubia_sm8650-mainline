@@ -29,6 +29,12 @@ properties:
     description: |
       Specifies that an ese is physically connected to the controller
 
+  ese-power-gpios:
+    maxItems: 1
+    description:
+      Output GPIO pin driving the SE_PWR_REQ input, through which the host
+      asks the controller to power the embedded secure element
+
   interrupts:
     maxItems: 1
 
