@@ -29,11 +29,15 @@
 #include <linux/input.h>
 #include <linux/input/mt.h>
 #include <linux/input/touchscreen.h>
+#include <linux/mutex.h>
 #include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/sizes.h>
 #include <linux/unaligned.h>
+#include <linux/workqueue.h>
+
+#include <drm/drm_panel.h>
 
 #include "goodix_berlin.h"
 
@@ -178,6 +182,13 @@ struct goodix_berlin_core {
 	const struct goodix_berlin_ic_data *ic_data;
 
 	struct goodix_berlin_event event;
+
+	struct drm_panel_follower panel_follower;
+	struct work_struct panel_work;
+	/* Serializes powering the controller on and off */
+	struct mutex power_lock;
+	bool is_panel_follower;
+	bool powered_off;
 };
 
 static bool goodix_berlin_checksum_valid(const u8 *data, int size)
@@ -648,12 +659,43 @@ static int goodix_berlin_input_dev_config(struct goodix_berlin_core *cd,
 	return 0;
 }
 
+static void goodix_berlin_stop(struct goodix_berlin_core *cd)
+{
+	guard(mutex)(&cd->power_lock);
+
+	if (cd->powered_off)
+		return;
+
+	disable_irq(cd->irq);
+	goodix_berlin_power_off(cd);
+	cd->powered_off = true;
+}
+
+static int goodix_berlin_start(struct goodix_berlin_core *cd)
+{
+	int error;
+
+	guard(mutex)(&cd->power_lock);
+
+	if (!cd->powered_off)
+		return 0;
+
+	error = goodix_berlin_power_on(cd);
+	if (error)
+		return error;
+
+	cd->powered_off = false;
+	enable_irq(cd->irq);
+
+	return 0;
+}
+
 static int goodix_berlin_suspend(struct device *dev)
 {
 	struct goodix_berlin_core *cd = dev_get_drvdata(dev);
 
-	disable_irq(cd->irq);
-	goodix_berlin_power_off(cd);
+	if (!cd->is_panel_follower)
+		goodix_berlin_stop(cd);
 
 	return 0;
 }
@@ -661,15 +703,11 @@ static int goodix_berlin_suspend(struct device *dev)
 static int goodix_berlin_resume(struct device *dev)
 {
 	struct goodix_berlin_core *cd = dev_get_drvdata(dev);
-	int error;
 
-	error = goodix_berlin_power_on(cd);
-	if (error)
-		return error;
+	if (cd->is_panel_follower)
+		return 0;
 
-	enable_irq(cd->irq);
-
-	return 0;
+	return goodix_berlin_start(cd);
 }
 
 EXPORT_GPL_SIMPLE_DEV_PM_OPS(goodix_berlin_pm_ops,
@@ -679,7 +717,69 @@ static void goodix_berlin_power_off_act(void *data)
 {
 	struct goodix_berlin_core *cd = data;
 
-	goodix_berlin_power_off(cd);
+	if (!cd->powered_off)
+		goodix_berlin_power_off(cd);
+}
+
+static void goodix_berlin_panel_work(struct work_struct *work)
+{
+	struct goodix_berlin_core *cd =
+		container_of(work, struct goodix_berlin_core, panel_work);
+	int error;
+
+	error = goodix_berlin_start(cd);
+	if (error)
+		dev_err(cd->dev, "Failed to power on: %d\n", error);
+}
+
+static int goodix_berlin_panel_prepared(struct drm_panel_follower *follower)
+{
+	struct goodix_berlin_core *cd =
+		container_of(follower, struct goodix_berlin_core, panel_follower);
+
+	/* Do not hold up the panel for the controller firmware boot */
+	schedule_work(&cd->panel_work);
+
+	return 0;
+}
+
+static int goodix_berlin_panel_unpreparing(struct drm_panel_follower *follower)
+{
+	struct goodix_berlin_core *cd =
+		container_of(follower, struct goodix_berlin_core, panel_follower);
+
+	cancel_work_sync(&cd->panel_work);
+	goodix_berlin_stop(cd);
+
+	return 0;
+}
+
+static const struct drm_panel_follower_funcs goodix_berlin_panel_follower_funcs = {
+	.panel_prepared = goodix_berlin_panel_prepared,
+	.panel_unpreparing = goodix_berlin_panel_unpreparing,
+};
+
+static void goodix_berlin_cancel_panel_work(void *data)
+{
+	struct goodix_berlin_core *cd = data;
+
+	cancel_work_sync(&cd->panel_work);
+}
+
+static int goodix_berlin_register_panel_follower(struct goodix_berlin_core *cd)
+{
+	int error;
+
+	INIT_WORK(&cd->panel_work, goodix_berlin_panel_work);
+
+	error = devm_add_action_or_reset(cd->dev, goodix_berlin_cancel_panel_work,
+					 cd);
+	if (error)
+		return error;
+
+	cd->panel_follower.funcs = &goodix_berlin_panel_follower_funcs;
+
+	return devm_drm_panel_add_follower(cd->dev, &cd->panel_follower);
 }
 
 static ssize_t registers_read(struct file *filp, struct kobject *kobj,
@@ -689,6 +789,11 @@ static ssize_t registers_read(struct file *filp, struct kobject *kobj,
 	struct device *dev = kobj_to_dev(kobj);
 	struct goodix_berlin_core *cd = dev_get_drvdata(dev);
 	int error;
+
+	guard(mutex)(&cd->power_lock);
+
+	if (cd->powered_off)
+		return -EIO;
 
 	error = regmap_raw_read(cd->regmap, off, buf, count);
 
@@ -702,6 +807,11 @@ static ssize_t registers_write(struct file *filp, struct kobject *kobj,
 	struct device *dev = kobj_to_dev(kobj);
 	struct goodix_berlin_core *cd = dev_get_drvdata(dev);
 	int error;
+
+	guard(mutex)(&cd->power_lock);
+
+	if (cd->powered_off)
+		return -EIO;
 
 	error = regmap_raw_write(cd->regmap, off, buf, count);
 
@@ -745,6 +855,10 @@ int goodix_berlin_probe(struct device *dev, int irq, const struct input_id *id,
 	cd->regmap = regmap;
 	cd->irq = irq;
 	cd->ic_data = ic_data;
+
+	error = devm_mutex_init(dev, &cd->power_lock);
+	if (error)
+		return error;
 
 	cd->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(cd->reset_gpio))
@@ -797,6 +911,14 @@ int goodix_berlin_probe(struct device *dev, int irq, const struct input_id *id,
 	}
 
 	dev_set_drvdata(dev, cd);
+
+	cd->is_panel_follower = drm_is_panel_follower(dev);
+	if (cd->is_panel_follower) {
+		error = goodix_berlin_register_panel_follower(cd);
+		if (error)
+			return dev_err_probe(dev, error,
+					     "Failed to follow the panel\n");
+	}
 
 	dev_dbg(dev, "Goodix Berlin %s Touchscreen Controller",
 		cd->fw_version.patch_pid);
