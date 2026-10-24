@@ -392,6 +392,28 @@
 	bias-pull-up = <2200>;
 };
 
+&i2c0 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	clock-frequency = <1000000>;
+
+	status = "okay";
+
+	nfc@8 {
+		compatible = "st,st54l", "st,st21nfcd";
+		reg = <0x08>;
+
+		interrupts-extended = <&tlmm 75 IRQ_TYPE_LEVEL_HIGH>;
+		reset-gpios = <&tlmm 34 GPIO_ACTIVE_HIGH>;
+
+		pinctrl-0 = <&nfc_int_default>, <&nfc_enable_default>;
+		pinctrl-names = "default";
+
+		wakeup-source;
+	};
+};
+
 &i2c3 {
 	#address-cells = <1>;
 	#size-cells = <0>;
@@ -819,6 +841,20 @@
 	mdp_vsync: mdp-vsync-state {
 		pins = "gpio86";
 		function = "mdp_vsync";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	nfc_enable_default: nfc-enable-default-state {
+		pins = "gpio34", "gpio35";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	nfc_int_default: nfc-int-default-state {
+		pins = "gpio75";
+		function = "gpio";
 		drive-strength = <2>;
 		bias-pull-down;
 	};
