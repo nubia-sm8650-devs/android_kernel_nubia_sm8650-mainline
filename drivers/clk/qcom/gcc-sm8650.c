@@ -3454,7 +3454,7 @@ static struct gdsc ufs_mem_phy_gdsc = {
 	.pd = {
 		.name = "ufs_mem_phy_gdsc",
 	},
-	.pwrsts = PWRSTS_OFF_ON,
+	.pwrsts = PWRSTS_RET_ON,
 	.flags = POLL_CFG_GDSCR | RETAIN_FF_ENABLE,
 };
 
