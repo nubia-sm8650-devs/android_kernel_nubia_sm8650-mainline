@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/sound/qcom,wcn-btfm-slim.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Qualcomm WCN Bluetooth SLIMbus audio interface
+
+maintainers:
+  - Cosmin Tanislav <demonsingur@gmail.com>
+
+description:
+  The Bluetooth part of Qualcomm WCN chips such as the WCN7850 exchanges SCO
+  and offloaded A2DP audio with the audio DSP over SLIMbus. It enumerates as a
+  ported generic device with the data ports and an interface device with the
+  port configuration registers.
+
+properties:
+  compatible:
+    const: slim217,220
+
+  reg:
+    maxItems: 1
+
+  slim-ifc-dev:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: SLIMbus interface device of the chip
+
+  qcom,rx-channels:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 1
+    maxItems: 2
+    description:
+      SLIMbus data channels toward the chip, the first one carrying SCO
+      downlink and offloaded A2DP
+
+  qcom,tx-channels:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 1
+    maxItems: 3
+    description:
+      SLIMbus data channels from the chip, the first one carrying SCO uplink
+
+  "#sound-dai-cells":
+    const: 1
+
+required:
+  - compatible
+  - reg
+
+allOf:
+  - $ref: dai-common.yaml#
+  - if:
+      required:
+        - slim-ifc-dev
+    then:
+      required:
+        - qcom,rx-channels
+        - qcom,tx-channels
+        - "#sound-dai-cells"
+    else:
+      properties:
+        qcom,rx-channels: false
+        qcom,tx-channels: false
+        "#sound-dai-cells": false
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    slim {
+        #address-cells = <2>;
+        #size-cells = <0>;
+
+        bt_ifd: ifd@0,0 {
+            compatible = "slim217,220";
+            reg = <0 0>;
+        };
+
+        bt@1,0 {
+            compatible = "slim217,220";
+            reg = <1 0>;
+            slim-ifc-dev = <&bt_ifd>;
+            qcom,rx-channels = <157>;
+            qcom,tx-channels = <159>;
+            #sound-dai-cells = <1>;
+        };
+    };
