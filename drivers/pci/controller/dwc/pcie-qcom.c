@@ -335,8 +335,17 @@ static void qcom_pcie_perst_assert(struct qcom_pcie *pcie)
 
 static void qcom_pcie_perst_deassert(struct qcom_pcie *pcie)
 {
-	/* Ensure that PERST# has been asserted for at least 100 ms */
-	msleep(PCIE_T_PVPERL_MS);
+	struct dw_pcie *pci = pcie->pci;
+
+	/*
+	 * T_PVPERL counts from power becoming stable. On resume with the
+	 * endpoint power kept on, only REFCLK needs to settle.
+	 */
+	if (pci->suspended && pci->pp.skip_pwrctrl_off)
+		fsleep(PCIE_T_PERST_CLK_US);
+	else
+		msleep(PCIE_T_PVPERL_MS);
+
 	__qcom_pcie_perst_assert(pcie, false);
 }
 
