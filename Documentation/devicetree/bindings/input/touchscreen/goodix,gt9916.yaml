@@ -37,6 +37,7 @@ properties:
   vddio-supply:
     description: power supply regulator on VDDIO pin
 
+  panel: true
   spi-max-frequency: true
   touchscreen-inverted-x: true
   touchscreen-inverted-y: true
