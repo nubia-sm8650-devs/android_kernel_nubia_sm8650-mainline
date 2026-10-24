@@ -19,6 +19,10 @@
 	qcom,board-id = <8 0>;
 };
 
+&{/aliases} {
+	spi1 = "/soc@0/geniqup@ac0000/spi@a84000";
+};
+
 &{/} {
 	model = "ZTE nubia Z60 Ultra";
 	compatible = "zte,nx721j", "qcom,sm8650";
@@ -406,6 +410,7 @@
 
 		interrupts-extended = <&tlmm 75 IRQ_TYPE_LEVEL_HIGH>;
 		reset-gpios = <&tlmm 34 GPIO_ACTIVE_HIGH>;
+		ese-power-gpios = <&tlmm 46 GPIO_ACTIVE_HIGH>;
 
 		pinctrl-0 = <&nfc_int_default>, <&nfc_enable_default>;
 		pinctrl-names = "default";
@@ -725,6 +730,21 @@
 	status = "okay";
 };
 
+&spi1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	status = "okay";
+
+	ese@0 {
+		compatible = "st,st54l-ese";
+		reg = <0>;
+
+		spi-max-frequency = <1000000>;
+		spi-cs-setup-delay-ns = <20000>;
+	};
+};
+
 &spi4 {
 	#address-cells = <1>;
 	#size-cells = <0>;
@@ -800,7 +820,7 @@
 };
 
 &tlmm {
-	gpio-reserved-ranges = <36 4>, <74 1>;
+	gpio-reserved-ranges = <74 1>;
 
 	bt_default: bt-default-state {
 		bt-en-pins {
