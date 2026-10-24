@@ -302,6 +302,22 @@
 	};
 };
 
+&cci0 {
+	status = "okay";
+};
+
+&cci1 {
+	/* Master 1 pins carry the main camera VANA enable (gpio13) */
+	pinctrl-0 = <&cci1_0_default>;
+	pinctrl-1 = <&cci1_0_sleep>;
+
+	status = "okay";
+};
+
+&cci1_i2c1 {
+	status = "disabled";
+};
+
 &chosen {
 	#address-cells = <2>;
 	#size-cells = <2>;
