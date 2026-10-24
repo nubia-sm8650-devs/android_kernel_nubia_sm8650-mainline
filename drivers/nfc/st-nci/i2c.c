@@ -48,6 +48,7 @@ struct st_nci_i2c_phy {
 	bool raw_nci;
 
 	struct gpio_desc *gpiod_reset;
+	struct gpio_desc *gpiod_ese_power;
 
 	struct st_nci_se_status se_status;
 };
@@ -55,6 +56,8 @@ struct st_nci_i2c_phy {
 static int st_nci_i2c_enable(void *phy_id)
 {
 	struct st_nci_i2c_phy *phy = phy_id;
+
+	gpiod_set_value(phy->gpiod_ese_power, 0);
 
 	/*
 	 * Existing DTS uses GPIO_ACTIVE_HIGH and treats logical 1 as
@@ -71,6 +74,11 @@ static int st_nci_i2c_enable(void *phy_id)
 		gpiod_set_value(phy->gpiod_reset, 1);
 	}
 	usleep_range(80000, 85000);
+
+	if (phy->gpiod_ese_power) {
+		gpiod_set_value(phy->gpiod_ese_power, 1);
+		usleep_range(5000, 6000);
+	}
 
 	if (phy->ndlc->powered == 0 && phy->irq_active == 0) {
 		enable_irq(phy->i2c_dev->irq);
@@ -315,6 +323,12 @@ static int st_nci_i2c_probe(struct i2c_client *client)
 		nfc_err(dev, "Unable to get RESET GPIO\n");
 		return -ENODEV;
 	}
+
+	phy->gpiod_ese_power = devm_gpiod_get_optional(dev, "ese-power",
+						       GPIOD_OUT_HIGH);
+	if (IS_ERR(phy->gpiod_ese_power))
+		return dev_err_probe(dev, PTR_ERR(phy->gpiod_ese_power),
+				     "Unable to get ESE power GPIO\n");
 
 	phy->se_status.is_ese_present =
 				device_property_read_bool(dev, "ese-present");
