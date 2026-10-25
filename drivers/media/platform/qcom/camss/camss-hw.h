@@ -8,15 +8,88 @@
 #include <linux/bits.h>
 #include <linux/types.h>
 
+struct camss;
+struct camss_hw_pipe;
+struct device;
+struct device_node;
+
+enum camss_hw_path {
+	CAMSS_HW_PATH_IPP,
+	CAMSS_HW_PATH_RDI0,
+	CAMSS_HW_PATH_RDI1,
+	CAMSS_HW_PATH_RDI2,
+	CAMSS_HW_PATH_RDI3,
+	CAMSS_HW_PATH_RDI4,
+	CAMSS_HW_PATH_NUM,
+};
+
+#define CAMSS_HW_COMP_NUM	16
+#define CAMSS_HW_WM_NUM		28
 #define CAMSS_HW_WM_MAX_REGS	24
+#define CAMSS_HW_WM_BW_LIMIT_MAX	0xff
 
 #define CAMSS_HW_WM_UPDATE_STRIDE	BIT(0)
 #define CAMSS_HW_WM_UPDATE_PACKER	BIT(1)
 #define CAMSS_HW_WM_UPDATE_UBWC		BIT(2)
 
+enum camss_hw_block {
+	CAMSS_HW_CSID,
+	CAMSS_HW_IFE,
+	CAMSS_HW_CSID_WRAPPER,
+};
+
+enum camss_hw_err_src {
+	CAMSS_HW_ERR_TOP,
+	CAMSS_HW_ERR_RX,
+	CAMSS_HW_ERR_PATH,
+};
+
+#define CAMSS_HW_EV_SOF		BIT(0)
+#define CAMSS_HW_EV_EOF		BIT(1)
+#define CAMSS_HW_EV_EPOCH	BIT(2)
+#define CAMSS_HW_EV_RUP		BIT(3)
+
 struct camss_hw_reg {
 	u32 offset;
 	u32 value;
+};
+
+struct camss_hw_ops {
+	void (*sof)(void *priv, enum camss_hw_path path, u64 qtimer_ns,
+		    u64 boot_ns);
+	void (*epoch)(void *priv, enum camss_hw_path path, u64 boot_ns);
+	void (*eof)(void *priv, enum camss_hw_path path, u64 boot_ns);
+	void (*rup_done)(void *priv, enum camss_hw_path path, u64 boot_ns);
+	void (*buf_done)(void *priv, unsigned int comp, unsigned int wm,
+			 u32 last_addr, u64 boot_ns);
+	void (*error)(void *priv, enum camss_hw_err_src src,
+		      enum camss_hw_path path, u32 status, bool fatal);
+};
+
+struct camss_hw_rx_cfg {
+	u8 phy;
+	u8 lanes;
+	u16 lane_cfg;
+	bool cphy;
+	bool epd;
+	bool vc_full_width;
+};
+
+struct camss_hw_path_cfg {
+	u8 vc;
+	u8 dt;
+	u8 cid;
+	u8 decode_format;
+	u8 plain_format;
+	bool packing_mipi;
+	bool plain_align;
+	bool pix_store;
+	bool crop;
+	bool drop;
+	bool vfr;
+	bool frame_id_dec;
+	u32 epoch_line;
+	u32 events;
 };
 
 enum camss_hw_wm_mode {
@@ -36,6 +109,13 @@ struct camss_hw_wm_ubwc {
 	u32 meta_size;
 };
 
+struct camss_hw_wm_hfr {
+	u32 framedrop_pattern;
+	u32 framedrop_period;
+	u32 subsample_pattern;
+	u32 subsample_period;
+};
+
 struct camss_hw_wm_cfg {
 	enum camss_hw_wm_mode mode;
 	bool virtual_frame;
@@ -50,5 +130,55 @@ struct camss_hw_wm_cfg {
 	bool ubwc;
 	struct camss_hw_wm_ubwc ubwc_cfg;
 };
+
+struct camss *camss_hw_get(struct device *consumer, struct device_node *np);
+
+struct camss_hw_pipe *camss_hw_claim(struct camss *camss, unsigned int index,
+				     const struct camss_hw_ops *ops,
+				     void *priv);
+void camss_hw_release(struct camss_hw_pipe *pipe);
+
+int camss_hw_csid_rx(struct camss_hw_pipe *pipe,
+		     const struct camss_hw_rx_cfg *cfg);
+int camss_hw_path_config(struct camss_hw_pipe *pipe, enum camss_hw_path path,
+			 const struct camss_hw_path_cfg *cfg);
+int camss_hw_path_resume(struct camss_hw_pipe *pipe, enum camss_hw_path path);
+int camss_hw_csid_stop(struct camss_hw_pipe *pipe);
+int camss_hw_path_sof_ts(struct camss_hw_pipe *pipe, enum camss_hw_path path,
+			 bool prev, u64 *ns);
+int camss_hw_set_clk_rate(struct camss_hw_pipe *pipe, enum camss_hw_block block,
+			  unsigned long rate, unsigned long *applied);
+struct camss_hw_reg camss_hw_rup_reg(struct camss_hw_pipe *pipe,
+				     unsigned long paths, bool mup);
+void camss_hw_rup(struct camss_hw_pipe *pipe, unsigned long paths, bool mup);
+
+int camss_hw_comp_start(struct camss_hw_pipe *pipe, unsigned int comp,
+			unsigned int wm);
+void camss_hw_comp_stop(struct camss_hw_pipe *pipe, unsigned int comp,
+			unsigned int wm);
+
+int camss_hw_wm_start_regs(struct camss_hw_pipe *pipe, unsigned int wm,
+			   const struct camss_hw_wm_cfg *cfg,
+			   struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS]);
+int camss_hw_wm_update_regs(struct camss_hw_pipe *pipe, unsigned int wm,
+			    const struct camss_hw_wm_cfg *cfg, u64 iova,
+			    unsigned int flags,
+			    struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS]);
+int camss_hw_wm_frame_header_regs(struct camss_hw_pipe *pipe, unsigned int wm,
+				  u64 iova, u32 id,
+				  struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS]);
+int camss_hw_wm_hfr_regs(struct camss_hw_pipe *pipe, unsigned int wm,
+			 const struct camss_hw_wm_hfr *hfr,
+			 struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS]);
+int camss_hw_wm_bw_limit_regs(struct camss_hw_pipe *pipe, unsigned int wm,
+			      u32 counter,
+			      struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS]);
+int camss_hw_wm_stop_regs(struct camss_hw_pipe *pipe, unsigned int wm,
+			  struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS]);
+u32 camss_hw_wm_last_addr(struct camss_hw_pipe *pipe, unsigned int wm);
+int camss_hw_read_reg(struct camss_hw_pipe *pipe, enum camss_hw_block block,
+		      u32 offset, u32 *val);
+int camss_hw_write_regs(struct camss_hw_pipe *pipe, enum camss_hw_block block,
+			const struct camss_hw_reg *regs, unsigned int n);
 
 #endif /* QC_MSM_CAMSS_HW_H */

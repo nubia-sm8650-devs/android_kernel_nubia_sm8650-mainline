@@ -14,6 +14,7 @@ qcom-camss-objs += \
 		camss-csiphy-2ph-1-0.o \
 		camss-csiphy-3ph-1-0.o \
 		camss-format.o \
+		camss-hw.o \
 		camss-ispif.o \
 		camss-tpg.o \
 		camss-tpg-gen1.o \

@@ -9,11 +9,14 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
+#include <linux/math64.h>
 #include <linux/of.h>
+#include <linux/timekeeping.h>
 
 #include "camss.h"
 #include "camss-csid.h"
 #include "camss-csid-gen3.h"
+#include "camss-vfe.h"
 
 #define CSID_IO_PATH_CFG0(csid)		(0x4 * (csid))
 #define		OUTPUT_IFE_EN			0x100
@@ -46,6 +49,8 @@
 #define CSID_CSI2_RX_IRQ_SET		0xA8
 #define CSID_CSI2_IPP_IRQ_STATUS	0xAC
 #define CSID_CSI2_IPP_IRQ_CLEAR		0xB4
+#define CSID_CSI2_PPP_IRQ_MASK		0xD0
+#define CSID_CSI2_PPP_IRQ_CLEAR		0xD4
 #define		CSID_RUP_AUP_IPP	(BIT(0) | BIT(16))
 #define		CSID_RUP_AUP_MUP	BIT(28)
 
@@ -123,6 +128,112 @@
 							(0x34C + 0x100 * (rdi)) :\
 							(0x54C + 0x100 * (rdi)))
 #define CSI2_RX_CFG0_PHY_SEL_BASE_IDX	1
+
+#define CSID_TOP_IRQ_RX			BIT(2)
+#define CSID_TOP_IRQ_BUF_DONE		BIT(13)
+#define CSID_TOP_IRQ_ERR		0x180002
+
+#define CSID_RX_IRQ_FATAL		0x19FA800
+#define CSID_RX_IRQ_PART_FATAL		0x1000
+#define CSID_RX_IRQ_NON_FATAL		0x200000
+#define CSID_RX_IRQ_CPHY_EOT		BIT(11)
+
+#define CSI2_RX_CFG1_MISR_EN		BIT(6)
+#define CSI2_RX_CFG1_EPD_EN		8
+
+#define CSID_PATH_IRQ_EOF		BIT(3)
+#define CSID_PATH_IRQ_SOF		BIT(4)
+#define CSID_PATH_IRQ_EPOCH0		BIT(21)
+#define CSID_PATH_IRQ_RUP_DONE		BIT(23)
+#define CSID_PATH_IRQ_FATAL		0x20186001
+#define CSID_PATH_IRQ_NON_FATAL		0x12000004
+
+#define CSID_PATH_CFG0_FRAME_ID_DEC	1
+#define CSID_PATH_CFG0_TS_STB_SEL	(2 << 8)
+#define CSID_PATH_CTRL_RESUME		BIT(0)
+#define CSID_PATH_ERR_REC_DEFAULT	0x9
+
+#define CSID_IPP_CFG1_DROP_H_EN		BIT(10)
+#define CSID_IPP_CFG1_DROP_V_EN		BIT(11)
+#define CSID_IPP_CFG1_CROP_H_EN		BIT(12)
+#define CSID_IPP_CFG1_CROP_V_EN		BIT(13)
+#define CSID_IPP_CFG1_PIX_STORE		BIT(14)
+#define CSID_IPP_CFG1_EARLY_EOF		BIT(16)
+
+#define CSID_RDI_CFG1_PLAIN_ALIGN	11
+#define CSID_RDI_CFG1_PLAIN_FMT		12
+#define CSID_RDI_CFG1_PACKING		15
+
+#define CSID_PATH_RESET_CFG		RST_MODE
+#define CSID_PATH_RESET_CMD		SELECT_HW_RST
+
+#define CSID_QTIMER_NS_NUM		10000
+#define CSID_QTIMER_NS_DEN		192
+
+struct csid_gen3_path {
+	u32 cfg0;
+	u32 ctrl;
+	u32 cfg1;
+	u32 err_rec;
+	u32 epoch;
+	u32 ts_lo;
+	u32 ts_hi;
+	u32 ts_prev_lo;
+	u32 ts_prev_hi;
+	u32 irq_status;
+	u32 irq_mask;
+	u32 irq_clear;
+	u32 irq_clear_all;
+	u32 top_bit;
+	u32 rup;
+};
+
+#define CSID_GEN3_RDI(n) {					\
+	.cfg0 = 0x500 + 0x100 * (n),				\
+	.ctrl = 0x504 + 0x100 * (n),				\
+	.cfg1 = 0x510 + 0x100 * (n),				\
+	.err_rec = 0x514 + 0x100 * (n),				\
+	.epoch = 0x52C + 0x100 * (n),				\
+	.ts_lo = 0x594 + 0x100 * (n),				\
+	.ts_hi = 0x598 + 0x100 * (n),				\
+	.ts_prev_lo = 0x59C + 0x100 * (n),			\
+	.ts_prev_hi = 0x5A0 + 0x100 * (n),			\
+	.irq_status = 0xEC + 0x10 * (n),			\
+	.irq_mask = 0xF0 + 0x10 * (n),				\
+	.irq_clear = 0xF4 + 0x10 * (n),				\
+	.irq_clear_all = 0x7FFF,				\
+	.top_bit = BIT(8) << (n),				\
+	.rup = 0x100010 << (n),					\
+}
+
+static const struct csid_gen3_path csid_gen3_paths[CAMSS_HW_PATH_NUM] = {
+	[CAMSS_HW_PATH_IPP] = {
+		.cfg0 = 0x300,
+		.ctrl = 0x304,
+		.cfg1 = 0x310,
+		.err_rec = 0x318,
+		.epoch = 0x334,
+		.ts_lo = 0x398,
+		.ts_hi = 0x39C,
+		.ts_prev_lo = 0x3A0,
+		.ts_prev_hi = 0x3A4,
+		.irq_status = 0xAC,
+		.irq_mask = 0xB0,
+		.irq_clear = 0xB4,
+		.irq_clear_all = 0x7FFF,
+		.top_bit = BIT(4),
+		.rup = 0x10001,
+	},
+	[CAMSS_HW_PATH_RDI0] = CSID_GEN3_RDI(0),
+	[CAMSS_HW_PATH_RDI1] = CSID_GEN3_RDI(1),
+	[CAMSS_HW_PATH_RDI2] = CSID_GEN3_RDI(2),
+	[CAMSS_HW_PATH_RDI3] = CSID_GEN3_RDI(3),
+	[CAMSS_HW_PATH_RDI4] = CSID_GEN3_RDI(4),
+};
+
+static const u8 csid_gen3_buf_done_bit[CAMSS_HW_COMP_NUM] = {
+	0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 11,
+};
 
 static void __csid_configure_rx(struct csid_device *csid,
 				struct csid_phy_config *phy, int vc)
@@ -321,6 +432,350 @@ static void csid_subdev_reg_update(struct csid_device *csid, int port_id, bool c
 	}
 }
 
+void csid_gen3_hw_init(struct camss_hw_pipe *pipe)
+{
+	struct csid_device *csid = pipe->csid;
+	unsigned long flags;
+	unsigned int i;
+
+	__csid_configure_wrapper(csid);
+
+	writel(0, csid->base + CSID_CSI2_RX_IRQ_MASK);
+	writel(0, csid->base + CSID_BUF_DONE_IRQ_MASK);
+	writel(0, csid->base + CSID_CSI2_PPP_IRQ_MASK);
+	for (i = 0; i < CAMSS_HW_PATH_NUM; i++)
+		writel(0, csid->base + csid_gen3_paths[i].irq_mask);
+
+	writel(TOP_IRQ_STATUS_RESET_DONE, csid->base + CSID_TOP_IRQ_CLEAR);
+	writel(0xFFFFFFF, csid->base + CSID_CSI2_RX_IRQ_CLEAR);
+	writel(0xFFFFFFFF, csid->base + CSID_CSI2_PPP_IRQ_CLEAR);
+	for (i = 0; i < CAMSS_HW_PATH_NUM; i++)
+		writel(csid_gen3_paths[i].irq_clear_all,
+		       csid->base + csid_gen3_paths[i].irq_clear);
+	writel(IRQ_CMD_CLEAR, csid->base + CSID_IRQ_CMD);
+
+	spin_lock_irqsave(&pipe->lock, flags);
+	pipe->top_mask = TOP_IRQ_STATUS_RESET_DONE | CSID_TOP_IRQ_BUF_DONE |
+			 CSID_TOP_IRQ_ERR;
+	pipe->buf_done_mask = 0;
+	memset(pipe->comp_wms, 0, sizeof(pipe->comp_wms));
+	writel(pipe->top_mask, csid->base + CSID_TOP_IRQ_MASK);
+	spin_unlock_irqrestore(&pipe->lock, flags);
+}
+
+static void csid_gen3_top_mask_set(struct camss_hw_pipe *pipe, u32 bits)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&pipe->lock, flags);
+	pipe->top_mask |= bits;
+	writel(pipe->top_mask, pipe->csid->base + CSID_TOP_IRQ_MASK);
+	spin_unlock_irqrestore(&pipe->lock, flags);
+}
+
+void csid_gen3_hw_rx(struct camss_hw_pipe *pipe,
+		     const struct camss_hw_rx_cfg *cfg)
+{
+	struct csid_device *csid = pipe->csid;
+	u32 val;
+
+	val = (cfg->lanes - 1) << CSI2_RX_CFG0_NUM_ACTIVE_LANES;
+	val |= cfg->lane_cfg << CSI2_RX_CFG0_DL0_INPUT_SEL;
+	val |= (cfg->phy + CSI2_RX_CFG0_PHY_SEL_BASE_IDX) << CSI2_RX_CFG0_PHY_NUM_SEL;
+	val |= cfg->cphy << CSI2_RX_CFG0_PHY_TYPE_SEL;
+	writel(val, csid->base + CSID_CSI2_RX_CFG0);
+
+	val = CSI2_RX_CFG1_MISR_EN | CSI2_RX_CFG1_ECC_CORRECTION_EN;
+	val |= cfg->epd << CSI2_RX_CFG1_EPD_EN;
+	if (cfg->vc_full_width)
+		val |= CSI2_RX_CFG1_VC_MODE;
+	writel(val, csid->base + CSID_CSI2_RX_CFG1);
+
+	val = CSID_RX_IRQ_FATAL | CSID_RX_IRQ_PART_FATAL | CSID_RX_IRQ_NON_FATAL;
+	if (cfg->epd && !cfg->cphy)
+		val &= ~CSID_RX_IRQ_CPHY_EOT;
+	writel(val, csid->base + CSID_CSI2_RX_IRQ_MASK);
+
+	csid_gen3_top_mask_set(pipe, CSID_TOP_IRQ_RX);
+}
+
+void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
+			      enum camss_hw_path path,
+			      const struct camss_hw_path_cfg *cfg)
+{
+	const struct csid_gen3_path *p = &csid_gen3_paths[path];
+	struct csid_device *csid = pipe->csid;
+	u32 cfg0, cfg1, mask;
+
+	cfg0 = cfg->cid << RDI_CFG0_DT_ID;
+	cfg0 |= cfg->vc << RDI_CFG0_VC;
+	cfg0 |= cfg->dt << RDI_CFG0_DT;
+	cfg0 |= cfg->decode_format << RDI_CFG0_DECODE_FORMAT;
+	cfg0 |= CSID_PATH_CFG0_TS_STB_SEL | RDI_CFG0_TIMESTAMP_EN;
+	cfg0 |= cfg->frame_id_dec << CSID_PATH_CFG0_FRAME_ID_DEC;
+	cfg0 |= cfg->vfr;
+
+	if (path == CAMSS_HW_PATH_IPP) {
+		cfg1 = CSID_IPP_CFG1_PIX_STORE;
+		if (cfg->crop)
+			cfg1 |= CSID_IPP_CFG1_CROP_H_EN | CSID_IPP_CFG1_CROP_V_EN |
+				CSID_IPP_CFG1_EARLY_EOF;
+		if (cfg->drop)
+			cfg1 |= CSID_IPP_CFG1_DROP_H_EN | CSID_IPP_CFG1_DROP_V_EN;
+	} else {
+		cfg1 = cfg->packing_mipi << CSID_RDI_CFG1_PACKING;
+		cfg1 |= cfg->plain_format << CSID_RDI_CFG1_PLAIN_FMT;
+		cfg1 |= cfg->plain_align << CSID_RDI_CFG1_PLAIN_ALIGN;
+		if (cfg->pix_store)
+			cfg1 |= RDI_CFG1_PIX_STORE;
+		if (cfg->crop)
+			cfg1 |= RDI_CFG1_CROP_H_EN | RDI_CFG1_CROP_V_EN;
+		if (cfg->drop)
+			cfg1 |= RDI_CFG1_DROP_H_EN | RDI_CFG1_DROP_V_EN;
+	}
+
+	writel(0, csid->base + p->ctrl);
+	writel(cfg0, csid->base + p->cfg0);
+	writel(cfg1, csid->base + p->cfg1);
+	writel(cfg0 | RDI_CFG0_EN, csid->base + p->cfg0);
+	writel(CSID_PATH_ERR_REC_DEFAULT, csid->base + p->err_rec);
+	writel(cfg->epoch_line << 16, csid->base + p->epoch);
+
+	mask = CSID_PATH_IRQ_FATAL | CSID_PATH_IRQ_NON_FATAL;
+	if (cfg->events & CAMSS_HW_EV_SOF)
+		mask |= CSID_PATH_IRQ_SOF;
+	if (cfg->events & CAMSS_HW_EV_EOF)
+		mask |= CSID_PATH_IRQ_EOF;
+	if (cfg->events & CAMSS_HW_EV_EPOCH)
+		mask |= CSID_PATH_IRQ_EPOCH0;
+	if (cfg->events & CAMSS_HW_EV_RUP)
+		mask |= CSID_PATH_IRQ_RUP_DONE;
+	writel(mask, csid->base + p->irq_mask);
+
+	pipe->paths |= BIT(path);
+	csid_gen3_top_mask_set(pipe, p->top_bit | CSID_TOP_IRQ_BUF_DONE |
+			       CSID_TOP_IRQ_ERR);
+}
+
+void csid_gen3_hw_path_resume(struct camss_hw_pipe *pipe,
+			      enum camss_hw_path path)
+{
+	const struct csid_gen3_path *p = &csid_gen3_paths[path];
+	struct csid_device *csid = pipe->csid;
+
+	writel(readl(csid->base + p->ctrl) | CSID_PATH_CTRL_RESUME,
+	       csid->base + p->ctrl);
+}
+
+int csid_gen3_hw_stop(struct camss_hw_pipe *pipe)
+{
+	struct csid_device *csid = pipe->csid;
+	unsigned long time, flags;
+	unsigned int i;
+
+	reinit_completion(&csid->reset_complete);
+	writel(CSID_PATH_RESET_CFG, csid->base + CSID_RST_CFG);
+	writel(CSID_PATH_RESET_CMD, csid->base + CSID_RST_CMD);
+	time = wait_for_completion_timeout(&csid->reset_complete,
+					   msecs_to_jiffies(CSID_RESET_TIMEOUT_MS));
+
+	writel(0, csid->base + CSID_CSI2_RX_IRQ_MASK);
+	for_each_set_bit(i, &pipe->paths, CAMSS_HW_PATH_NUM)
+		writel(0, csid->base + csid_gen3_paths[i].irq_mask);
+
+	spin_lock_irqsave(&pipe->lock, flags);
+	pipe->buf_done_mask = 0;
+	memset(pipe->comp_wms, 0, sizeof(pipe->comp_wms));
+	pipe->top_mask = TOP_IRQ_STATUS_RESET_DONE;
+	pipe->gen++;
+	writel(0, csid->base + CSID_BUF_DONE_IRQ_MASK);
+	writel(pipe->top_mask, csid->base + CSID_TOP_IRQ_MASK);
+	spin_unlock_irqrestore(&pipe->lock, flags);
+
+	synchronize_irq(csid->irq);
+	pipe->paths = 0;
+
+	if (!time) {
+		dev_err(csid->camss->dev, "CSID%u path reset timeout\n", csid->id);
+		return -EIO;
+	}
+
+	return 0;
+}
+
+u64 csid_gen3_hw_path_sof_ts(struct camss_hw_pipe *pipe,
+			     enum camss_hw_path path, bool prev)
+{
+	const struct csid_gen3_path *p = &csid_gen3_paths[path];
+	struct csid_device *csid = pipe->csid;
+	u64 hi, lo;
+
+	hi = readl(csid->base + (prev ? p->ts_prev_hi : p->ts_hi));
+	lo = readl(csid->base + (prev ? p->ts_prev_lo : p->ts_lo));
+
+	return mul_u64_u32_div(hi << 32 | lo, CSID_QTIMER_NS_NUM,
+			       CSID_QTIMER_NS_DEN);
+}
+
+struct camss_hw_reg csid_gen3_hw_rup_reg(unsigned long paths, bool mup)
+{
+	struct camss_hw_reg reg = { .offset = CSID_RUP_AUP_CMD };
+	unsigned int i;
+
+	for_each_set_bit(i, &paths, CAMSS_HW_PATH_NUM)
+		reg.value |= csid_gen3_paths[i].rup;
+	if (mup)
+		reg.value |= CSID_RUP_AUP_MUP;
+
+	return reg;
+}
+
+void csid_gen3_hw_buf_done(struct camss_hw_pipe *pipe, unsigned int comp,
+			   unsigned int wm, bool enable)
+{
+	u32 bit = BIT(csid_gen3_buf_done_bit[comp]);
+	unsigned long flags;
+
+	spin_lock_irqsave(&pipe->lock, flags);
+
+	if (enable)
+		pipe->comp_wms[comp] |= BIT(wm);
+	else
+		pipe->comp_wms[comp] &= ~BIT(wm);
+
+	if (pipe->comp_wms[comp])
+		pipe->buf_done_mask |= bit;
+	else
+		pipe->buf_done_mask &= ~bit;
+
+	writel(pipe->buf_done_mask, pipe->csid->base + CSID_BUF_DONE_IRQ_MASK);
+
+	spin_unlock_irqrestore(&pipe->lock, flags);
+}
+
+static void csid_gen3_dispatch(struct camss_hw_pipe *pipe,
+			       const struct camss_hw_irq *ev)
+{
+	const struct camss_hw_ops *ops = pipe->ops;
+	unsigned int i, wm;
+	unsigned long wms;
+	u32 err;
+
+	if (ev->gen != READ_ONCE(pipe->gen))
+		return;
+
+	err = ev->top & CSID_TOP_IRQ_ERR;
+	if (err && ops->error)
+		ops->error(pipe->priv, CAMSS_HW_ERR_TOP, 0, err, true);
+
+	for (i = 0; i < CAMSS_HW_PATH_NUM; i++) {
+		u32 st = ev->path[i];
+
+		if (!st)
+			continue;
+
+		err = st & (CSID_PATH_IRQ_FATAL | CSID_PATH_IRQ_NON_FATAL);
+		if (err && ops->error)
+			ops->error(pipe->priv, CAMSS_HW_ERR_PATH, i, err,
+				   err & CSID_PATH_IRQ_FATAL);
+
+		if ((st & CSID_PATH_IRQ_EOF) && ops->eof)
+			ops->eof(pipe->priv, i, ev->boot_ns);
+		if ((st & CSID_PATH_IRQ_SOF) && ops->sof)
+			ops->sof(pipe->priv, i,
+				 mul_u64_u32_div(ev->sof_ts[i], CSID_QTIMER_NS_NUM,
+						 CSID_QTIMER_NS_DEN),
+				 ev->boot_ns);
+		if ((st & CSID_PATH_IRQ_RUP_DONE) && ops->rup_done)
+			ops->rup_done(pipe->priv, i, ev->boot_ns);
+		if ((st & CSID_PATH_IRQ_EPOCH0) && ops->epoch)
+			ops->epoch(pipe->priv, i, ev->boot_ns);
+	}
+
+	if (ev->rx && ops->error)
+		ops->error(pipe->priv, CAMSS_HW_ERR_RX, 0, ev->rx,
+			   ev->rx & CSID_RX_IRQ_FATAL);
+
+	for (i = 0; ops->buf_done && i < CAMSS_HW_COMP_NUM; i++) {
+		wms = ev->comp_wms[i];
+		for_each_set_bit(wm, &wms, CAMSS_HW_WM_NUM)
+			ops->buf_done(pipe->priv, i, wm, ev->addr[wm],
+				      ev->boot_ns);
+	}
+}
+
+static irqreturn_t csid_isr_claimed(struct csid_device *csid,
+				    struct camss_hw_pipe *pipe)
+{
+	struct camss_hw_irq ev = {};
+	unsigned long wms;
+	unsigned int i, wm;
+	u32 hi;
+
+	spin_lock(&pipe->lock);
+	ev.gen = pipe->gen;
+	spin_unlock(&pipe->lock);
+
+	ev.top = readl(csid->base + CSID_TOP_IRQ_STATUS);
+	writel(ev.top, csid->base + CSID_TOP_IRQ_CLEAR);
+
+	if (ev.top & CSID_TOP_IRQ_RX) {
+		ev.rx = readl(csid->base + CSID_CSI2_RX_IRQ_STATUS);
+		writel(ev.rx, csid->base + CSID_CSI2_RX_IRQ_CLEAR);
+	}
+
+	for_each_set_bit(i, &pipe->paths, CAMSS_HW_PATH_NUM) {
+		const struct csid_gen3_path *p = &csid_gen3_paths[i];
+
+		if (!(ev.top & p->top_bit))
+			continue;
+
+		ev.path[i] = readl(csid->base + p->irq_status);
+		writel(ev.path[i], csid->base + p->irq_clear);
+
+		if (ev.path[i] & CSID_PATH_IRQ_SOF) {
+			hi = readl(csid->base + p->ts_hi);
+			ev.sof_ts[i] = (u64)hi << 32 |
+				       readl(csid->base + p->ts_lo);
+		}
+	}
+
+	spin_lock(&pipe->lock);
+
+	if (ev.top & CSID_TOP_IRQ_BUF_DONE) {
+		ev.buf_done = readl(csid->base + CSID_BUF_DONE_IRQ_STATUS);
+		writel(ev.buf_done, csid->base + CSID_BUF_DONE_IRQ_CLEAR);
+
+		for (i = 0; i < CAMSS_HW_COMP_NUM; i++) {
+			if (!(ev.buf_done & BIT(csid_gen3_buf_done_bit[i])))
+				continue;
+
+			ev.comp_wms[i] = pipe->comp_wms[i];
+			wms = ev.comp_wms[i];
+			for_each_set_bit(wm, &wms, CAMSS_HW_WM_NUM)
+				ev.addr[wm] = vfe_780_wm_last_addr(pipe->vfe, wm);
+		}
+	}
+
+	spin_unlock(&pipe->lock);
+
+	writel(IRQ_CMD_CLEAR, csid->base + CSID_IRQ_CMD);
+
+	if (ev.top & TOP_IRQ_STATUS_RESET_DONE)
+		complete(&csid->reset_complete);
+
+	if (!(ev.top & ~TOP_IRQ_STATUS_RESET_DONE))
+		return IRQ_HANDLED;
+
+	if (smp_load_acquire(&pipe->vfe->claim) != pipe)
+		return IRQ_HANDLED;
+
+	ev.boot_ns = ktime_get_boottime_ns();
+	csid_gen3_dispatch(pipe, &ev);
+
+	return IRQ_HANDLED;
+}
+
 /*
  * csid_isr - CSID module interrupt service routine
  * @irq: Interrupt line
@@ -334,6 +789,9 @@ static irqreturn_t csid_isr(int irq, void *dev)
 	u32 val, buf_done_val;
 	u8 reset_done;
 	int i;
+
+	if (csid->claim)
+		return csid_isr_claimed(csid, csid->claim);
 
 	val = readl(csid->base + CSID_TOP_IRQ_STATUS);
 	writel(val, csid->base + CSID_TOP_IRQ_CLEAR);

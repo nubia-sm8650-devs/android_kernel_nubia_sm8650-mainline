@@ -76,6 +76,8 @@ typedef enum {
 #define VFE_BUS_WM_IMAGE_CFG_2(n)	(BUS_REG_BASE + 0x214 + (n) * 0x100)
 #define		WM_IMAGE_CFG_2_DEFAULT_STRIDE	(0xFFFF)
 #define VFE_BUS_WM_PACKER_CFG(n)	(BUS_REG_BASE + 0x218 + (n) * 0x100)
+#define VFE_BUS_WM_FRAME_HEADER_ADDR(n)	(BUS_REG_BASE + 0x220 + (n) * 0x100)
+#define VFE_BUS_WM_FRAME_HEADER_CFG(n)	(BUS_REG_BASE + 0x228 + (n) * 0x100)
 
 #define VFE_BUS_WM_IRQ_SUBSAMPLE_PERIOD(n)	(BUS_REG_BASE + 0x230 + (n) * 0x100)
 #define VFE_BUS_WM_IRQ_SUBSAMPLE_PATTERN(n)	(BUS_REG_BASE + 0x234 + (n) * 0x100)
@@ -85,6 +87,7 @@ typedef enum {
 #define VFE_BUS_WM_MMU_PREFETCH_CFG(n)		(BUS_REG_BASE + 0x260 + (n) * 0x100)
 #define VFE_BUS_WM_MMU_PREFETCH_MAX_OFFSET(n)	(BUS_REG_BASE + 0x264 + (n) * 0x100)
 #define VFE_BUS_WM_ADDR_CFG(n)			(BUS_REG_BASE + 0x270 + (n) * 0x100)
+#define VFE_BUS_WM_ADDR_STATUS_0(n)		(BUS_REG_BASE + 0x278 + (n) * 0x100)
 #define VFE_BUS_WM_DEBUG_STATUS_CFG(n)		(BUS_REG_BASE + 0x288 + (n) * 0x100)
 #define		WM_DEBUG_STATUS_1_EN		(11 << 8)
 
@@ -98,6 +101,9 @@ typedef enum {
 #define VFE_BUS_WM_UBWC_LOSSY_THRESH1(n)	(BUS_REG_BASE + 0x258 + (n) * 0x100)
 #define VFE_BUS_WM_UBWC_OFF_LOSSY_VAR(n)	(BUS_REG_BASE + 0x25c + (n) * 0x100)
 #define		WM_UBWC_BW_LIMIT_BLOB		0xFFFF
+
+#define VFE_BUS_UBWC_STATIC_CTRL		(BUS_REG_BASE + 0x58)
+#define		UBWC_STATIC_CTRL_LPDDR5		0x1036
 
 #define VFE_WM_REG(r, o, v)	((r)[n].offset = (o), (r)[n++].value = (v))
 
@@ -228,6 +234,49 @@ int vfe_780_wm_update_regs(struct vfe_device *vfe, unsigned int wm,
 	return n;
 }
 
+int vfe_780_wm_frame_header_regs(struct vfe_device *vfe, unsigned int wm,
+				 u64 iova, u32 id,
+				 struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS])
+{
+	unsigned int n = 0;
+
+	if (!vfe_780_wm_has_frame_header(wm) || iova & 0xff)
+		return -EINVAL;
+
+	VFE_WM_REG(regs, VFE_BUS_WM_FRAME_HEADER_ADDR(wm), iova >> 8);
+	VFE_WM_REG(regs, VFE_BUS_WM_FRAME_HEADER_CFG(wm), id);
+
+	return n;
+}
+
+int vfe_780_wm_hfr_regs(struct vfe_device *vfe, unsigned int wm,
+			const struct camss_hw_wm_hfr *hfr,
+			struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS])
+{
+	unsigned int n = 0;
+
+	VFE_WM_REG(regs, VFE_BUS_WM_FRAMEDROP_PATTERN(wm), hfr->framedrop_pattern);
+	VFE_WM_REG(regs, VFE_BUS_WM_FRAMEDROP_PERIOD(wm), hfr->framedrop_period);
+	VFE_WM_REG(regs, VFE_BUS_WM_IRQ_SUBSAMPLE_PERIOD(wm), hfr->subsample_period);
+	VFE_WM_REG(regs, VFE_BUS_WM_IRQ_SUBSAMPLE_PATTERN(wm), hfr->subsample_pattern);
+
+	return n;
+}
+
+int vfe_780_wm_bw_limit_regs(struct vfe_device *vfe, unsigned int wm,
+			     u32 counter,
+			     struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS])
+{
+	unsigned int n = 0;
+
+	if (counter > CAMSS_HW_WM_BW_LIMIT_MAX)
+		return -EINVAL;
+
+	VFE_WM_REG(regs, VFE_BUS_WM_BW_LIMIT(wm), counter ? counter << 1 | 1 : 0);
+
+	return n;
+}
+
 int vfe_780_wm_stop_regs(struct vfe_device *vfe, unsigned int wm,
 			 struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS])
 {
@@ -245,6 +294,17 @@ void vfe_780_write_regs(struct vfe_device *vfe, const struct camss_hw_reg *regs,
 
 	for (i = 0; i < n; i++)
 		writel(regs[i].value, vfe->base + regs[i].offset);
+}
+
+u32 vfe_780_wm_last_addr(struct vfe_device *vfe, unsigned int wm)
+{
+	return readl(vfe->base + VFE_BUS_WM_ADDR_STATUS_0(wm));
+}
+
+void vfe_780_ubwc_static(struct vfe_device *vfe)
+{
+	writel(readl(vfe->base + VFE_BUS_UBWC_STATIC_CTRL) | UBWC_STATIC_CTRL_LPDDR5,
+	       vfe->base + VFE_BUS_UBWC_STATIC_CTRL);
 }
 
 static void vfe_780_wm_start(struct vfe_device *vfe, unsigned int wm,

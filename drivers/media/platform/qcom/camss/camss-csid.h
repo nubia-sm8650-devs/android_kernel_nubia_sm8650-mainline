@@ -163,6 +163,7 @@ struct csid_device {
 	char irq_name[30];
 	u32 reg_update;
 	u8 ipp_port;	/* source port the IPP feeds: PIX, or RDI0 for NV12 compat */
+	struct camss_hw_pipe *claim;
 	struct camss_clock *clock;
 	int nclocks;
 	struct regulator_bulk_data *supplies;
@@ -206,6 +207,8 @@ const struct csid_format_info *csid_get_fmt_entry(const struct csid_format_info 
 
 int msm_csid_subdev_init(struct camss *camss, struct csid_device *csid,
 			 const struct camss_subdev_resources *res, u8 id);
+
+int csid_power(struct csid_device *csid, bool on);
 
 int msm_csid_register_entity(struct csid_device *csid,
 			     struct v4l2_device *v4l2_dev);

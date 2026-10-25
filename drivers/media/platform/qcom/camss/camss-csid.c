@@ -671,15 +671,14 @@ u32 csid_src_pad_code(struct csid_device *csid, u32 sink_code,
 }
 
 /*
- * csid_set_power - Power on/off CSID module
- * @sd: CSID V4L2 subdevice
+ * csid_power - Power on/off CSID module
+ * @csid: CSID device
  * @on: Requested power state
  *
  * Return 0 on success or a negative error code otherwise
  */
-static int csid_set_power(struct v4l2_subdev *sd, int on)
+int csid_power(struct csid_device *csid, bool on)
 {
-	struct csid_device *csid = v4l2_get_subdevdata(sd);
 	struct camss *camss = csid->camss;
 	struct device *dev = camss->dev;
 	int ret = 0;
@@ -739,6 +738,16 @@ err_pm_put:
 err_put_parent:
 	csid->res->parent_dev_ops->put(camss, csid->id);
 	return ret;
+}
+
+static int csid_set_power(struct v4l2_subdev *sd, int on)
+{
+	struct csid_device *csid = v4l2_get_subdevdata(sd);
+
+	if (on && camss_hw_csid_claimed(csid))
+		return -EBUSY;
+
+	return csid_power(csid, on);
 }
 
 /*

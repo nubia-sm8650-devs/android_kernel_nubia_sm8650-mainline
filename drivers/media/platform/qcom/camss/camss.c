@@ -5993,6 +5993,14 @@ static struct platform_driver qcom_camss_driver = {
 	},
 };
 
+struct camss *camss_from_device(struct device *dev)
+{
+	if (dev->driver != &qcom_camss_driver.driver || !device_is_bound(dev))
+		return NULL;
+
+	return dev_get_drvdata(dev);
+}
+
 module_platform_driver(qcom_camss_driver);
 
 MODULE_DESCRIPTION("Qualcomm Camera Subsystem driver");

@@ -1672,6 +1672,9 @@ static int vfe_set_power(struct v4l2_subdev *sd, int on)
 	int ret;
 
 	if (on) {
+		if (camss_hw_vfe_claimed(vfe))
+			return -EBUSY;
+
 		ret = vfe_get(vfe);
 		if (ret < 0)
 			return ret;

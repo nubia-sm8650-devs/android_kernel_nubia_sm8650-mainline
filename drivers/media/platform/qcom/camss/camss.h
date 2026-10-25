@@ -11,6 +11,7 @@
 #define QC_MSM_CAMSS_H
 
 #include <linux/device.h>
+#include <linux/spinlock.h>
 #include <linux/types.h>
 #include <media/v4l2-async.h>
 #include <media/v4l2-device.h>
@@ -24,6 +25,7 @@
 #include "camss-tpg.h"
 #include "camss-vfe.h"
 #include "camss-format.h"
+#include "camss-hw.h"
 
 #define to_camss(ptr_module)	\
 	container_of(ptr_module, struct camss, ptr_module)
@@ -143,6 +145,35 @@ struct camss {
 	bool legacy_phy;
 };
 
+struct camss_hw_irq {
+	u64 boot_ns;
+	u64 sof_ts[CAMSS_HW_PATH_NUM];
+	u32 gen;
+	u32 top;
+	u32 rx;
+	u32 path[CAMSS_HW_PATH_NUM];
+	u32 buf_done;
+	u32 comp_wms[CAMSS_HW_COMP_NUM];
+	u32 addr[CAMSS_HW_WM_NUM];
+};
+
+struct camss_hw_pipe {
+	struct camss *camss;
+	struct csid_device *csid;
+	struct vfe_device *vfe;
+	const struct camss_hw_ops *ops;
+	void *priv;
+	resource_size_t csid_size;
+	resource_size_t vfe_size;
+	resource_size_t wrapper_size;
+	spinlock_t lock;	/* protects the masks, @comp_wms and @gen */
+	unsigned long paths;
+	u32 top_mask;
+	u32 buf_done_mask;
+	u32 comp_wms[CAMSS_HW_COMP_NUM];
+	u32 gen;
+};
+
 struct camss_buf_done_info {
 	int hw_id;
 	int port_id;
@@ -188,5 +219,8 @@ void camss_delete(struct camss *camss);
 void camss_buf_done(struct camss *camss, struct camss_buf_done_info *info);
 void camss_reg_update(struct camss *camss, int hw_id,
 		      int port_id, bool is_clear);
+struct camss *camss_from_device(struct device *dev);
+bool camss_hw_csid_claimed(struct csid_device *csid);
+bool camss_hw_vfe_claimed(struct vfe_device *vfe);
 
 #endif /* QC_MSM_CAMSS_H */

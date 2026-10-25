@@ -9,6 +9,8 @@
 #ifndef __QC_MSM_CAMSS_CSID_GEN3_H__
 #define __QC_MSM_CAMSS_CSID_GEN3_H__
 
+#include "camss-hw.h"
+
 #define DECODE_FORMAT_UNCOMPRESSED_8_BIT	0x1
 #define DECODE_FORMAT_UNCOMPRESSED_10_BIT	0x2
 #define DECODE_FORMAT_UNCOMPRESSED_12_BIT	0x3
@@ -24,5 +26,22 @@
 
 /* port_id passed to camss_reg_update() for the IPP, outside the RDI range */
 #define CSID_780_CUSTOM_PORT_ID_IPP0	0x100
+
+struct camss_hw_pipe;
+
+void csid_gen3_hw_init(struct camss_hw_pipe *pipe);
+void csid_gen3_hw_rx(struct camss_hw_pipe *pipe,
+		     const struct camss_hw_rx_cfg *cfg);
+void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
+			      enum camss_hw_path path,
+			      const struct camss_hw_path_cfg *cfg);
+void csid_gen3_hw_path_resume(struct camss_hw_pipe *pipe,
+			      enum camss_hw_path path);
+int csid_gen3_hw_stop(struct camss_hw_pipe *pipe);
+struct camss_hw_reg csid_gen3_hw_rup_reg(unsigned long paths, bool mup);
+u64 csid_gen3_hw_path_sof_ts(struct camss_hw_pipe *pipe,
+			     enum camss_hw_path path, bool prev);
+void csid_gen3_hw_buf_done(struct camss_hw_pipe *pipe, unsigned int comp,
+			   unsigned int wm, bool enable);
 
 #endif /* __QC_MSM_CAMSS_CSID_GEN3_H__ */

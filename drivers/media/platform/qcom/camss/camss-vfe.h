@@ -273,6 +273,7 @@ struct vfe_device {
 	struct camss_video_ops video_ops;
 	struct device *genpd;
 	struct device_link *genpd_link;
+	struct camss_hw_pipe *claim;	/* set while the claimed VFE is powered */
 };
 
 struct camss_subdev_resources;
@@ -362,10 +363,21 @@ int vfe_780_wm_update_regs(struct vfe_device *vfe, unsigned int wm,
 			   const struct camss_hw_wm_cfg *cfg, u64 iova,
 			   unsigned int flags,
 			   struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS]);
+int vfe_780_wm_frame_header_regs(struct vfe_device *vfe, unsigned int wm,
+				 u64 iova, u32 id,
+				 struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS]);
+int vfe_780_wm_hfr_regs(struct vfe_device *vfe, unsigned int wm,
+			const struct camss_hw_wm_hfr *hfr,
+			struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS]);
+int vfe_780_wm_bw_limit_regs(struct vfe_device *vfe, unsigned int wm,
+			     u32 counter,
+			     struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS]);
 int vfe_780_wm_stop_regs(struct vfe_device *vfe, unsigned int wm,
 			 struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS]);
 void vfe_780_write_regs(struct vfe_device *vfe, const struct camss_hw_reg *regs,
 			unsigned int n);
+u32 vfe_780_wm_last_addr(struct vfe_device *vfe, unsigned int wm);
+void vfe_780_ubwc_static(struct vfe_device *vfe);
 
 int vfe_get(struct vfe_device *vfe);
 void vfe_put(struct vfe_device *vfe);
