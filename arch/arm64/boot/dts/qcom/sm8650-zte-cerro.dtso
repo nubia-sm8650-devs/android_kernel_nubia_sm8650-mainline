@@ -610,6 +610,30 @@
 		power-domains = <&camcc CAM_CC_TITAN_TOP_GDSC>;
 	};
 
+	qcom,csiphy1 {
+		cell-index = <1>;
+		compatible = "qcom,csiphy-v2.2.0", "qcom,csiphy";
+		phys = <&csiphy1>;
+	};
+
+	qcom,csiphy2 {
+		cell-index = <2>;
+		compatible = "qcom,csiphy-v2.2.0", "qcom,csiphy";
+		phys = <&csiphy2>;
+	};
+
+	qcom,csiphy3 {
+		cell-index = <3>;
+		compatible = "qcom,csiphy-v2.2.0_z60u_tele", "qcom,csiphy";
+		phys = <&csiphy3>;
+	};
+
+	qcom,csiphy4 {
+		cell-index = <4>;
+		compatible = "qcom,csiphy-v2.2.0", "qcom,csiphy";
+		phys = <&csiphy4>;
+	};
+
 	qcom,cam-sensor3 {
 		cell-index = <3>;
 		compatible = "qcom,cam-sensor";
