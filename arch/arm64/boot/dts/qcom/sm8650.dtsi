@@ -5515,6 +5515,18 @@
 			};
 		};
 
+		camnoc_virt: interconnect@ac19000 {
+			compatible = "qcom,sm8650-camnoc";
+			reg = <0 0x0ac19000 0 0xac80>;
+
+			clocks = <&camcc CAM_CC_CAMNOC_AXI_RT_CLK_SRC>;
+			clock-names = "camnoc_axi";
+
+			power-domains = <&camcc CAM_CC_TITAN_TOP_GDSC>;
+
+			#interconnect-cells = <1>;
+		};
+
 		csiphy0: phy@ace4000 {
 			compatible = "qcom,sm8650-csi2-phy";
 			reg = <0 0x0ace4000 0 0x2000>;
