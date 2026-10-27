@@ -11,6 +11,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/media/video-interfaces.h>
 #include <dt-bindings/leds/common.h>
 #include <dt-bindings/msm-camera.h>
 #include <dt-bindings/interconnect/qcom,icc.h>
@@ -652,6 +653,12 @@
 		clock-rates = <24000000>;
 		power-domains = <&camcc CAM_CC_TITAN_TOP_GDSC>;
 		zte-tof-enable;
+
+		port {
+			sensor3_ep: endpoint {
+				remote-endpoint = <&csiphy3_in>;
+			};
+		};
 	};
 
 	qcom,cam-sensor1 {
@@ -692,6 +699,12 @@
 		clock-rates = <24000000>;
 		power-domains = <&camcc CAM_CC_TITAN_TOP_GDSC>;
 		zte-tof-enable;
+
+		port {
+			sensor1_ep: endpoint {
+				remote-endpoint = <&csiphy4_in>;
+			};
+		};
 	};
 
 	qcom,cam-sensor0 {
@@ -738,6 +751,12 @@
 		clock-rates = <24000000>;
 		power-domains = <&camcc CAM_CC_TITAN_TOP_GDSC>;
 		zte-tof-enable;
+
+		port {
+			sensor0_ep: endpoint {
+				remote-endpoint = <&csiphy1_in>;
+			};
+		};
 	};
 
 	qcom,cam-sensor2 {
@@ -782,6 +801,12 @@
 		clock-rates = <24000000>;
 		power-domains = <&camcc CAM_CC_TITAN_TOP_GDSC>;
 		zte-tof-enable;
+
+		port {
+			sensor2_ep: endpoint {
+				remote-endpoint = <&csiphy2_in>;
+			};
+		};
 	};
 };
 
@@ -794,6 +819,136 @@
 	vdd-csiphy35-1p2-supply = <&vreg_l3i_1p2>;
 
 	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			camss_ep1: endpoint {
+				bus-type = <MEDIA_BUS_TYPE_CSI2_CPHY>;
+				data-lanes = <1 2 3>;
+				remote-endpoint = <&csiphy1_out>;
+			};
+		};
+
+		port@2 {
+			camss_ep2: endpoint {
+				bus-type = <MEDIA_BUS_TYPE_CSI2_CPHY>;
+				data-lanes = <1 2 3>;
+				remote-endpoint = <&csiphy2_out>;
+			};
+		};
+
+		port@3 {
+			camss_ep3: endpoint {
+				bus-type = <MEDIA_BUS_TYPE_CSI2_CPHY>;
+				data-lanes = <1 2 3>;
+				remote-endpoint = <&csiphy3_out>;
+			};
+		};
+
+		port@4 {
+			camss_ep4: endpoint {
+				bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
+				data-lanes = <1 2 3 4>;
+				remote-endpoint = <&csiphy4_out>;
+			};
+		};
+	};
+};
+
+&csiphy1 {
+	vdda-phy-supply = <&vreg_l2i_0p88>;
+	vdda-pll-supply = <&vreg_l3i_1p2>;
+
+	status = "okay";
+
+	ports {
+		port@0 {
+			csiphy1_in: endpoint {
+				bus-type = <MEDIA_BUS_TYPE_CSI2_CPHY>;
+				data-lanes = <1 2 3>;
+				remote-endpoint = <&sensor0_ep>;
+			};
+		};
+
+		port@1 {
+			csiphy1_out: endpoint {
+				remote-endpoint = <&camss_ep1>;
+			};
+		};
+	};
+};
+
+&csiphy2 {
+	vdda-phy-supply = <&vreg_l2i_0p88>;
+	vdda-pll-supply = <&vreg_l3i_1p2>;
+
+	status = "okay";
+
+	ports {
+		port@0 {
+			csiphy2_in: endpoint {
+				bus-type = <MEDIA_BUS_TYPE_CSI2_CPHY>;
+				data-lanes = <1 2 3>;
+				remote-endpoint = <&sensor2_ep>;
+			};
+		};
+
+		port@1 {
+			csiphy2_out: endpoint {
+				remote-endpoint = <&camss_ep2>;
+			};
+		};
+	};
+};
+
+&csiphy3 {
+	compatible = "qcom,sm8650-csi2-phy-z60u-tele";
+	vdda-phy-supply = <&vreg_l2i_0p88>;
+	vdda-pll-supply = <&vreg_l3i_1p2>;
+
+	status = "okay";
+
+	ports {
+		port@0 {
+			csiphy3_in: endpoint {
+				bus-type = <MEDIA_BUS_TYPE_CSI2_CPHY>;
+				data-lanes = <1 2 3>;
+				remote-endpoint = <&sensor3_ep>;
+			};
+		};
+
+		port@1 {
+			csiphy3_out: endpoint {
+				remote-endpoint = <&camss_ep3>;
+			};
+		};
+	};
+};
+
+&csiphy4 {
+	vdda-phy-supply = <&vreg_l2i_0p88>;
+	vdda-pll-supply = <&vreg_l3i_1p2>;
+
+	status = "okay";
+
+	ports {
+		port@0 {
+			csiphy4_in: endpoint {
+				bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
+				data-lanes = <1 2 3 4>;
+				remote-endpoint = <&sensor1_ep>;
+			};
+		};
+
+		port@1 {
+			csiphy4_out: endpoint {
+				remote-endpoint = <&camss_ep4>;
+			};
+		};
+	};
 };
 
 &cci0 {
