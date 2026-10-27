@@ -44,7 +44,7 @@
 #define MASTER_CAMNOC_SBI		16
 
 /* Image Control Processor */
-#define MASTER_CAMNOC_ICP		17
+#define MASTER_CAMNOC_ICP_RD_WR	17
 
 /* CAMNOC AXI slave (single exit point to external interconnect) */
 #define SLAVE_CAMNOC_AXI		18

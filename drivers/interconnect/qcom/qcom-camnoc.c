@@ -142,7 +142,7 @@ static const struct qcom_camnoc_node * const camnoc_nodes[] = {
 	[MASTER_CAMNOC_CDM]        = &camnoc_master_cdm,
 	[MASTER_CAMNOC_FD]         = &camnoc_master_fd,
 	[MASTER_CAMNOC_SBI]        = &camnoc_master_sbi,
-	[MASTER_CAMNOC_ICP]        = &camnoc_master_icp,
+	[MASTER_CAMNOC_ICP_RD_WR] = &camnoc_master_icp,
 	[SLAVE_CAMNOC_AXI]         = &camnoc_slave_axi,
 };
 
