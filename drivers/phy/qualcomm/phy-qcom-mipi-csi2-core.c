@@ -312,6 +312,7 @@ static int phy_qcom_mipi_csi2_parse_routing(struct mipi_csi2phy_device *csi2phy)
 	struct fwnode_handle *ep;
 	int num_polarities;
 	int num_data_lanes;
+	u32 channel_type;
 	u32 bus_type;
 	int i, ret;
 
@@ -331,6 +332,15 @@ static int phy_qcom_mipi_csi2_parse_routing(struct mipi_csi2phy_device *csi2phy)
 	/* bus-type is optional, D-PHY is the default */
 	bus_type = MEDIA_BUS_TYPE_CSI2_DPHY;
 	fwnode_property_read_u32(ep, "bus-type", &bus_type);
+
+	/*
+	 * qcom,channel-type is optional, the short channel C-PHY rate table
+	 * entries are the default.
+	 */
+	channel_type = 0;
+	fwnode_property_read_u32(dev_fwnode(dev), "qcom,channel-type",
+				 &channel_type);
+	csi2phy->standard_channel = channel_type == 1;
 
 	switch (bus_type) {
 	case MEDIA_BUS_TYPE_CSI2_DPHY:
@@ -528,6 +538,7 @@ static const struct of_device_id phy_qcom_mipi_csi2_of_match_table[] = {
 	{ .compatible	= "qcom,qcs8300-csi2-phy", .data = &mipi_csi2_dphy_sa8775p },
 	{ .compatible	= "qcom,sa8775p-csi2-phy", .data = &mipi_csi2_dphy_sa8775p },
 	{ .compatible	= "qcom,sc7280-csi2-phy", .data = &mipi_csi2_dphy_sc7280 },
+	{ .compatible	= "qcom,sm8650-csi2-phy", .data = &mipi_csi2_dphy_sm8650 },
 	{ .compatible	= "qcom,x1e80100-csi2-phy", .data = &mipi_csi2_dphy_4nm_x1e },
 	{ }
 };
