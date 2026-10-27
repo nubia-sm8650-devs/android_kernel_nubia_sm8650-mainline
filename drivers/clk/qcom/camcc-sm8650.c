@@ -3499,7 +3499,7 @@ static struct gdsc cam_cc_bps_gdsc = {
 	},
 	.pwrsts = PWRSTS_OFF_ON,
 	.parent = &cam_cc_titan_top_gdsc.pd,
-	.flags = POLL_CFG_GDSCR | RETAIN_FF_ENABLE,
+	.flags = HW_CTRL_TRIGGER | POLL_CFG_GDSCR | RETAIN_FF_ENABLE,
 };
 
 static struct gdsc cam_cc_ife_0_gdsc = {
@@ -3551,7 +3551,7 @@ static struct gdsc cam_cc_ipe_0_gdsc = {
 	},
 	.pwrsts = PWRSTS_OFF_ON,
 	.parent = &cam_cc_titan_top_gdsc.pd,
-	.flags = POLL_CFG_GDSCR | RETAIN_FF_ENABLE,
+	.flags = HW_CTRL_TRIGGER | POLL_CFG_GDSCR | RETAIN_FF_ENABLE,
 };
 
 static struct gdsc cam_cc_sbi_gdsc = {
