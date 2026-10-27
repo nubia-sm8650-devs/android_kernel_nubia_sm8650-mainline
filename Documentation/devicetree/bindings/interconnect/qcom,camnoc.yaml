@@ -28,14 +28,26 @@ properties:
   compatible:
     enum:
       - qcom,sm8250-cam-virt
+      - qcom,sm8650-camnoc
+
+  reg:
+    maxItems: 1
+    description:
+      CAMNOC QoS register space. Required when the compatible carries a
+      static QoS table, absent on the virtual variants.
 
   clocks:
     items:
-      - description: CAMNOC AXI clock
+      - description: CAMNOC AXI clock. Consumers keep the branch clocks
+          enabled, the provider drives the shared source clock rate.
 
   clock-names:
     items:
       - const: camnoc_axi
+
+  power-domains:
+    maxItems: 1
+    description: Titan Top GDSC.
 
   '#interconnect-cells':
     const: 1
@@ -49,6 +61,22 @@ required:
 additionalProperties: false
 
 examples:
+  - |
+    #include <dt-bindings/clock/qcom,sm8650-camcc.h>
+    #include <dt-bindings/interconnect/qcom,camnoc.h>
+
+    camnoc: interconnect@ac19000 {
+        compatible = "qcom,sm8650-camnoc";
+        reg = <0x0ac19000 0xac80>;
+
+        clocks = <&camcc CAM_CC_CAMNOC_AXI_RT_CLK_SRC>;
+        clock-names = "camnoc_axi";
+
+        power-domains = <&camcc CAM_CC_TITAN_TOP_GDSC>;
+
+        #interconnect-cells = <1>;
+    };
+
   - |
     #include <dt-bindings/clock/qcom,camcc-sm8250.h>
     #include <dt-bindings/interconnect/qcom,camnoc.h>
@@ -122,3 +150,4 @@ examples:
             };
         };
     };
+...

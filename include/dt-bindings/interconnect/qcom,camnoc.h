@@ -49,4 +49,7 @@
 /* CAMNOC AXI slave (single exit point to external interconnect) */
 #define SLAVE_CAMNOC_AXI		18
 
+/* CPAS aggregate vote, not tied to one hardware master port */
+#define MASTER_CAMNOC_CPAS		19
+
 #endif /* __DT_BINDINGS_INTERCONNECT_QCOM_CAMNOC_H */
