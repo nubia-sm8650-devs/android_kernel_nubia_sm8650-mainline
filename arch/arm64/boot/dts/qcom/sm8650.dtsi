@@ -5762,6 +5762,8 @@
 				    "tpg0",
 				    "tpg1",
 				    "tpg2";
+			qcom,rt-wrapper-base = <0x0 0x0ac62000>,
+					       <0x0 0x0acca000>;
 
 			clocks = <&camcc CAM_CC_CAMNOC_AXI_RT_CLK>,
 				 <&camcc CAM_CC_CPAS_AHB_CLK>,
