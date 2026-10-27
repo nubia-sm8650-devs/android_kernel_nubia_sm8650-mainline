@@ -13,6 +13,7 @@
 #include "pm8550vs.dtsi"
 #include "pmk8550.dtsi"
 #include "pmr735d_a.dtsi"
+#include "sm8650-camera.dtsi"
 
 /delete-node/ &hwfence_shbuf;
 /delete-node/ &rmtfs_mem;
