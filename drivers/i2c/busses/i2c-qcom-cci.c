@@ -75,6 +75,7 @@
 #define CCI_I2C_REPORT		8
 #define CCI_I2C_WRITE		9
 #define CCI_I2C_READ		10
+#define CCI_I2C_WRITE_DISABLE_P	11
 
 #define CCI_I2C_REPORT_IRQ_EN	BIT(8)
 
@@ -327,31 +328,11 @@ static int cci_validate_queue(struct cci *cci, u8 master, u8 queue)
 	return cci_run_queue(cci, master, queue);
 }
 
-static int cci_i2c_read(struct cci *cci, u16 master,
-			u16 addr, u8 *buf, u16 len)
+static int cci_i2c_read_fifo(struct cci *cci, u16 master, u8 *buf, u16 len)
 {
 	u32 val, words_read, words_exp;
-	u8 queue = QUEUE_1;
-	int i, index = 0, ret;
+	int i, index = 0;
 	bool first = true;
-
-	/*
-	 * Call validate queue to make sure queue is empty before starting.
-	 * This is to avoid overflow / underflow of queue.
-	 */
-	ret = cci_validate_queue(cci, master, queue);
-	if (ret < 0)
-		return ret;
-
-	val = CCI_I2C_SET_PARAM | (addr & 0x7f) << 4;
-	writel(val, cci->base + CCI_I2C_Mm_Qn_LOAD_DATA(master, queue));
-
-	val = CCI_I2C_READ | len << 4;
-	writel(val, cci->base + CCI_I2C_Mm_Qn_LOAD_DATA(master, queue));
-
-	ret = cci_run_queue(cci, master, queue);
-	if (ret < 0)
-		return ret;
 
 	words_read = readl(cci->base + CCI_I2C_Mm_READ_BUF_LEVEL(master));
 	words_exp = len / 4 + 1;
@@ -378,6 +359,71 @@ static int cci_i2c_read(struct cci *cci, u16 master,
 	} while (--words_read);
 
 	return 0;
+}
+
+static int cci_i2c_read(struct cci *cci, u16 master,
+			u16 addr, u8 *buf, u16 len)
+{
+	u32 val;
+	u8 queue = QUEUE_1;
+	int ret;
+
+	/*
+	 * Call validate queue to make sure queue is empty before starting.
+	 * This is to avoid overflow / underflow of queue.
+	 */
+	ret = cci_validate_queue(cci, master, queue);
+	if (ret < 0)
+		return ret;
+
+	val = CCI_I2C_SET_PARAM | (addr & 0x7f) << 4;
+	writel(val, cci->base + CCI_I2C_Mm_Qn_LOAD_DATA(master, queue));
+
+	val = CCI_I2C_READ | len << 4;
+	writel(val, cci->base + CCI_I2C_Mm_Qn_LOAD_DATA(master, queue));
+
+	ret = cci_run_queue(cci, master, queue);
+	if (ret < 0)
+		return ret;
+
+	return cci_i2c_read_fifo(cci, master, buf, len);
+}
+
+static int cci_i2c_write_read(struct cci *cci, u16 master,
+			      u16 addr, u8 *wbuf, u16 wlen, u8 *rbuf, u16 rlen)
+{
+	u8 load[12] = { 0 };
+	u32 val;
+	u8 queue = QUEUE_1;
+	int j, ret;
+
+	ret = cci_validate_queue(cci, master, queue);
+	if (ret < 0)
+		return ret;
+
+	val = CCI_I2C_SET_PARAM | (addr & 0x7f) << 4;
+	writel(val, cci->base + CCI_I2C_Mm_Qn_LOAD_DATA(master, queue));
+
+	load[0] = CCI_I2C_WRITE_DISABLE_P | wlen << 4;
+	for (j = 0; j < wlen; j++)
+		load[j + 1] = wbuf[j];
+
+	for (j = 0; j < DIV_ROUND_UP(wlen + 1, 4); j++) {
+		val = load[j * 4];
+		val |= load[j * 4 + 1] << 8;
+		val |= load[j * 4 + 2] << 16;
+		val |= load[j * 4 + 3] << 24;
+		writel(val, cci->base + CCI_I2C_Mm_Qn_LOAD_DATA(master, queue));
+	}
+
+	val = CCI_I2C_READ | rlen << 4;
+	writel(val, cci->base + CCI_I2C_Mm_Qn_LOAD_DATA(master, queue));
+
+	ret = cci_run_queue(cci, master, queue);
+	if (ret < 0)
+		return ret;
+
+	return cci_i2c_read_fifo(cci, master, rbuf, rlen);
 }
 
 static int cci_i2c_write(struct cci *cci, u16 master,
@@ -418,6 +464,17 @@ static int cci_i2c_write(struct cci *cci, u16 master,
 	return cci_run_queue(cci, master, queue);
 }
 
+static bool cci_msgs_combinable(struct cci *cci, struct i2c_msg *w,
+				struct i2c_msg *r)
+{
+	const struct i2c_adapter_quirks *q = &cci->data->quirks;
+
+	return q->max_comb_1st_msg_len && !(w->flags & I2C_M_RD) &&
+	       r->flags & I2C_M_RD && w->addr == r->addr &&
+	       w->len <= q->max_comb_1st_msg_len &&
+	       r->len <= q->max_comb_2nd_msg_len;
+}
+
 static int cci_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 {
 	struct cci_master *cci_master = i2c_get_adapdata(adap);
@@ -429,7 +486,14 @@ static int cci_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 		goto err;
 
 	for (i = 0; i < num; i++) {
-		if (msgs[i].flags & I2C_M_RD)
+		if (i + 1 < num &&
+		    cci_msgs_combinable(cci, &msgs[i], &msgs[i + 1])) {
+			ret = cci_i2c_write_read(cci, cci_master->master,
+						 msgs[i].addr, msgs[i].buf,
+						 msgs[i].len, msgs[i + 1].buf,
+						 msgs[i + 1].len);
+			i++;
+		} else if (msgs[i].flags & I2C_M_RD)
 			ret = cci_i2c_read(cci, cci_master->master,
 					   msgs[i].addr, msgs[i].buf,
 					   msgs[i].len);
@@ -806,6 +870,8 @@ static const struct cci_data cci_sm8650_data = {
 	.quirks = {
 		.max_write_len = 11,
 		.max_read_len = 255,
+		.max_comb_1st_msg_len = 8,
+		.max_comb_2nd_msg_len = 255,
 	},
 	.params[I2C_MODE_STANDARD] = {
 		.thigh = 201,
