@@ -76,6 +76,7 @@
 #define CCI_I2C_WRITE		9
 #define CCI_I2C_READ		10
 #define CCI_I2C_WRITE_DISABLE_P	11
+#define CCI_I2C_WRITE_PAYLOAD	11
 
 #define CCI_I2C_REPORT_IRQ_EN	BIT(8)
 
@@ -289,7 +290,16 @@ static int cci_reset(struct cci *cci)
 	return 0;
 }
 
-static int cci_run_queue(struct cci *cci, u8 master, u8 queue)
+static unsigned long cci_xfer_timeout(struct cci *cci, u8 master, u16 len)
+{
+	static const unsigned int rate_khz[] = {100, 400, 1000};
+	unsigned int ms = len * 9 / rate_khz[cci->master[master].mode];
+
+	return CCI_TIMEOUT + msecs_to_jiffies(ms);
+}
+
+static int cci_run_queue(struct cci *cci, u8 master, u8 queue,
+			 unsigned long timeout)
 {
 	u32 val;
 
@@ -301,7 +311,7 @@ static int cci_run_queue(struct cci *cci, u8 master, u8 queue)
 	writel(val, cci->base + CCI_QUEUE_START);
 
 	if (!wait_for_completion_timeout(&cci->master[master].irq_complete,
-					 CCI_TIMEOUT)) {
+					 timeout)) {
 		dev_err(cci->dev, "master %d queue %d timeout\n",
 			master, queue);
 		cci_reset(cci);
@@ -325,7 +335,7 @@ static int cci_validate_queue(struct cci *cci, u8 master, u8 queue)
 	val = CCI_I2C_REPORT | CCI_I2C_REPORT_IRQ_EN;
 	writel(val, cci->base + CCI_I2C_Mm_Qn_LOAD_DATA(master, queue));
 
-	return cci_run_queue(cci, master, queue);
+	return cci_run_queue(cci, master, queue, CCI_TIMEOUT);
 }
 
 static int cci_i2c_read_fifo(struct cci *cci, u16 master, u8 *buf, u16 len)
@@ -382,7 +392,8 @@ static int cci_i2c_read(struct cci *cci, u16 master,
 	val = CCI_I2C_READ | len << 4;
 	writel(val, cci->base + CCI_I2C_Mm_Qn_LOAD_DATA(master, queue));
 
-	ret = cci_run_queue(cci, master, queue);
+	ret = cci_run_queue(cci, master, queue,
+			     cci_xfer_timeout(cci, master, len));
 	if (ret < 0)
 		return ret;
 
@@ -419,7 +430,8 @@ static int cci_i2c_write_read(struct cci *cci, u16 master,
 	val = CCI_I2C_READ | rlen << 4;
 	writel(val, cci->base + CCI_I2C_Mm_Qn_LOAD_DATA(master, queue));
 
-	ret = cci_run_queue(cci, master, queue);
+	ret = cci_run_queue(cci, master, queue,
+			     cci_xfer_timeout(cci, master, wlen + rlen));
 	if (ret < 0)
 		return ret;
 
@@ -430,8 +442,8 @@ static int cci_i2c_write(struct cci *cci, u16 master,
 			 u16 addr, u8 *buf, u16 len)
 {
 	u8 queue = QUEUE_0;
-	u8 load[12] = { 0 };
-	int i = 0, j, ret;
+	u16 sent = 0;
+	int j, ret;
 	u32 val;
 
 	/*
@@ -445,23 +457,33 @@ static int cci_i2c_write(struct cci *cci, u16 master,
 	val = CCI_I2C_SET_PARAM | (addr & 0x7f) << 4;
 	writel(val, cci->base + CCI_I2C_Mm_Qn_LOAD_DATA(master, queue));
 
-	load[i++] = CCI_I2C_WRITE | len << 4;
+	while (sent < len) {
+		u8 load[12] = { 0 };
+		u16 chunk = min_t(u16, len - sent, CCI_I2C_WRITE_PAYLOAD);
+		u16 words = DIV_ROUND_UP(chunk + 1, 4);
 
-	for (j = 0; j < len; j++)
-		load[i++] = buf[j];
+		load[0] = CCI_I2C_WRITE |
+			(sent + chunk < len ? 0xf : chunk) << 4;
 
-	for (j = 0; j < i; j += 4) {
-		val = load[j];
-		val |= load[j + 1] << 8;
-		val |= load[j + 2] << 16;
-		val |= load[j + 3] << 24;
-		writel(val, cci->base + CCI_I2C_Mm_Qn_LOAD_DATA(master, queue));
+		for (j = 0; j < chunk; j++)
+			load[j + 1] = buf[sent + j];
+
+		for (j = 0; j < words; j++) {
+			val = load[j * 4];
+			val |= load[j * 4 + 1] << 8;
+			val |= load[j * 4 + 2] << 16;
+			val |= load[j * 4 + 3] << 24;
+			writel(val, cci->base + CCI_I2C_Mm_Qn_LOAD_DATA(master, queue));
+		}
+
+		sent += chunk;
 	}
 
 	val = CCI_I2C_REPORT | CCI_I2C_REPORT_IRQ_EN;
 	writel(val, cci->base + CCI_I2C_Mm_Qn_LOAD_DATA(master, queue));
 
-	return cci_run_queue(cci, master, queue);
+	return cci_run_queue(cci, master, queue,
+			     cci_xfer_timeout(cci, master, len));
 }
 
 static bool cci_msgs_combinable(struct cci *cci, struct i2c_msg *w,
@@ -868,7 +890,7 @@ static const struct cci_data cci_sm8650_data = {
 	.num_masters = 2,
 	.queue_size = { 128, 32 },
 	.quirks = {
-		.max_write_len = 11,
+		.max_write_len = 440,
 		.max_read_len = 255,
 		.max_comb_1st_msg_len = 8,
 		.max_comb_2nd_msg_len = 255,
