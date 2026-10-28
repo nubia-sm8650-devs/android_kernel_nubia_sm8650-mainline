@@ -287,6 +287,10 @@ int camss_hw_path_config(struct camss_hw_pipe *pipe, enum camss_hw_path path,
 			 (path != CAMSS_HW_PATH_RDI0 && path != CAMSS_HW_PATH_PPP)))
 		return -EINVAL;
 
+	if (cfg->shdr && (csid_is_lite(pipe->csid) || path < CAMSS_HW_PATH_RDI0 ||
+			  path > CAMSS_HW_PATH_RDI2))
+		return -EINVAL;
+
 	if (cfg->sync > CAMSS_HW_SYNC_SLAVE ||
 	    (cfg->sync && csid_is_lite(pipe->csid)))
 		return -EINVAL;

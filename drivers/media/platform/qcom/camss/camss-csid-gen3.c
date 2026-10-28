@@ -37,6 +37,8 @@
 #define		SHDR_EN				BIT(0)
 #define		SHDR_MASTER_RDI0		BIT(5)
 #define		SHDR_SLAVE_PPP			BIT(20)
+#define		SHDR_SLAVE_RDI1			BIT(21)
+#define		SHDR_SLAVE_RDI2			BIT(22)
 
 #define CSID_RST_CFG			0xC
 #define		RST_MODE			BIT(0)
@@ -592,6 +594,22 @@ void csid_gen3_hw_rx(struct camss_hw_pipe *pipe,
 	csid_gen3_top_mask_set(pipe, CSID_TOP_IRQ_RX);
 }
 
+static u32 csid_gen3_shdr_bit(enum camss_hw_path path)
+{
+	switch (path) {
+	case CAMSS_HW_PATH_RDI0:
+		return SHDR_MASTER_RDI0;
+	case CAMSS_HW_PATH_RDI1:
+		return SHDR_SLAVE_RDI1;
+	case CAMSS_HW_PATH_RDI2:
+		return SHDR_SLAVE_RDI2;
+	case CAMSS_HW_PATH_PPP:
+		return SHDR_SLAVE_PPP;
+	default:
+		return 0;
+	}
+}
+
 void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 			      enum camss_hw_path path,
 			      const struct camss_hw_path_cfg *cfg)
@@ -607,7 +625,7 @@ void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 	cfg0 |= CSID_PATH_CFG0_TS_STB_SEL | RDI_CFG0_TIMESTAMP_EN;
 	cfg0 |= cfg->frame_id_dec << CSID_PATH_CFG0_FRAME_ID_DEC;
 	cfg0 |= cfg->vfr;
-	if (cfg->lcr)
+	if (cfg->lcr || cfg->shdr)
 		cfg0 |= CSID_PATH_CFG0_SOF_RETIME_DIS;
 
 	if (path == CAMSS_HW_PATH_IPP || path == CAMSS_HW_PATH_PPP) {
@@ -655,11 +673,10 @@ void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 	writel(CSID_PATH_ERR_REC_DEFAULT, csid->base + p->err_rec);
 	writel(cfg->epoch_line << 16, csid->base + p->epoch);
 
-	if (cfg->lcr) {
+	if (cfg->lcr || cfg->shdr) {
 		u32 shdr = readl(csid->base + CSID_SHDR_MASTER_SLAVE_CFG);
 
-		shdr |= SHDR_EN;
-		shdr |= path == CAMSS_HW_PATH_PPP ? SHDR_SLAVE_PPP : SHDR_MASTER_RDI0;
+		shdr |= SHDR_EN | csid_gen3_shdr_bit(path);
 		writel(shdr, csid->base + CSID_SHDR_MASTER_SLAVE_CFG);
 		pipe->shdr = true;
 	}
