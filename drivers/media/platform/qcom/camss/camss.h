@@ -175,6 +175,7 @@ struct camss_hw_pipe {
 	unsigned int wm_num;
 	spinlock_t lock;	/* protects the masks, @comp_wms and @gen */
 	unsigned long paths;
+	unsigned long ts_comb;
 	bool dual;
 	bool shdr;
 	u32 top_mask;

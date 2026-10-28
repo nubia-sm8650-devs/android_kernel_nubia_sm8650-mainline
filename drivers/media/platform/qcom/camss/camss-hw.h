@@ -144,6 +144,10 @@ struct camss_hw_path_cfg {
 	bool lcr;	/* RDI0 feeds the VFE PDAF LCR input, the PPP follows it */
 	bool shdr;	/* RDI0 to RDI2 carry staggered exposures, RDI0 leads */
 	bool offline;	/* the SFE fetch feeds the RDI, one frame per GO command */
+	bool multi_vcdt;	/* a second VC/DT also feeds the path */
+	u8 vc1;
+	u8 dt1;
+	u8 decode_format1;
 	enum camss_hw_sync sync;
 	u32 epoch_line;
 	u32 events;

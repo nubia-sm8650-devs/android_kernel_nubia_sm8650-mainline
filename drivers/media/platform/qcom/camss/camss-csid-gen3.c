@@ -187,6 +187,12 @@
 
 #define CSID_PATH_CFG0_OFFLINE		BIT(2)
 #define CSID_PATH_CFG0_SOF_RETIME_DIS	BIT(5)
+#define CSID_PATH_MULTI_VCDT_EN		BIT(0)
+#define CSID_PATH_MULTI_VCDT_VC1	GENMASK(6, 2)
+#define CSID_PATH_MULTI_VCDT_DT1	GENMASK(12, 7)
+#define CSID_PATH_MULTI_VCDT_TS_COMB	BIT(13)
+#define CSID_PATH_MULTI_VCDT_DECODE1	GENMASK(19, 16)
+#define CSID_PATH_TS_COMB_MASK		GENMASK_ULL(1, 0)
 #define CSID_OFFLINE_CMD		0x1C
 #define		OFFLINE_CMD_GO			BIT(0)
 
@@ -208,6 +214,7 @@
 struct csid_gen3_path {
 	u32 cfg0;
 	u32 ctrl;
+	u32 multi_vcdt;
 	u32 cfg1;
 	u32 err_rec;
 	u32 epoch;
@@ -226,6 +233,7 @@ struct csid_gen3_path {
 #define CSID_GEN3_RDI(n) {					\
 	.cfg0 = 0x500 + 0x100 * (n),				\
 	.ctrl = 0x504 + 0x100 * (n),				\
+	.multi_vcdt = 0x50C + 0x100 * (n),			\
 	.cfg1 = 0x510 + 0x100 * (n),				\
 	.err_rec = 0x514 + 0x100 * (n),				\
 	.epoch = 0x52C + 0x100 * (n),				\
@@ -245,6 +253,7 @@ static const struct csid_gen3_path csid_gen3_paths[CAMSS_HW_PATH_NUM] = {
 	[CAMSS_HW_PATH_IPP] = {
 		.cfg0 = 0x300,
 		.ctrl = 0x304,
+		.multi_vcdt = 0x30C,
 		.cfg1 = 0x310,
 		.err_rec = 0x318,
 		.epoch = 0x334,
@@ -267,6 +276,7 @@ static const struct csid_gen3_path csid_gen3_paths[CAMSS_HW_PATH_NUM] = {
 	[CAMSS_HW_PATH_PPP] = {
 		.cfg0 = 0xB00,
 		.ctrl = 0xB04,
+		.multi_vcdt = 0xB0C,
 		.cfg1 = 0xB10,
 		.err_rec = 0xB18,
 		.epoch = 0xB34,
@@ -613,6 +623,17 @@ static u32 csid_gen3_shdr_bit(enum camss_hw_path path)
 	}
 }
 
+static u32 csid_gen3_multi_vcdt(const struct camss_hw_path_cfg *cfg)
+{
+	if (!cfg->multi_vcdt)
+		return 0;
+
+	return CSID_PATH_MULTI_VCDT_EN | CSID_PATH_MULTI_VCDT_TS_COMB |
+	       FIELD_PREP(CSID_PATH_MULTI_VCDT_VC1, cfg->vc1) |
+	       FIELD_PREP(CSID_PATH_MULTI_VCDT_DT1, cfg->dt1) |
+	       FIELD_PREP(CSID_PATH_MULTI_VCDT_DECODE1, cfg->decode_format1);
+}
+
 void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 			      enum camss_hw_path path,
 			      const struct camss_hw_path_cfg *cfg)
@@ -621,8 +642,14 @@ void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 	struct csid_device *csid = pipe->csid;
 	u32 cfg0, cfg1, mask, ctrl = 0;
 
+	if (cfg->multi_vcdt)
+		pipe->ts_comb |= BIT(path);
+	else
+		pipe->ts_comb &= ~BIT(path);
+
 	if (cfg->offline) {
 		writel(0, csid->base + p->ctrl);
+		writel(0, csid->base + p->multi_vcdt);
 		writel(CSID_PATH_CFG0_OFFLINE | RDI_CFG0_EN, csid->base + p->cfg0);
 		goto irqs;
 	}
@@ -677,6 +704,7 @@ void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 
 	writel(0, csid->base + p->ctrl);
 	writel(cfg0, csid->base + p->cfg0);
+	writel(csid_gen3_multi_vcdt(cfg), csid->base + p->multi_vcdt);
 	writel(cfg1, csid->base + p->cfg1);
 	writel(cfg0 | RDI_CFG0_EN, csid->base + p->cfg0);
 	writel(CSID_PATH_ERR_REC_DEFAULT, csid->base + p->err_rec);
@@ -753,6 +781,8 @@ int csid_gen3_hw_stop(struct camss_hw_pipe *pipe)
 	writel(0, csid->base + CSID_CSI2_RX_IRQ_MASK);
 	for_each_set_bit(i, &pipe->paths, CAMSS_HW_PATH_NUM)
 		writel(0, csid->base + csid_gen3_paths[i].irq_mask);
+	for_each_set_bit(i, &pipe->ts_comb, CAMSS_HW_PATH_NUM)
+		writel(0, csid->base + csid_gen3_paths[i].multi_vcdt);
 	if (pipe->shdr) {
 		writel(0, csid->base + CSID_SHDR_MASTER_SLAVE_CFG);
 		pipe->shdr = false;
@@ -769,6 +799,7 @@ int csid_gen3_hw_stop(struct camss_hw_pipe *pipe)
 
 	synchronize_irq(csid->irq);
 	pipe->paths = 0;
+	pipe->ts_comb = 0;
 
 	if (!time) {
 		dev_err(csid->camss->dev, "CSID%u path reset timeout\n", csid->id);
@@ -787,6 +818,8 @@ u64 csid_gen3_hw_path_sof_ts(struct camss_hw_pipe *pipe,
 
 	hi = readl(csid->base + (prev ? p->ts_prev_hi : p->ts_hi));
 	lo = readl(csid->base + (prev ? p->ts_prev_lo : p->ts_lo));
+	if (pipe->ts_comb & BIT(path))
+		lo &= ~CSID_PATH_TS_COMB_MASK;
 
 	return mul_u64_u32_div(hi << 32 | lo, CSID_QTIMER_NS_NUM,
 			       CSID_QTIMER_NS_DEN);
@@ -933,6 +966,8 @@ static irqreturn_t csid_isr_claimed(struct csid_device *csid,
 			hi = readl(csid->base + p->ts_hi);
 			ev.sof_ts[i] = (u64)hi << 32 |
 				       readl(csid->base + p->ts_lo);
+			if (pipe->ts_comb & BIT(i))
+				ev.sof_ts[i] &= ~CSID_PATH_TS_COMB_MASK;
 		}
 	}
 

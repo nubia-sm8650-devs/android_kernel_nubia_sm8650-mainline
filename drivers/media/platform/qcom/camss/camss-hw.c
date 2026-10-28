@@ -295,6 +295,10 @@ int camss_hw_path_config(struct camss_hw_pipe *pipe, enum camss_hw_path path,
 			     path > CAMSS_HW_PATH_RDI4 || cfg->lcr || cfg->shdr))
 		return -EINVAL;
 
+	if (cfg->multi_vcdt && (cfg->offline || cfg->vc1 > 0x1f ||
+				cfg->dt1 > 0x3f || cfg->decode_format1 > 0xf))
+		return -EINVAL;
+
 	if (cfg->sync > CAMSS_HW_SYNC_SLAVE ||
 	    (cfg->sync && csid_is_lite(pipe->csid)))
 		return -EINVAL;
