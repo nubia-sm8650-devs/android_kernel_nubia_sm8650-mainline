@@ -371,8 +371,7 @@ static const struct reg_offset_data bam_v2_0_reg_info[] = {
 #define BAM_DESC_FIFO_SIZE	SZ_32K
 #define MAX_DESCRIPTORS (BAM_DESC_FIFO_SIZE / sizeof(struct bam_desc_hw) - 1)
 #define BAM_FIFO_SIZE	(SZ_32K - 8)
-#define IS_BUSY(chan)	(CIRC_SPACE(bchan->tail, bchan->head,\
-			 MAX_DESCRIPTORS + 1) == 0)
+#define IS_BUSY(chan)	(bam_fifo_space(chan) == 0)
 
 struct bam_chan {
 	struct virt_dma_chan vc;
@@ -429,6 +428,13 @@ struct bam_device {
 	/* dma start transaction tasklet */
 	struct tasklet_struct task;
 };
+
+/* head and tail wrap at MAX_DESCRIPTORS, and one slot always stays empty */
+static u32 bam_fifo_space(struct bam_chan *bchan)
+{
+	return (bchan->head + MAX_DESCRIPTORS - bchan->tail - 1) %
+	       MAX_DESCRIPTORS;
+}
 
 /**
  * bam_addr - returns BAM register address
@@ -1060,8 +1066,7 @@ static void bam_start_dma(struct bam_chan *bchan)
 			bam_apply_new_config(bchan, async_desc->dir);
 
 		desc = async_desc->curr_desc;
-		avail = CIRC_SPACE(bchan->tail, bchan->head,
-				   MAX_DESCRIPTORS + 1);
+		avail = bam_fifo_space(bchan);
 
 		if (async_desc->num_desc > avail)
 			async_desc->xfer_len = avail;
