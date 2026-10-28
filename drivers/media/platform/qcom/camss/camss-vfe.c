@@ -1383,6 +1383,12 @@ static u32 vfe_pix_ppc(struct vfe_device *vfe)
 	}
 }
 
+static bool vfe_camnoc_voted(struct vfe_device *vfe, struct camss_clock *clock)
+{
+	return vfe->camss->icc_camnoc && (!strcmp(clock->name, "camnoc_axi") ||
+					  !strcmp(clock->name, "camnoc_rt_axi"));
+}
+
 /*
  * vfe_set_clock_rates - Calculate and set clock rates on VFE module
  * @vfe: VFE device
@@ -1453,6 +1459,11 @@ static int vfe_set_clock_rates(struct vfe_device *vfe)
 				return -EINVAL;
 			}
 
+			if (vfe_camnoc_voted(vfe, clock)) {
+				vfe->camnoc_rate = rate;
+				continue;
+			}
+
 			ret = clk_set_rate(clock->clk, rate);
 			if (ret < 0) {
 				dev_err(dev, "clk set rate failed: %d\n", ret);
@@ -1461,7 +1472,7 @@ static int vfe_set_clock_rates(struct vfe_device *vfe)
 		}
 	}
 
-	return 0;
+	return camss_camnoc_vote(vfe->camss);
 }
 
 /*
@@ -1512,7 +1523,10 @@ static int vfe_check_clock_rates(struct vfe_device *vfe)
 
 			camss_add_clock_margin(&min_rate);
 
-			rate = clk_get_rate(clock->clk);
+			if (vfe_camnoc_voted(vfe, clock))
+				rate = vfe->camnoc_rate;
+			else
+				rate = clk_get_rate(clock->clk);
 			if (rate < min_rate)
 				return -EBUSY;
 		}
@@ -1575,6 +1589,8 @@ error_reset:
 	camss_disable_clocks(vfe->nclocks, vfe->clock);
 
 error_pm_runtime_get:
+	vfe->camnoc_rate = 0;
+	camss_camnoc_vote(vfe->camss);
 	pm_runtime_put_sync(vfe->camss->dev);
 error_domain_off:
 	vfe->res->hw_ops->pm_domain_off(vfe);
@@ -1602,6 +1618,8 @@ void vfe_put(struct vfe_device *vfe)
 			vfe->res->hw_ops->vfe_halt(vfe);
 		}
 		camss_disable_clocks(vfe->nclocks, vfe->clock);
+		vfe->camnoc_rate = 0;
+		camss_camnoc_vote(vfe->camss);
 		pm_runtime_put_sync(vfe->camss->dev);
 		vfe->res->hw_ops->pm_domain_off(vfe);
 	}

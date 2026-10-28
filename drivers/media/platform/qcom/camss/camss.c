@@ -5416,7 +5416,52 @@ static int camss_icc_get(struct camss *camss)
 			return PTR_ERR(camss->icc_path[i]);
 	}
 
+	if (!camss->res->camnoc_buswidth)
+		return 0;
+
+	camss->icc_camnoc = devm_of_icc_get(camss->dev, "camnoc");
+	if (IS_ERR(camss->icc_camnoc)) {
+		if (PTR_ERR(camss->icc_camnoc) != -ENODATA)
+			return PTR_ERR(camss->icc_camnoc);
+		camss->icc_camnoc = NULL;
+	}
+
 	return 0;
+}
+
+/**
+ * camss_camnoc_vote - vote the CAMNOC bandwidth the VFEs need
+ * @camss: CAMSS device
+ *
+ * The CAMNOC provider rates the shared camnoc_axi source from the highest
+ * peak vote of its consumers, so CAMSS votes its highest VFE rate times the
+ * AXI slave width instead of setting the clock. A VFE claimed by another
+ * driver leaves the vote to that driver.
+ *
+ * Return: 0 on success or a negative error code otherwise
+ */
+int camss_camnoc_vote(struct camss *camss)
+{
+	unsigned long rate = 0;
+	unsigned int i;
+	u32 bw;
+	int ret;
+
+	if (!camss->icc_camnoc)
+		return 0;
+
+	mutex_lock(&camss->camnoc_lock);
+
+	for (i = 0; i < camss->res->vfe_num; i++)
+		if (!camss_hw_vfe_claimed(&camss->vfe[i]))
+			rate = max(rate, camss->vfe[i].camnoc_rate);
+
+	bw = Bps_to_icc((u64)rate * camss->res->camnoc_buswidth);
+	ret = icc_set_bw(camss->icc_camnoc, bw, bw);
+
+	mutex_unlock(&camss->camnoc_lock);
+
+	return ret;
 }
 
 static void camss_genpd_subdevice_cleanup(struct camss *camss)
@@ -5503,6 +5548,7 @@ static int camss_probe(struct platform_device *pdev)
 
 	atomic_set(&camss->ref_count, 0);
 	camss->dev = dev;
+	mutex_init(&camss->camnoc_lock);
 	platform_set_drvdata(pdev, camss);
 
 	camss->csiphy = devm_kcalloc(dev, camss->res->csiphy_num,
@@ -5887,6 +5933,7 @@ static const struct camss_resources sm8650_resources = {
 	.vfe_res = vfe_res_sm8650,
 	.icc_res = icc_res_sm8650,
 	.icc_path_num = ARRAY_SIZE(icc_res_sm8650),
+	.camnoc_buswidth = 32,
 	.csiphy_num = ARRAY_SIZE(csiphy_res_sm8650),
 	.tpg_num = ARRAY_SIZE(tpg_res_sm8650),
 	.csid_num = ARRAY_SIZE(csid_res_sm8650),
