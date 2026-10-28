@@ -151,6 +151,8 @@
 
 #define CSI2_RX_CFG1_MISR_EN		BIT(6)
 #define CSI2_RX_CFG1_EPD_EN		8
+#define CSI2_RX_CFG1_DYN_SWITCH_EN	BIT(10)
+#define CSI2_RX_CFG1_RUP_AUP_LATCH_DIS	BIT(13)
 
 #define CSID_PATH_IRQ_EOF		BIT(3)
 #define CSID_PATH_IRQ_SOF		BIT(4)
@@ -552,6 +554,8 @@ void csid_gen3_hw_rx(struct camss_hw_pipe *pipe,
 
 	val = CSI2_RX_CFG1_MISR_EN | CSI2_RX_CFG1_ECC_CORRECTION_EN;
 	val |= cfg->epd << CSI2_RX_CFG1_EPD_EN;
+	if (cfg->dyn_switch)
+		val |= CSI2_RX_CFG1_DYN_SWITCH_EN | CSI2_RX_CFG1_RUP_AUP_LATCH_DIS;
 	if (cfg->vc_full_width)
 		val |= CSI2_RX_CFG1_VC_MODE;
 	writel(val, csid->base + CSID_CSI2_RX_CFG1);
