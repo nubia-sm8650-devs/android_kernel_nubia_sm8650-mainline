@@ -86,6 +86,7 @@ struct camss_hw_ops {
 	void (*error)(void *priv, enum camss_hw_err_src src,
 		      enum camss_hw_path path, u32 status, bool fatal);
 	void (*vfe_error)(void *priv, const struct camss_hw_vfe_err *err);
+	void (*vfe_frame)(void *priv, u32 events, u64 sof_ns, u64 boot_ns);
 };
 
 struct camss_hw_rx_cfg {
@@ -196,6 +197,8 @@ void camss_hw_vfe_in_stop(struct camss_hw_pipe *pipe);
 void camss_hw_vfe_err_enable(struct camss_hw_pipe *pipe, unsigned int errs,
 			     bool enable);
 void camss_hw_vfe_sync(struct camss_hw_pipe *pipe);
+int camss_hw_vfe_frame_enable(struct camss_hw_pipe *pipe, u32 events,
+			      enum camss_hw_path ts_path);
 void camss_hw_bus_status(struct camss_hw_pipe *pipe, u32 *overflow,
 			 u32 *violation);
 int camss_hw_vfe_pdaf_lcr_regs(struct camss_hw_pipe *pipe, unsigned int rdi,

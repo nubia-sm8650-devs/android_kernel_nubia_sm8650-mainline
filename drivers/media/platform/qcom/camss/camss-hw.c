@@ -234,6 +234,8 @@ void camss_hw_release(struct camss_hw_pipe *pipe)
 	camss_hw_wm_disable_all(pipe);
 	camss_hw_vfe_err_enable(pipe, CAMSS_HW_VFE_ERR_CAMIF | CAMSS_HW_VFE_ERR_BUS,
 				false);
+	if (!vfe_is_lite(pipe->vfe))
+		vfe_780_frame_irq_mask(pipe->vfe, 0);
 	WRITE_ONCE(pipe->vfe->claim, NULL);
 	synchronize_irq(pipe->vfe->irq);
 	csid_power(csid, false);
@@ -540,14 +542,50 @@ EXPORT_SYMBOL_NS_GPL(camss_hw_vfe_err_enable, "QCOM_CAMSS");
  * camss_hw_vfe_sync - wait for the VFE events in flight
  * @pipe: claimed pipe
  *
- * Returns once no vfe_error op runs for an interrupt taken before the
- * call. Must not be called from an op.
+ * Returns once no vfe_error or vfe_frame op runs for an interrupt taken
+ * before the call. Must not be called from an op.
  */
 void camss_hw_vfe_sync(struct camss_hw_pipe *pipe)
 {
 	synchronize_irq(pipe->vfe->irq);
 }
 EXPORT_SYMBOL_NS_GPL(camss_hw_vfe_sync, "QCOM_CAMSS");
+
+/**
+ * camss_hw_vfe_frame_enable - report pixel pipe frames through vfe_frame
+ * @pipe: claimed full pipe
+ * @events: CAMSS_HW_EV_SOF, CAMSS_HW_EV_EOF and CAMSS_HW_EV_EPOCH to
+ *          report, 0 to disable
+ * @ts_path: CSID path whose SOF timestamp the SOF carries, as nanoseconds
+ *           of QTimer time, CAMSS_HW_PATH_NUM for none
+ *
+ * The VFE pixel pipe raises its own frame events when the CSID feeds it
+ * through an SFE. Events latched before the call are dropped, and a pixel
+ * pipe error disables every event until enabled again.
+ *
+ * Return: 0 on success, -EINVAL on a lite pipe or for an unknown event
+ */
+int camss_hw_vfe_frame_enable(struct camss_hw_pipe *pipe, u32 events,
+			      enum camss_hw_path ts_path)
+{
+	unsigned long flags;
+
+	if (vfe_is_lite(pipe->vfe) ||
+	    events & ~(CAMSS_HW_EV_SOF | CAMSS_HW_EV_EOF | CAMSS_HW_EV_EPOCH))
+		return -EINVAL;
+
+	spin_lock_irqsave(&pipe->lock, flags);
+	pipe->vfe_gen++;
+	pipe->vfe_events = events;
+	pipe->vfe_ts_path = ts_path;
+	if (events)
+		vfe_780_frame_irq_clear(pipe->vfe, events);
+	vfe_780_frame_irq_mask(pipe->vfe, events);
+	spin_unlock_irqrestore(&pipe->lock, flags);
+
+	return 0;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_vfe_frame_enable, "QCOM_CAMSS");
 
 /**
  * camss_hw_bus_status - read the VFE bus overflow and violation status

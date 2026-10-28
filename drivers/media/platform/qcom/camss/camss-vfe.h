@@ -390,6 +390,8 @@ int vfe_780_fcg_phase_regs(struct vfe_device *vfe, u16 r, u16 g, u32 b,
 void vfe_780_bus_status(struct vfe_device *vfe, u32 *overflow, u32 *violation);
 void vfe_780_err_irq_init(struct vfe_device *vfe);
 void vfe_780_err_irq_mask(struct vfe_device *vfe, unsigned int errs);
+void vfe_780_frame_irq_clear(struct vfe_device *vfe, u32 events);
+void vfe_780_frame_irq_mask(struct vfe_device *vfe, u32 events);
 
 int vfe_get(struct vfe_device *vfe);
 void vfe_put(struct vfe_device *vfe);

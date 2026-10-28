@@ -181,6 +181,9 @@ struct camss_hw_pipe {
 	u32 comp_wms[CAMSS_HW_COMP_NUM];
 	u32 gen;
 	unsigned int vfe_errs;
+	u32 vfe_events;
+	enum camss_hw_path vfe_ts_path;
+	u32 vfe_gen;
 };
 
 struct camss_buf_done_info {

@@ -8,6 +8,7 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
+#include <linux/timekeeping.h>
 
 #include <linux/qcom-camss-config.h>
 
@@ -63,6 +64,10 @@ typedef enum {
 #define VFE_TOP_IRQ_STATUS_0		(vfe_is_lite(vfe) ? 0x1C : 0x44)
 #define		TOP_IRQ_BUS			BIT(0)
 #define		TOP_IRQ_CAMIF_ERR		0x7F1D0
+#define VFE_TOP_IRQ_STATUS_1		0x48
+#define		TOP_IRQ_1_CAMIF_SOF		BIT(0)
+#define		TOP_IRQ_1_CAMIF_EOF		BIT(1)
+#define		TOP_IRQ_1_CAMIF_EPOCH0		BIT(16)
 
 #define VFE_TOP_EPOCH_HEIGHT_CFG	0x9C
 #define VFE_TOP_DEBUG_CFG		(vfe_is_lite(vfe) ? 0x74 : 0xFC)
@@ -420,6 +425,45 @@ void vfe_780_err_irq_mask(struct vfe_device *vfe, unsigned int errs)
 	writel(top, vfe->base + VFE_TOP_IRQ_MASK(0));
 }
 
+static u32 vfe_780_frame_bits(u32 events)
+{
+	u32 bits = 0;
+
+	if (events & CAMSS_HW_EV_SOF)
+		bits |= TOP_IRQ_1_CAMIF_SOF;
+	if (events & CAMSS_HW_EV_EOF)
+		bits |= TOP_IRQ_1_CAMIF_EOF;
+	if (events & CAMSS_HW_EV_EPOCH)
+		bits |= TOP_IRQ_1_CAMIF_EPOCH0;
+
+	return bits;
+}
+
+static u32 vfe_780_frame_events(u32 bits)
+{
+	u32 events = 0;
+
+	if (bits & TOP_IRQ_1_CAMIF_SOF)
+		events |= CAMSS_HW_EV_SOF;
+	if (bits & TOP_IRQ_1_CAMIF_EOF)
+		events |= CAMSS_HW_EV_EOF;
+	if (bits & TOP_IRQ_1_CAMIF_EPOCH0)
+		events |= CAMSS_HW_EV_EPOCH;
+
+	return events;
+}
+
+void vfe_780_frame_irq_clear(struct vfe_device *vfe, u32 events)
+{
+	writel(vfe_780_frame_bits(events), vfe->base + VFE_TOP_IRQ_CLEAR(1));
+	writel(TOP_IRQ_CMD_CLEAR, vfe->base + VFE_TOP_IRQ_CMD);
+}
+
+void vfe_780_frame_irq_mask(struct vfe_device *vfe, u32 events)
+{
+	writel(vfe_780_frame_bits(events), vfe->base + VFE_TOP_IRQ_MASK(1));
+}
+
 void vfe_780_err_irq_init(struct vfe_device *vfe)
 {
 	unsigned int i;
@@ -438,27 +482,57 @@ void vfe_780_err_irq_init(struct vfe_device *vfe)
 	writel(TOP_IRQ_CMD_CLEAR, vfe->base + VFE_TOP_IRQ_CMD);
 }
 
+static void vfe_780_frame_claimed(struct vfe_device *vfe,
+				  struct camss_hw_pipe *pipe, u32 bits)
+{
+	u64 boot_ns = ktime_get_boottime_ns(), sof_ns = 0;
+	enum camss_hw_path path;
+	u32 events, gen;
+
+	spin_lock(&pipe->lock);
+	gen = pipe->vfe_gen;
+	events = vfe_780_frame_events(bits) & pipe->vfe_events;
+	path = pipe->vfe_ts_path;
+	spin_unlock(&pipe->lock);
+
+	if (!events || !pipe->ops->vfe_frame)
+		return;
+
+	if (events & CAMSS_HW_EV_SOF && path < pipe->path_num)
+		sof_ns = csid_gen3_hw_path_sof_ts(pipe, path, false);
+
+	if (gen == READ_ONCE(pipe->vfe_gen))
+		pipe->ops->vfe_frame(pipe->priv, events, sof_ns, boot_ns);
+}
+
 /*
  * Mask each reported source until the consumer enables it again, as
  * cam_vfe_top_ver4 and cam_vfe_bus_ver3 drop their error IRQs until the
- * pipe restarts. A pixel pipe error masks the bus errors too, as
- * cam_vfe_top_ver4 disables the whole top controller.
+ * pipe restarts. A pixel pipe error masks the bus errors and the frame
+ * events too, as cam_vfe_top_ver4 disables the whole top controller.
  */
 static irqreturn_t vfe_780_isr_claimed(struct vfe_device *vfe,
 				       struct camss_hw_pipe *pipe)
 {
 	struct camss_hw_vfe_err err = {};
 	unsigned int wm;
-	u32 top, bus = 0;
+	u32 top, frame = 0, bus = 0;
 
 	top = readl(vfe->base + VFE_TOP_IRQ_STATUS_0);
+	if (!vfe_is_lite(vfe))
+		frame = readl(vfe->base + VFE_TOP_IRQ_STATUS_1);
 	if (top & TOP_IRQ_BUS) {
 		bus = readl(vfe->base + VFE_BUS_IRQ_STATUS_0);
 		writel(bus, vfe->base + VFE_BUS_IRQ_CLEAR(0));
 		writel(BUS_IRQ_CMD_CLEAR, vfe->base + VFE_BUS_IRQ_CMD);
 	}
 	writel(top, vfe->base + VFE_TOP_IRQ_CLEAR(0));
+	if (frame)
+		writel(frame, vfe->base + VFE_TOP_IRQ_CLEAR(1));
 	writel(TOP_IRQ_CMD_CLEAR, vfe->base + VFE_TOP_IRQ_CMD);
+
+	if (frame)
+		vfe_780_frame_claimed(vfe, pipe, frame);
 
 	if (!vfe_is_lite(vfe))
 		err.top = top & TOP_IRQ_CAMIF_ERR;
@@ -476,10 +550,13 @@ static irqreturn_t vfe_780_isr_claimed(struct vfe_device *vfe,
 		err.ccif_wms = readl(vfe->base + VFE_BUS_VIOLATION_STATUS);
 
 	spin_lock(&pipe->lock);
-	if (err.top)
+	if (err.top) {
 		pipe->vfe_errs = 0;
-	else if (err.bus)
+		pipe->vfe_events = 0;
+		vfe_780_frame_irq_mask(vfe, 0);
+	} else if (err.bus) {
 		pipe->vfe_errs &= ~CAMSS_HW_VFE_ERR_BUS;
+	}
 	vfe_780_err_irq_mask(vfe, pipe->vfe_errs);
 	spin_unlock(&pipe->lock);
 
