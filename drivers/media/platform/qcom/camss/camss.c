@@ -3489,7 +3489,7 @@ static const struct camss_subdev_resources csid_res_sm8650[] = {
 	{
 		.regulators = { },
 		.clock = { "csid", "csiphy_rx" },
-		.clock_rate = { { 400000000 },
+		.clock_rate = { { 400000000, 480000000 },
 				{ 400000000, 480000000 } },
 		.reg = { "csid0" },
 		.interrupt = { "csid0" },
@@ -3503,7 +3503,7 @@ static const struct camss_subdev_resources csid_res_sm8650[] = {
 	{
 		.regulators = { },
 		.clock = { "csid", "csiphy_rx" },
-		.clock_rate = { { 400000000 },
+		.clock_rate = { { 400000000, 480000000 },
 				{ 400000000, 480000000 } },
 		.reg = { "csid1" },
 		.interrupt = { "csid1" },
@@ -3517,7 +3517,7 @@ static const struct camss_subdev_resources csid_res_sm8650[] = {
 	{
 		.regulators = { },
 		.clock = { "csid", "csiphy_rx" },
-		.clock_rate = { { 400000000 },
+		.clock_rate = { { 400000000, 480000000 },
 				{ 400000000, 480000000 } },
 		.reg = { "csid2" },
 		.interrupt = { "csid2" },
