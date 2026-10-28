@@ -72,6 +72,10 @@ typedef enum {
 #define		PDAF_INPUT_CFG_1_DEFAULT	1
 #define		PDAF_INPUT_CFG_1_LCR		0
 
+#define VFE_FCG_PHASE_INDEX_CFG_0	0xC870
+#define		FCG_PHASE_INDEX_G		16
+#define VFE_FCG_PHASE_INDEX_CFG_1	0xC874
+
 #define BUS_REG_BASE (vfe_is_lite(vfe) ? 0x200 : 0xC00)
 
 #define VFE_BUS_IRQ_MASK(n)		(BUS_REG_BASE + 0x18 + 4 * (n))
@@ -383,6 +387,17 @@ int vfe_780_pdaf_lcr_regs(struct vfe_device *vfe, unsigned int rdi, bool init,
 	regs[n++].value = rdi;
 
 	return n;
+}
+
+int vfe_780_fcg_phase_regs(struct vfe_device *vfe, u16 r, u16 g, u32 b,
+			   struct camss_hw_reg regs[2])
+{
+	regs[0].offset = VFE_FCG_PHASE_INDEX_CFG_0;
+	regs[0].value = (u32)g << FCG_PHASE_INDEX_G | r;
+	regs[1].offset = VFE_FCG_PHASE_INDEX_CFG_1;
+	regs[1].value = b;
+
+	return 2;
 }
 
 void vfe_780_bus_status(struct vfe_device *vfe, u32 *overflow, u32 *violation)

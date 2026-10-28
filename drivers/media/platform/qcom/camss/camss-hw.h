@@ -200,6 +200,8 @@ void camss_hw_bus_status(struct camss_hw_pipe *pipe, u32 *overflow,
 			 u32 *violation);
 int camss_hw_vfe_pdaf_lcr_regs(struct camss_hw_pipe *pipe, unsigned int rdi,
 			       bool init, struct camss_hw_reg regs[2]);
+int camss_hw_vfe_fcg_phase_regs(struct camss_hw_pipe *pipe, u32 r, u32 g,
+				u32 b, struct camss_hw_reg regs[2]);
 
 int camss_hw_comp_start(struct camss_hw_pipe *pipe, unsigned int comp,
 			unsigned int wm);

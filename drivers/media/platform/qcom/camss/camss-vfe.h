@@ -385,6 +385,8 @@ void vfe_780_in_start(struct vfe_device *vfe, bool camif, u32 epoch_line);
 void vfe_780_in_stop(struct vfe_device *vfe);
 int vfe_780_pdaf_lcr_regs(struct vfe_device *vfe, unsigned int rdi, bool init,
 			  struct camss_hw_reg regs[2]);
+int vfe_780_fcg_phase_regs(struct vfe_device *vfe, u16 r, u16 g, u32 b,
+			   struct camss_hw_reg regs[2]);
 void vfe_780_bus_status(struct vfe_device *vfe, u32 *overflow, u32 *violation);
 void vfe_780_err_irq_init(struct vfe_device *vfe);
 void vfe_780_err_irq_mask(struct vfe_device *vfe, unsigned int errs);

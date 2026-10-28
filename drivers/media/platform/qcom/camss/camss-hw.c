@@ -584,6 +584,27 @@ int camss_hw_vfe_pdaf_lcr_regs(struct camss_hw_pipe *pipe, unsigned int rdi,
 }
 EXPORT_SYMBOL_NS_GPL(camss_hw_vfe_pdaf_lcr_regs, "QCOM_CAMSS");
 
+/**
+ * camss_hw_vfe_fcg_phase_regs - set the FCG phase indices of the pixel pipe
+ * @pipe: claimed full pipe
+ * @r: red phase index
+ * @g: green phase index
+ * @b: blue phase index
+ * @regs: register writes to apply
+ *
+ * Return: number of entries in @regs, or -EINVAL on a lite pipe or for a
+ * red or green index wider than 16 bits
+ */
+int camss_hw_vfe_fcg_phase_regs(struct camss_hw_pipe *pipe, u32 r, u32 g,
+				u32 b, struct camss_hw_reg regs[2])
+{
+	if (vfe_is_lite(pipe->vfe) || r > U16_MAX || g > U16_MAX)
+		return -EINVAL;
+
+	return vfe_780_fcg_phase_regs(pipe->vfe, r, g, b, regs);
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_vfe_fcg_phase_regs, "QCOM_CAMSS");
+
 int camss_hw_comp_start(struct camss_hw_pipe *pipe, unsigned int comp,
 			unsigned int wm)
 {
