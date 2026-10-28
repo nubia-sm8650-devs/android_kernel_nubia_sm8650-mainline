@@ -272,7 +272,10 @@ int camss_hw_path_config(struct camss_hw_pipe *pipe, enum camss_hw_path path,
 		return -EINVAL;
 
 	if (path != CAMSS_HW_PATH_IPP &&
-	    (cfg->sync || cfg->bin_h || cfg->bin_v || cfg->bin_qcfa))
+	    (cfg->sync || cfg->bin_v || cfg->bin_qcfa))
+		return -EINVAL;
+
+	if (cfg->bin_h && path != CAMSS_HW_PATH_IPP && path != CAMSS_HW_PATH_PPP)
 		return -EINVAL;
 
 	if (cfg->sync > CAMSS_HW_SYNC_SLAVE ||
