@@ -14,6 +14,7 @@
 #include <dt-bindings/dma/qcom-gpi.h>
 #include <dt-bindings/firmware/qcom,scm.h>
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interconnect/qcom,camnoc.h>
 #include <dt-bindings/interconnect/qcom,icc.h>
 #include <dt-bindings/interconnect/qcom,sm8650-rpmh.h>
 #include <dt-bindings/interconnect/qcom,osm-l3.h>
@@ -5870,9 +5871,12 @@
 			interconnects = <&gem_noc MASTER_APPSS_PROC 0
 					 &config_noc SLAVE_CAMERA_CFG 0>,
 					<&mmss_noc MASTER_CAMNOC_HF 0
-					 &mc_virt SLAVE_EBI1 0>;
+					 &mc_virt SLAVE_EBI1 0>,
+					<&camnoc_virt MASTER_CAMNOC_IFE_0
+					 &camnoc_virt SLAVE_CAMNOC_AXI>;
 			interconnect-names = "ahb",
-					     "hf_mnoc";
+					     "hf_mnoc",
+					     "camnoc";
 
 			iommus = <&apps_smmu 0x800 0x20>,
 				 <&apps_smmu 0x18a0 0x40>,
