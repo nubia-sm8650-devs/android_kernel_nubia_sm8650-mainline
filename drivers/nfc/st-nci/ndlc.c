@@ -64,12 +64,13 @@ void ndlc_close(struct llt_ndlc *ndlc)
 	cmd.cmd_type = ST_NCI_SET_NFC_MODE;
 	cmd.mode = 0;
 
-	/* toggle reset pin */
-	ndlc->ops->enable(ndlc->phy_id);
+	if (!ndlc->raw_nci) {
+		/* toggle reset pin */
+		ndlc->ops->enable(ndlc->phy_id);
 
-	if (!ndlc->raw_nci)
 		nci_prop_cmd(ndlc->ndev, ST_NCI_CORE_PROP,
 			     sizeof(struct nci_mode_set_cmd), (__u8 *)&cmd);
+	}
 
 	ndlc->powered = 0;
 	ndlc->ops->disable(ndlc->phy_id);

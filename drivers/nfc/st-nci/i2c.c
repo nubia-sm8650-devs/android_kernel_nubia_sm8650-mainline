@@ -53,26 +53,36 @@ struct st_nci_i2c_phy {
 	struct st_nci_se_status se_status;
 };
 
+/*
+ * Existing DTS uses GPIO_ACTIVE_HIGH and treats logical 1 as
+ * chip-running. GPIO_ACTIVE_LOW: logical 1 asserts reset
+ * (physical LOW).
+ */
+static void st_nci_i2c_set_reset(struct st_nci_i2c_phy *phy, bool reset)
+{
+	if (gpiod_is_active_low(phy->gpiod_reset))
+		gpiod_set_value(phy->gpiod_reset, reset);
+	else
+		gpiod_set_value(phy->gpiod_reset, !reset);
+}
+
 static int st_nci_i2c_enable(void *phy_id)
 {
 	struct st_nci_i2c_phy *phy = phy_id;
 
 	gpiod_set_value(phy->gpiod_ese_power, 0);
 
-	/*
-	 * Existing DTS uses GPIO_ACTIVE_HIGH and treats logical 1 as
-	 * chip-running. GPIO_ACTIVE_LOW: logical 1 asserts reset
-	 * (physical LOW).
-	 */
-	if (gpiod_is_active_low(phy->gpiod_reset)) {
-		gpiod_set_value(phy->gpiod_reset, 1);
-		usleep_range(10000, 15000);
-		gpiod_set_value(phy->gpiod_reset, 0);
+	st_nci_i2c_set_reset(phy, true);
+	if (phy->raw_nci) {
+		msleep(20);
+		st_nci_i2c_set_reset(phy, false);
+		usleep_range(10000, 11000);
+		st_nci_i2c_set_reset(phy, true);
+		msleep(20);
 	} else {
-		gpiod_set_value(phy->gpiod_reset, 0);
 		usleep_range(10000, 15000);
-		gpiod_set_value(phy->gpiod_reset, 1);
 	}
+	st_nci_i2c_set_reset(phy, false);
 	usleep_range(80000, 85000);
 
 	if (phy->gpiod_ese_power) {
