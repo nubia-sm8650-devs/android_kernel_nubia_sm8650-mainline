@@ -278,6 +278,10 @@ int camss_hw_path_config(struct camss_hw_pipe *pipe, enum camss_hw_path path,
 	if (cfg->bin_h && path != CAMSS_HW_PATH_IPP && path != CAMSS_HW_PATH_PPP)
 		return -EINVAL;
 
+	if (cfg->lcr && (csid_is_lite(pipe->csid) ||
+			 (path != CAMSS_HW_PATH_RDI0 && path != CAMSS_HW_PATH_PPP)))
+		return -EINVAL;
+
 	if (cfg->sync > CAMSS_HW_SYNC_SLAVE ||
 	    (cfg->sync && csid_is_lite(pipe->csid)))
 		return -EINVAL;
@@ -336,6 +340,36 @@ int camss_hw_path_resume(struct camss_hw_pipe *pipe, enum camss_hw_path path)
 
 	return 0;
 }
+
+/**
+ * camss_hw_path_resume_global - resume a path at the next global start
+ * @pipe: claimed pipe
+ * @path: configured path
+ *
+ * The path stays halted until camss_hw_csid_global_start(), which starts
+ * every path armed this way on the same frame, as the RDI LCR group needs.
+ * Not for a path of a dual pair, whose master starts both CSIDs.
+ *
+ * Return: 0 on success, -EINVAL for a path that is not configured or on a
+ * paired pipe
+ */
+int camss_hw_path_resume_global(struct camss_hw_pipe *pipe,
+				enum camss_hw_path path)
+{
+	if (path >= pipe->path_num || !(pipe->paths & BIT(path)) || pipe->dual)
+		return -EINVAL;
+
+	csid_gen3_hw_path_resume_global(pipe, path);
+
+	return 0;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_path_resume_global, "QCOM_CAMSS");
+
+void camss_hw_csid_global_start(struct camss_hw_pipe *pipe)
+{
+	csid_gen3_hw_global_start(pipe);
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_csid_global_start, "QCOM_CAMSS");
 EXPORT_SYMBOL_NS_GPL(camss_hw_path_resume, "QCOM_CAMSS");
 
 /**
@@ -527,6 +561,28 @@ void camss_hw_bus_status(struct camss_hw_pipe *pipe, u32 *overflow,
 	vfe_780_bus_status(pipe->vfe, overflow, violation);
 }
 EXPORT_SYMBOL_NS_GPL(camss_hw_bus_status, "QCOM_CAMSS");
+
+/**
+ * camss_hw_vfe_pdaf_lcr_regs - route a VFE RDI input into the PDAF LCR input
+ * @pipe: claimed full pipe
+ * @rdi: VFE RDI input, 0 to 2
+ * @init: also enable the LCR input, for the first configuration
+ * @regs: register writes to apply
+ *
+ * Stopping the VFE inputs disables the LCR input again.
+ *
+ * Return: number of entries in @regs, or -EINVAL on a lite pipe or for an
+ * invalid input
+ */
+int camss_hw_vfe_pdaf_lcr_regs(struct camss_hw_pipe *pipe, unsigned int rdi,
+			       bool init, struct camss_hw_reg regs[2])
+{
+	if (vfe_is_lite(pipe->vfe) || rdi > 2)
+		return -EINVAL;
+
+	return vfe_780_pdaf_lcr_regs(pipe->vfe, rdi, init, regs);
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_vfe_pdaf_lcr_regs, "QCOM_CAMSS");
 
 int camss_hw_comp_start(struct camss_hw_pipe *pipe, unsigned int comp,
 			unsigned int wm)

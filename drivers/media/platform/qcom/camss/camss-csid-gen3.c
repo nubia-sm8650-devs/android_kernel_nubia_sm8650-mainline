@@ -27,6 +27,14 @@
 #define		DUAL_CFG0_SLAVE			BIT(1)
 #define		DUAL_CFG0_SYNC_SEL		8
 
+#define CSID_GLOBAL_CMD			0x8
+#define		GLOBAL_CMD_START		BIT(0)
+
+#define CSID_SHDR_MASTER_SLAVE_CFG	0x20
+#define		SHDR_EN				BIT(0)
+#define		SHDR_MASTER_RDI0		BIT(5)
+#define		SHDR_SLAVE_PPP			BIT(20)
+
 #define CSID_RST_CFG			0xC
 #define		RST_MODE			BIT(0)
 #define		RST_LOCATION			BIT(4)
@@ -168,7 +176,10 @@
 #define CSID_IPP_CFG1_BIN_V_EN		BIT(21)
 #define CSID_PPP_CFG1_BIN_H_EN		BIT(18)
 
+#define CSID_PATH_CFG0_SOF_RETIME_DIS	BIT(5)
+
 #define CSID_PATH_CTRL_START_MODE	GENMASK(3, 2)
+#define		START_MODE_GLOBAL		1
 #define		START_MODE_MASTER		2
 #define		START_MODE_SLAVE		3
 
@@ -568,12 +579,15 @@ void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 	cfg0 |= CSID_PATH_CFG0_TS_STB_SEL | RDI_CFG0_TIMESTAMP_EN;
 	cfg0 |= cfg->frame_id_dec << CSID_PATH_CFG0_FRAME_ID_DEC;
 	cfg0 |= cfg->vfr;
+	if (cfg->lcr)
+		cfg0 |= CSID_PATH_CFG0_SOF_RETIME_DIS;
 
 	if (path == CAMSS_HW_PATH_IPP || path == CAMSS_HW_PATH_PPP) {
 		cfg1 = CSID_IPP_CFG1_PIX_STORE;
 		if (cfg->crop)
-			cfg1 |= CSID_IPP_CFG1_CROP_H_EN | CSID_IPP_CFG1_CROP_V_EN |
-				CSID_IPP_CFG1_EARLY_EOF;
+			cfg1 |= CSID_IPP_CFG1_CROP_H_EN | CSID_IPP_CFG1_CROP_V_EN;
+		if (cfg->crop && !cfg->lcr)
+			cfg1 |= CSID_IPP_CFG1_EARLY_EOF;
 		if (cfg->drop)
 			cfg1 |= CSID_IPP_CFG1_DROP_H_EN | CSID_IPP_CFG1_DROP_V_EN;
 		if (path == CAMSS_HW_PATH_PPP) {
@@ -613,6 +627,15 @@ void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 	writel(CSID_PATH_ERR_REC_DEFAULT, csid->base + p->err_rec);
 	writel(cfg->epoch_line << 16, csid->base + p->epoch);
 
+	if (cfg->lcr) {
+		u32 shdr = readl(csid->base + CSID_SHDR_MASTER_SLAVE_CFG);
+
+		shdr |= SHDR_EN;
+		shdr |= path == CAMSS_HW_PATH_PPP ? SHDR_SLAVE_PPP : SHDR_MASTER_RDI0;
+		writel(shdr, csid->base + CSID_SHDR_MASTER_SLAVE_CFG);
+		pipe->shdr = true;
+	}
+
 	mask = CSID_PATH_IRQ_FATAL | CSID_PATH_IRQ_NON_FATAL;
 	if (cfg->events & CAMSS_HW_EV_SOF)
 		mask |= CSID_PATH_IRQ_SOF;
@@ -640,6 +663,18 @@ void csid_gen3_hw_path_resume(struct camss_hw_pipe *pipe,
 	       csid->base + p->ctrl);
 }
 
+void csid_gen3_hw_path_resume_global(struct camss_hw_pipe *pipe,
+				     enum camss_hw_path path)
+{
+	writel(FIELD_PREP(CSID_PATH_CTRL_START_MODE, START_MODE_GLOBAL) |
+	       CSID_PATH_CTRL_RESUME, pipe->csid->base + csid_gen3_paths[path].ctrl);
+}
+
+void csid_gen3_hw_global_start(struct camss_hw_pipe *pipe)
+{
+	writel(GLOBAL_CMD_START, pipe->csid->base + CSID_GLOBAL_CMD);
+}
+
 int csid_gen3_hw_stop(struct camss_hw_pipe *pipe)
 {
 	struct csid_device *csid = pipe->csid;
@@ -655,6 +690,10 @@ int csid_gen3_hw_stop(struct camss_hw_pipe *pipe)
 	writel(0, csid->base + CSID_CSI2_RX_IRQ_MASK);
 	for_each_set_bit(i, &pipe->paths, CAMSS_HW_PATH_NUM)
 		writel(0, csid->base + csid_gen3_paths[i].irq_mask);
+	if (pipe->shdr) {
+		writel(0, csid->base + CSID_SHDR_MASTER_SLAVE_CFG);
+		pipe->shdr = false;
+	}
 
 	spin_lock_irqsave(&pipe->lock, flags);
 	pipe->buf_done_mask = 0;

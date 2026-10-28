@@ -119,6 +119,7 @@ struct camss_hw_path_cfg {
 	bool bin_h;
 	bool bin_v;
 	bool bin_qcfa;
+	bool lcr;	/* RDI0 feeds the VFE PDAF LCR input, the PPP follows it */
 	enum camss_hw_sync sync;
 	u32 epoch_line;
 	u32 events;
@@ -177,6 +178,9 @@ int camss_hw_path_config(struct camss_hw_pipe *pipe, enum camss_hw_path path,
 int camss_hw_csid_dual(struct camss_hw_pipe *pipe, enum camss_hw_sync sync,
 		       unsigned int peer);
 int camss_hw_path_resume(struct camss_hw_pipe *pipe, enum camss_hw_path path);
+int camss_hw_path_resume_global(struct camss_hw_pipe *pipe,
+				enum camss_hw_path path);
+void camss_hw_csid_global_start(struct camss_hw_pipe *pipe);
 int camss_hw_csid_stop(struct camss_hw_pipe *pipe);
 int camss_hw_path_sof_ts(struct camss_hw_pipe *pipe, enum camss_hw_path path,
 			 bool prev, u64 *ns);
@@ -194,6 +198,8 @@ void camss_hw_vfe_err_enable(struct camss_hw_pipe *pipe, unsigned int errs,
 void camss_hw_vfe_sync(struct camss_hw_pipe *pipe);
 void camss_hw_bus_status(struct camss_hw_pipe *pipe, u32 *overflow,
 			 u32 *violation);
+int camss_hw_vfe_pdaf_lcr_regs(struct camss_hw_pipe *pipe, unsigned int rdi,
+			       bool init, struct camss_hw_reg regs[2]);
 
 int camss_hw_comp_start(struct camss_hw_pipe *pipe, unsigned int comp,
 			unsigned int wm);

@@ -41,6 +41,9 @@ void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 			      const struct camss_hw_path_cfg *cfg);
 void csid_gen3_hw_path_resume(struct camss_hw_pipe *pipe,
 			      enum camss_hw_path path);
+void csid_gen3_hw_path_resume_global(struct camss_hw_pipe *pipe,
+				     enum camss_hw_path path);
+void csid_gen3_hw_global_start(struct camss_hw_pipe *pipe);
 int csid_gen3_hw_stop(struct camss_hw_pipe *pipe);
 struct camss_hw_reg csid_gen3_hw_rup_reg(unsigned long paths, bool mup);
 u64 csid_gen3_hw_path_sof_ts(struct camss_hw_pipe *pipe,

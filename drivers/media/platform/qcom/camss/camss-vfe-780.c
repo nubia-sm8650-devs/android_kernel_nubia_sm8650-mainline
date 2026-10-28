@@ -67,8 +67,10 @@ typedef enum {
 #define VFE_TOP_EPOCH_HEIGHT_CFG	0x9C
 #define VFE_TOP_DEBUG_CFG		(vfe_is_lite(vfe) ? 0x74 : 0xFC)
 #define		TOP_DEBUG_CFG_EN		3
+#define VFE_TOP_PDAF_INPUT_CFG_0	0x130
 #define VFE_TOP_PDAF_INPUT_CFG_1	0x134
 #define		PDAF_INPUT_CFG_1_DEFAULT	1
+#define		PDAF_INPUT_CFG_1_LCR		0
 
 #define BUS_REG_BASE (vfe_is_lite(vfe) ? 0x200 : 0xC00)
 
@@ -366,6 +368,21 @@ void vfe_780_in_stop(struct vfe_device *vfe)
 {
 	if (!vfe_is_lite(vfe))
 		writel(PDAF_INPUT_CFG_1_DEFAULT, vfe->base + VFE_TOP_PDAF_INPUT_CFG_1);
+}
+
+int vfe_780_pdaf_lcr_regs(struct vfe_device *vfe, unsigned int rdi, bool init,
+			  struct camss_hw_reg regs[2])
+{
+	unsigned int n = 0;
+
+	if (init) {
+		regs[n].offset = VFE_TOP_PDAF_INPUT_CFG_1;
+		regs[n++].value = PDAF_INPUT_CFG_1_LCR;
+	}
+	regs[n].offset = VFE_TOP_PDAF_INPUT_CFG_0;
+	regs[n++].value = rdi;
+
+	return n;
 }
 
 void vfe_780_bus_status(struct vfe_device *vfe, u32 *overflow, u32 *violation)
