@@ -85,6 +85,7 @@ struct dwc3_qcom {
 	struct icc_path		*icc_path_apps;
 
 	enum usb_role		current_role;
+	struct wakeup_source	*ws;
 };
 
 #define to_dwc3_qcom(d) container_of((d), struct dwc3_qcom, dwc)
@@ -562,6 +563,11 @@ static void dwc3_qcom_set_role_notifier(struct dwc3 *dwc, enum usb_role next_rol
 {
 	struct dwc3_qcom *qcom = to_dwc3_qcom(dwc);
 
+	if (next_role == USB_ROLE_NONE)
+		__pm_relax(qcom->ws);
+	else
+		__pm_stay_awake(qcom->ws);
+
 	if (qcom->current_role == next_role)
 		return;
 
@@ -607,6 +613,11 @@ static struct dwc3_glue_ops dwc3_qcom_glue_ops = {
 	.pre_run_stop	= dwc3_qcom_run_stop_notifier,
 };
 
+static void dwc3_qcom_unregister_ws(void *ws)
+{
+	wakeup_source_unregister(ws);
+}
+
 static int dwc3_qcom_probe(struct platform_device *pdev)
 {
 	struct dwc3_probe_data	probe_data = {};
@@ -623,6 +634,11 @@ static int dwc3_qcom_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	qcom->dev = &pdev->dev;
+
+	qcom->ws = wakeup_source_register(dev, dev_name(dev));
+	ret = devm_add_action_or_reset(dev, dwc3_qcom_unregister_ws, qcom->ws);
+	if (ret)
+		return ret;
 
 	qcom->resets = devm_reset_control_array_get_optional_exclusive(dev);
 	if (IS_ERR(qcom->resets)) {
