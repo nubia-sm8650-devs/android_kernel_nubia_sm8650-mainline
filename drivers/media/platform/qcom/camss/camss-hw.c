@@ -705,6 +705,30 @@ void camss_hw_comp_stop(struct camss_hw_pipe *pipe, unsigned int comp,
 }
 EXPORT_SYMBOL_NS_GPL(camss_hw_comp_stop, "QCOM_CAMSS");
 
+/**
+ * camss_hw_sfe_done_enable - report SFE completions through the sfe_done op
+ * @pipe: claimed full pipe
+ * @lines: SFE completion lines to report, 0 to disable
+ *
+ * The buf done status of a full CSID carries the composite done lines of
+ * the SFE it feeds next to those of the VFE. Line n is reported as bit n.
+ * camss_hw_csid_stop() disables every line.
+ *
+ * Return: 0 on success, -EINVAL on a lite pipe or for a line beyond
+ * CAMSS_HW_SFE_DONE_NUM
+ */
+int camss_hw_sfe_done_enable(struct camss_hw_pipe *pipe, u32 lines)
+{
+	if (csid_is_lite(pipe->csid) ||
+	    lines & ~GENMASK(CAMSS_HW_SFE_DONE_NUM - 1, 0))
+		return -EINVAL;
+
+	csid_gen3_hw_sfe_done(pipe, lines);
+
+	return 0;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_sfe_done_enable, "QCOM_CAMSS");
+
 int camss_hw_wm_start_regs(struct camss_hw_pipe *pipe, unsigned int wm,
 			   const struct camss_hw_wm_cfg *cfg,
 			   struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS])

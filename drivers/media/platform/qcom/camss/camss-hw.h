@@ -25,6 +25,7 @@ enum camss_hw_path {
 };
 
 #define CAMSS_HW_COMP_NUM	16
+#define CAMSS_HW_SFE_DONE_NUM	11
 #define CAMSS_HW_WM_NUM		28
 #define CAMSS_HW_WM_MAX_REGS	24
 #define CAMSS_HW_WM_BW_LIMIT_MAX	0xff
@@ -86,6 +87,7 @@ struct camss_hw_ops {
 	void (*rup_done)(void *priv, enum camss_hw_path path, u64 boot_ns);
 	void (*buf_done)(void *priv, unsigned int comp, unsigned int wm,
 			 u32 last_addr, u64 boot_ns);
+	void (*sfe_done)(void *priv, u32 lines, u64 boot_ns);
 	void (*error)(void *priv, enum camss_hw_err_src src,
 		      enum camss_hw_path path, u32 status, bool fatal);
 	void (*vfe_error)(void *priv, const struct camss_hw_vfe_err *err);
@@ -231,6 +233,7 @@ int camss_hw_comp_start(struct camss_hw_pipe *pipe, unsigned int comp,
 			unsigned int wm);
 void camss_hw_comp_stop(struct camss_hw_pipe *pipe, unsigned int comp,
 			unsigned int wm);
+int camss_hw_sfe_done_enable(struct camss_hw_pipe *pipe, u32 lines);
 
 int camss_hw_wm_start_regs(struct camss_hw_pipe *pipe, unsigned int wm,
 			   const struct camss_hw_wm_cfg *cfg,

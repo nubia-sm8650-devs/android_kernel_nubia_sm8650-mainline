@@ -52,5 +52,6 @@ u64 csid_gen3_hw_path_sof_ts(struct camss_hw_pipe *pipe,
 			     enum camss_hw_path path, bool prev);
 void csid_gen3_hw_buf_done(struct camss_hw_pipe *pipe, unsigned int comp,
 			   unsigned int wm, bool enable);
+void csid_gen3_hw_sfe_done(struct camss_hw_pipe *pipe, u32 lines);
 
 #endif /* __QC_MSM_CAMSS_CSID_GEN3_H__ */

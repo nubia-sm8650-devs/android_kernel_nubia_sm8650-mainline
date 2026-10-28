@@ -77,6 +77,7 @@
 #define CSID_BUF_DONE_IRQ_MASK		0x90
 #define CSID_BUF_DONE_IRQ_CLEAR		0x94
 #define CSID_BUF_DONE_IRQ_SET		0x98
+#define		BUF_DONE_SFE			GENMASK(27, 17)
 
 #define CSID_CSI2_RDIN_IRQ_STATUS(rdi)	(0xEC + 0x10 * (rdi))
 #define		RUP_DONE_IRQ_STATUS		BIT(23)
@@ -800,6 +801,17 @@ void csid_gen3_hw_buf_done(struct camss_hw_pipe *pipe, unsigned int comp,
 	spin_unlock_irqrestore(&pipe->lock, flags);
 }
 
+void csid_gen3_hw_sfe_done(struct camss_hw_pipe *pipe, u32 lines)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&pipe->lock, flags);
+	pipe->buf_done_mask &= ~BUF_DONE_SFE;
+	pipe->buf_done_mask |= FIELD_PREP(BUF_DONE_SFE, lines);
+	writel(pipe->buf_done_mask, pipe->csid->base + CSID_BUF_DONE_IRQ_MASK);
+	spin_unlock_irqrestore(&pipe->lock, flags);
+}
+
 static void csid_gen3_dispatch(struct camss_hw_pipe *pipe,
 			       const struct camss_hw_irq *ev)
 {
@@ -851,6 +863,9 @@ static void csid_gen3_dispatch(struct camss_hw_pipe *pipe,
 			ops->buf_done(pipe->priv, i, wm, ev->addr[wm],
 				      ev->boot_ns);
 	}
+
+	if (ev->sfe_done && ops->sfe_done)
+		ops->sfe_done(pipe->priv, ev->sfe_done, ev->boot_ns);
 }
 
 static irqreturn_t csid_isr_claimed(struct csid_device *csid,
@@ -894,6 +909,8 @@ static irqreturn_t csid_isr_claimed(struct csid_device *csid,
 	if (ev.top & CSID_TOP_IRQ_BUF_DONE) {
 		ev.buf_done = readl(csid->base + CSID_BUF_DONE_IRQ_STATUS);
 		writel(ev.buf_done, csid->base + CSID_BUF_DONE_IRQ_CLEAR);
+		ev.sfe_done = FIELD_GET(BUF_DONE_SFE,
+					ev.buf_done & pipe->buf_done_mask);
 
 		for (i = 0; i < pipe->comp_num; i++) {
 			if (!(ev.buf_done & csid_gen3_buf_done_mask(pipe, i)))

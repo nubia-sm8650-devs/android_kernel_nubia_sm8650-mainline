@@ -156,6 +156,7 @@ struct camss_hw_irq {
 	u32 rx;
 	u32 path[CAMSS_HW_PATH_NUM];
 	u32 buf_done;
+	u32 sfe_done;
 	u32 comp_wms[CAMSS_HW_COMP_NUM];
 	u32 addr[CAMSS_HW_WM_NUM];
 };
