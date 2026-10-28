@@ -587,7 +587,12 @@ void csid_gen3_hw_rx(struct camss_hw_pipe *pipe,
 
 	val = (cfg->lanes - 1) << CSI2_RX_CFG0_NUM_ACTIVE_LANES;
 	val |= cfg->lane_cfg << CSI2_RX_CFG0_DL0_INPUT_SEL;
-	val |= (cfg->phy + CSI2_RX_CFG0_PHY_SEL_BASE_IDX) << CSI2_RX_CFG0_PHY_NUM_SEL;
+	if (cfg->tpg)
+		val |= FIELD_PREP(CSI2_RX_CFG0_TPG_MUX_SEL, cfg->phy + 1) |
+		       CSI2_RX_CFG0_TPG_MUX_EN;
+	else
+		val |= (cfg->phy + CSI2_RX_CFG0_PHY_SEL_BASE_IDX) <<
+		       CSI2_RX_CFG0_PHY_NUM_SEL;
 	val |= cfg->cphy << CSI2_RX_CFG0_PHY_TYPE_SEL;
 	writel(val, csid->base + CSID_CSI2_RX_CFG0);
 

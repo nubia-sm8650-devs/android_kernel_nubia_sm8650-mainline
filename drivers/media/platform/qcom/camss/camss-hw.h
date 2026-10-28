@@ -102,6 +102,7 @@ struct camss_hw_rx_cfg {
 	bool epd;
 	bool vc_full_width;
 	bool dyn_switch;	/* MUP switches the sensor mode, no RUP latch */
+	bool tpg;	/* @phy indexes the TPGs, their claim is not checked */
 };
 
 enum camss_hw_sync {

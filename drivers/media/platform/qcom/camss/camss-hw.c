@@ -256,7 +256,8 @@ int camss_hw_csid_rx(struct camss_hw_pipe *pipe,
 		     const struct camss_hw_rx_cfg *cfg)
 {
 	if (!cfg->lanes || cfg->lanes > 4 ||
-	    cfg->phy >= pipe->camss->res->csiphy_num)
+	    cfg->phy >= (cfg->tpg ? pipe->camss->res->tpg_num :
+			 pipe->camss->res->csiphy_num))
 		return -EINVAL;
 
 	csid_gen3_hw_rx(pipe, cfg);
