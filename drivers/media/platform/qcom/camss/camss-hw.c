@@ -252,6 +252,128 @@ void camss_hw_release(struct camss_hw_pipe *pipe)
 }
 EXPORT_SYMBOL_NS_GPL(camss_hw_release, "QCOM_CAMSS");
 
+struct camss_hw_tpg {
+	struct camss *camss;
+	struct tpg_device *tpg;
+	resource_size_t size;
+	bool powered;
+};
+
+/**
+ * camss_hw_tpg_claim - take a CSI TPG away from the V4L2 subdevice
+ * @camss: CAMSS instance from camss_hw_get()
+ * @id: TPG index
+ *
+ * The claim leaves the TPG powered off. While it holds, the V4L2 subdevice
+ * refuses to power on.
+ *
+ * Return: the claim, ERR_PTR(-EINVAL) for an unknown TPG, ERR_PTR(-EBUSY)
+ * while claimed or in use by a V4L2 pipeline, ERR_PTR(-ENOMEM)
+ */
+struct camss_hw_tpg *camss_hw_tpg_claim(struct camss *camss, unsigned int id)
+{
+	struct platform_device *pdev = to_platform_device(camss->dev);
+	struct camss_hw_tpg *claim;
+	struct tpg_device *tpg;
+	struct resource *res;
+
+	if (!camss->tpg || id >= camss->res->tpg_num)
+		return ERR_PTR(-EINVAL);
+
+	tpg = &camss->tpg[id];
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+					   camss->res->tpg_res[id].reg[0]);
+	if (!res)
+		return ERR_PTR(-EINVAL);
+
+	claim = kzalloc(sizeof(*claim), GFP_KERNEL);
+	if (!claim)
+		return ERR_PTR(-ENOMEM);
+
+	claim->camss = camss;
+	claim->tpg = tpg;
+	claim->size = resource_size(res);
+
+	mutex_lock(&camss->media_dev.graph_mutex);
+	if (tpg->claim || tpg->subdev.entity.use_count) {
+		mutex_unlock(&camss->media_dev.graph_mutex);
+		kfree(claim);
+		return ERR_PTR(-EBUSY);
+	}
+	tpg->claim = claim;
+	mutex_unlock(&camss->media_dev.graph_mutex);
+
+	return claim;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_tpg_claim, "QCOM_CAMSS");
+
+/**
+ * camss_hw_tpg_release - hand a claimed TPG back to its V4L2 subdevice
+ * @claim: TPG claim
+ *
+ * Powers the TPG off when the claim still holds it powered.
+ */
+void camss_hw_tpg_release(struct camss_hw_tpg *claim)
+{
+	struct camss *camss = claim->camss;
+
+	mutex_lock(&camss->media_dev.graph_mutex);
+	if (claim->powered)
+		msm_tpg_power(claim->tpg, false);
+	claim->tpg->claim = NULL;
+	mutex_unlock(&camss->media_dev.graph_mutex);
+
+	kfree(claim);
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_tpg_release, "QCOM_CAMSS");
+
+/**
+ * camss_hw_tpg_power - power a claimed TPG on or off
+ * @claim: TPG claim
+ * @on: power on or off
+ *
+ * Power on resumes CAMSS, sets the TPG clocks to their rates, enables them
+ * and resets the TPG.
+ *
+ * Return: 0 on success or when already in the requested state, a negative
+ * error code otherwise
+ */
+int camss_hw_tpg_power(struct camss_hw_tpg *claim, bool on)
+{
+	int ret;
+
+	if (claim->powered == on)
+		return 0;
+
+	ret = msm_tpg_power(claim->tpg, on);
+	if (ret)
+		return ret;
+
+	claim->powered = on;
+
+	return 0;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_tpg_power, "QCOM_CAMSS");
+
+/**
+ * camss_hw_tpg_regs - map of the registers of a claimed TPG
+ * @claim: TPG claim
+ * @size: size of the TPG region
+ *
+ * The registers are accessible only while camss_hw_tpg_power() holds the
+ * TPG powered.
+ *
+ * Return: the base of the TPG region
+ */
+void __iomem *camss_hw_tpg_regs(struct camss_hw_tpg *claim,
+				resource_size_t *size)
+{
+	*size = claim->size;
+
+	return claim->tpg->base;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_tpg_regs, "QCOM_CAMSS");
+
 int camss_hw_csid_rx(struct camss_hw_pipe *pipe,
 		     const struct camss_hw_rx_cfg *cfg)
 {

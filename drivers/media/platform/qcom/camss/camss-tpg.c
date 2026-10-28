@@ -152,9 +152,8 @@ static int tpg_set_clock_rates(struct tpg_device *tpg)
 	return 0;
 }
 
-static int tpg_set_power(struct v4l2_subdev *sd, int on)
+int msm_tpg_power(struct tpg_device *tpg, bool on)
 {
-	struct tpg_device *tpg = v4l2_get_subdevdata(sd);
 	struct device *dev = tpg->camss->dev;
 
 	if (on) {
@@ -186,6 +185,16 @@ static int tpg_set_power(struct v4l2_subdev *sd, int on)
 	}
 
 	return 0;
+}
+
+static int tpg_set_power(struct v4l2_subdev *sd, int on)
+{
+	struct tpg_device *tpg = v4l2_get_subdevdata(sd);
+
+	if (on && tpg->claim)
+		return -EBUSY;
+
+	return msm_tpg_power(tpg, on);
 }
 
 static int tpg_set_stream(struct v4l2_subdev *sd, int enable)

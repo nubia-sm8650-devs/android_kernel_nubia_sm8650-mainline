@@ -94,6 +94,7 @@ struct tpg_device {
 	struct v4l2_ctrl *testgen_mode;
 	const struct tpg_subdev_resources *res;
 	u32 hw_version;
+	struct camss_hw_tpg *claim;
 };
 
 struct camss_subdev_resources;
@@ -105,6 +106,8 @@ const struct tpg_format_info *tpg_get_fmt_entry(const struct tpg_format_info *fo
 int msm_tpg_subdev_init(struct camss *camss,
 			struct tpg_device *tpg,
 			const struct camss_subdev_resources *res, u8 id);
+
+int msm_tpg_power(struct tpg_device *tpg, bool on);
 
 int msm_tpg_register_entity(struct tpg_device *tpg,
 			    struct v4l2_device *v4l2_dev);

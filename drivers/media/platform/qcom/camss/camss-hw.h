@@ -200,6 +200,14 @@ struct camss_hw_pipe *camss_hw_claim(struct camss *camss, unsigned int index,
 				     void *priv);
 void camss_hw_release(struct camss_hw_pipe *pipe);
 
+struct camss_hw_tpg;
+
+struct camss_hw_tpg *camss_hw_tpg_claim(struct camss *camss, unsigned int id);
+void camss_hw_tpg_release(struct camss_hw_tpg *claim);
+int camss_hw_tpg_power(struct camss_hw_tpg *claim, bool on);
+void __iomem *camss_hw_tpg_regs(struct camss_hw_tpg *claim,
+				resource_size_t *size);
+
 int camss_hw_csid_rx(struct camss_hw_pipe *pipe,
 		     const struct camss_hw_rx_cfg *cfg);
 int camss_hw_path_config(struct camss_hw_pipe *pipe, enum camss_hw_path path,
