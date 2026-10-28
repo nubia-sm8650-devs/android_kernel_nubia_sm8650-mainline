@@ -49,9 +49,29 @@ enum camss_hw_err_src {
 #define CAMSS_HW_EV_EPOCH	BIT(2)
 #define CAMSS_HW_EV_RUP		BIT(3)
 
+#define CAMSS_HW_VFE_ERR_CAMIF	BIT(0)
+#define CAMSS_HW_VFE_ERR_BUS	BIT(1)
+
 struct camss_hw_reg {
 	u32 offset;
 	u32 value;
+};
+
+/**
+ * struct camss_hw_vfe_err - VFE error status
+ * @top: pixel pipe errors in top status 0, cam_vfe880.h error_irq_mask bits
+ * @bus: bus status 0 errors, 31 image size, 30 CCIF and 28 constraint
+ * @image_size_wms: write masters with an image size violation
+ * @ccif_wms: write masters with a CCIF violation
+ * @constraint_wms: write masters with a constraint violation, read only
+ *                  when @image_size_wms is empty
+ */
+struct camss_hw_vfe_err {
+	u32 top;
+	u32 bus;
+	u32 image_size_wms;
+	u32 ccif_wms;
+	u32 constraint_wms;
 };
 
 struct camss_hw_ops {
@@ -64,6 +84,7 @@ struct camss_hw_ops {
 			 u32 last_addr, u64 boot_ns);
 	void (*error)(void *priv, enum camss_hw_err_src src,
 		      enum camss_hw_path path, u32 status, bool fatal);
+	void (*vfe_error)(void *priv, const struct camss_hw_vfe_err *err);
 };
 
 struct camss_hw_rx_cfg {
@@ -167,6 +188,9 @@ void camss_hw_rup(struct camss_hw_pipe *pipe, unsigned long paths, bool mup);
 int camss_hw_vfe_in_start(struct camss_hw_pipe *pipe, bool camif,
 			  u32 epoch_line);
 void camss_hw_vfe_in_stop(struct camss_hw_pipe *pipe);
+void camss_hw_vfe_err_enable(struct camss_hw_pipe *pipe, unsigned int errs,
+			     bool enable);
+void camss_hw_vfe_sync(struct camss_hw_pipe *pipe);
 void camss_hw_bus_status(struct camss_hw_pipe *pipe, u32 *overflow,
 			 u32 *violation);
 

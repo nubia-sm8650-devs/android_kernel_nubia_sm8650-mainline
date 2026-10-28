@@ -56,6 +56,14 @@ typedef enum {
 	VFE_LITE_WM_STATS_BG,
 } vfe_lite_wm_t;
 
+#define VFE_TOP_IRQ_CMD			(vfe_is_lite(vfe) ? 0x38 : 0x30)
+#define		TOP_IRQ_CMD_CLEAR		BIT(0)
+#define VFE_TOP_IRQ_MASK(n)		((vfe_is_lite(vfe) ? 0x24 : 0x34) + 4 * (n))
+#define VFE_TOP_IRQ_CLEAR(n)		((vfe_is_lite(vfe) ? 0x2C : 0x3C) + 4 * (n))
+#define VFE_TOP_IRQ_STATUS_0		(vfe_is_lite(vfe) ? 0x1C : 0x44)
+#define		TOP_IRQ_BUS			BIT(0)
+#define		TOP_IRQ_CAMIF_ERR		0x7F1D0
+
 #define VFE_TOP_EPOCH_HEIGHT_CFG	0x9C
 #define VFE_TOP_DEBUG_CFG		(vfe_is_lite(vfe) ? 0x74 : 0xFC)
 #define		TOP_DEBUG_CFG_EN		3
@@ -64,8 +72,20 @@ typedef enum {
 
 #define BUS_REG_BASE (vfe_is_lite(vfe) ? 0x200 : 0xC00)
 
+#define VFE_BUS_IRQ_MASK(n)		(BUS_REG_BASE + 0x18 + 4 * (n))
+#define VFE_BUS_IRQ_CLEAR(n)		(BUS_REG_BASE + 0x20 + 4 * (n))
+#define VFE_BUS_IRQ_STATUS_0		(BUS_REG_BASE + 0x28)
+#define VFE_BUS_IRQ_CMD			(BUS_REG_BASE + 0x30)
+#define		BUS_IRQ_CMD_CLEAR		BIT(0)
+#define		BUS_IRQ_CONSTRAINT		BIT(28)
+#define		BUS_IRQ_CCIF			BIT(30)
+#define		BUS_IRQ_IMAGE_SIZE		BIT(31)
+#define		BUS_IRQ_ERR			(BUS_IRQ_CONSTRAINT | BUS_IRQ_CCIF | \
+						 BUS_IRQ_IMAGE_SIZE)
+#define VFE_BUS_IRQ_REGS		(vfe_is_lite(vfe) ? 1 : 2)
 #define VFE_BUS_VIOLATION_STATUS	(BUS_REG_BASE + 0x64)
 #define VFE_BUS_OVERFLOW_STATUS		(BUS_REG_BASE + 0x68)
+#define VFE_BUS_IMAGE_SIZE_VIOLATION	(BUS_REG_BASE + 0x70)
 
 #define VFE_BUS_WM_TEST_BUS_CTRL (BUS_REG_BASE + 0xDC)
 
@@ -99,6 +119,7 @@ typedef enum {
 #define VFE_BUS_WM_ADDR_STATUS_0(n)		(BUS_REG_BASE + 0x278 + (n) * 0x100)
 #define VFE_BUS_WM_DEBUG_STATUS_CFG(n)		(BUS_REG_BASE + 0x288 + (n) * 0x100)
 #define		WM_DEBUG_STATUS_1_EN		(11 << 8)
+#define VFE_BUS_WM_DEBUG_STATUS_1(n)		(BUS_REG_BASE + 0x290 + (n) * 0x100)
 
 #define VFE_BUS_WM_BW_LIMIT(n)			(BUS_REG_BASE + 0x21c + (n) * 0x100)
 #define VFE_BUS_WM_UBWC_META_ADDR(n)		(BUS_REG_BASE + 0x240 + (n) * 0x100)
@@ -351,6 +372,89 @@ void vfe_780_bus_status(struct vfe_device *vfe, u32 *overflow, u32 *violation)
 {
 	*overflow = readl(vfe->base + VFE_BUS_OVERFLOW_STATUS);
 	*violation = readl(vfe->base + VFE_BUS_VIOLATION_STATUS);
+}
+
+void vfe_780_err_irq_mask(struct vfe_device *vfe, unsigned int errs)
+{
+	u32 top = 0;
+
+	if (errs & CAMSS_HW_VFE_ERR_CAMIF)
+		top |= TOP_IRQ_CAMIF_ERR;
+	if (errs & CAMSS_HW_VFE_ERR_BUS)
+		top |= TOP_IRQ_BUS;
+
+	writel(errs & CAMSS_HW_VFE_ERR_BUS ? BUS_IRQ_ERR : 0,
+	       vfe->base + VFE_BUS_IRQ_MASK(0));
+	writel(top, vfe->base + VFE_TOP_IRQ_MASK(0));
+}
+
+void vfe_780_err_irq_init(struct vfe_device *vfe)
+{
+	unsigned int i;
+
+	for (i = 0; i < 2; i++) {
+		writel(0, vfe->base + VFE_TOP_IRQ_MASK(i));
+		writel(0xFFFFFFFF, vfe->base + VFE_TOP_IRQ_CLEAR(i));
+	}
+
+	for (i = 0; i < VFE_BUS_IRQ_REGS; i++) {
+		writel(0, vfe->base + VFE_BUS_IRQ_MASK(i));
+		writel(0xFFFFFFFF, vfe->base + VFE_BUS_IRQ_CLEAR(i));
+	}
+
+	writel(BUS_IRQ_CMD_CLEAR, vfe->base + VFE_BUS_IRQ_CMD);
+	writel(TOP_IRQ_CMD_CLEAR, vfe->base + VFE_TOP_IRQ_CMD);
+}
+
+/*
+ * Mask each reported source until the consumer enables it again, as
+ * cam_vfe_top_ver4 and cam_vfe_bus_ver3 drop their error IRQs until the
+ * pipe restarts. A pixel pipe error masks the bus errors too, as
+ * cam_vfe_top_ver4 disables the whole top controller.
+ */
+static irqreturn_t vfe_780_isr_claimed(struct vfe_device *vfe,
+				       struct camss_hw_pipe *pipe)
+{
+	struct camss_hw_vfe_err err = {};
+	unsigned int wm;
+	u32 top, bus = 0;
+
+	top = readl(vfe->base + VFE_TOP_IRQ_STATUS_0);
+	if (top & TOP_IRQ_BUS) {
+		bus = readl(vfe->base + VFE_BUS_IRQ_STATUS_0);
+		writel(bus, vfe->base + VFE_BUS_IRQ_CLEAR(0));
+		writel(BUS_IRQ_CMD_CLEAR, vfe->base + VFE_BUS_IRQ_CMD);
+	}
+	writel(top, vfe->base + VFE_TOP_IRQ_CLEAR(0));
+	writel(TOP_IRQ_CMD_CLEAR, vfe->base + VFE_TOP_IRQ_CMD);
+
+	if (!vfe_is_lite(vfe))
+		err.top = top & TOP_IRQ_CAMIF_ERR;
+	err.bus = bus & BUS_IRQ_ERR;
+	if (!err.top && !err.bus)
+		return IRQ_HANDLED;
+
+	if (err.bus & (BUS_IRQ_IMAGE_SIZE | BUS_IRQ_CONSTRAINT)) {
+		err.image_size_wms = readl(vfe->base + VFE_BUS_IMAGE_SIZE_VIOLATION);
+		for (wm = 0; !err.image_size_wms && wm < pipe->wm_num; wm++)
+			if (readl(vfe->base + VFE_BUS_WM_DEBUG_STATUS_1(wm)))
+				err.constraint_wms |= BIT(wm);
+	}
+	if (err.bus & BUS_IRQ_CCIF)
+		err.ccif_wms = readl(vfe->base + VFE_BUS_VIOLATION_STATUS);
+
+	spin_lock(&pipe->lock);
+	if (err.top)
+		pipe->vfe_errs = 0;
+	else if (err.bus)
+		pipe->vfe_errs &= ~CAMSS_HW_VFE_ERR_BUS;
+	vfe_780_err_irq_mask(vfe, pipe->vfe_errs);
+	spin_unlock(&pipe->lock);
+
+	if (pipe->ops->vfe_error)
+		pipe->ops->vfe_error(pipe->priv, &err);
+
+	return IRQ_HANDLED;
 }
 
 void vfe_780_ubwc_static(struct vfe_device *vfe)
@@ -628,7 +732,12 @@ static void vfe_global_reset(struct vfe_device *vfe)
 
 static irqreturn_t vfe_isr(int irq, void *dev)
 {
-	/* nop */
+	struct vfe_device *vfe = dev;
+	struct camss_hw_pipe *pipe = camss_hw_vfe_pipe(vfe);
+
+	if (pipe)
+		return vfe_780_isr_claimed(vfe, pipe);
+
 	return IRQ_HANDLED;
 }
 

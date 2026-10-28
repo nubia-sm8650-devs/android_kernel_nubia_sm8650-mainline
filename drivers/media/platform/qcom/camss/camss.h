@@ -179,6 +179,7 @@ struct camss_hw_pipe {
 	u32 buf_done_mask;
 	u32 comp_wms[CAMSS_HW_COMP_NUM];
 	u32 gen;
+	unsigned int vfe_errs;
 };
 
 struct camss_buf_done_info {
@@ -230,5 +231,6 @@ void camss_reg_update(struct camss *camss, int hw_id,
 struct camss *camss_from_device(struct device *dev);
 bool camss_hw_csid_claimed(struct csid_device *csid);
 bool camss_hw_vfe_claimed(struct vfe_device *vfe);
+struct camss_hw_pipe *camss_hw_vfe_pipe(struct vfe_device *vfe);
 
 #endif /* QC_MSM_CAMSS_H */

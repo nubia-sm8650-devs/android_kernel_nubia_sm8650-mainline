@@ -54,6 +54,11 @@ bool camss_hw_vfe_claimed(struct vfe_device *vfe)
 	return vfe->id < camss->res->csid_num && camss->csid[vfe->id].claim;
 }
 
+struct camss_hw_pipe *camss_hw_vfe_pipe(struct vfe_device *vfe)
+{
+	return smp_load_acquire(&vfe->claim);
+}
+
 static bool camss_hw_vfe_busy(struct vfe_device *vfe)
 {
 	unsigned int i;
@@ -87,8 +92,9 @@ static void camss_hw_wm_disable_all(struct camss_hw_pipe *pipe)
  * @ops: event callbacks
  * @priv: argument passed to @ops
  *
- * The ops run from the hard interrupt handler of the CSID once the claim
- * returns, and must not sleep.
+ * The ops run from the hard interrupt handlers of the CSID and the VFE once
+ * the claim returns, and must not sleep. The two handlers can run at the
+ * same time on different CPUs.
  *
  * Return: the claimed pipe, an ERR_PTR() otherwise
  */
@@ -156,6 +162,7 @@ struct camss_hw_pipe *camss_hw_claim(struct camss *camss, unsigned int index,
 
 	csid_gen3_hw_init(pipe);
 	camss_hw_wm_disable_all(pipe);
+	vfe_780_err_irq_init(vfe);
 	if (!vfe_is_lite(vfe))
 		vfe_780_ubwc_static(vfe);
 	smp_store_release(&vfe->claim, pipe);
@@ -225,7 +232,10 @@ void camss_hw_release(struct camss_hw_pipe *pipe)
 	if (pipe->dual)
 		csid_gen3_hw_dual(pipe, CAMSS_HW_SYNC_NONE, 0);
 	camss_hw_wm_disable_all(pipe);
+	camss_hw_vfe_err_enable(pipe, CAMSS_HW_VFE_ERR_CAMIF | CAMSS_HW_VFE_ERR_BUS,
+				false);
 	WRITE_ONCE(pipe->vfe->claim, NULL);
+	synchronize_irq(pipe->vfe->irq);
 	csid_power(csid, false);
 	csid->claim = NULL;
 	camss_hw_clk_drop(pipe, CAMSS_HW_CSID);
@@ -461,6 +471,46 @@ void camss_hw_vfe_in_stop(struct camss_hw_pipe *pipe)
 	vfe_780_in_stop(pipe->vfe);
 }
 EXPORT_SYMBOL_NS_GPL(camss_hw_vfe_in_stop, "QCOM_CAMSS");
+
+/**
+ * camss_hw_vfe_err_enable - report VFE errors through the vfe_error op
+ * @pipe: claimed pipe
+ * @errs: CAMSS_HW_VFE_ERR_CAMIF for the pixel pipe of a full pipe,
+ *        CAMSS_HW_VFE_ERR_BUS for the write masters
+ * @enable: enable or disable @errs
+ *
+ * A source that reports an error stays disabled until enabled again.
+ */
+void camss_hw_vfe_err_enable(struct camss_hw_pipe *pipe, unsigned int errs,
+			     bool enable)
+{
+	unsigned long flags;
+
+	if (vfe_is_lite(pipe->vfe))
+		errs &= ~CAMSS_HW_VFE_ERR_CAMIF;
+
+	spin_lock_irqsave(&pipe->lock, flags);
+	if (enable)
+		pipe->vfe_errs |= errs;
+	else
+		pipe->vfe_errs &= ~errs;
+	vfe_780_err_irq_mask(pipe->vfe, pipe->vfe_errs);
+	spin_unlock_irqrestore(&pipe->lock, flags);
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_vfe_err_enable, "QCOM_CAMSS");
+
+/**
+ * camss_hw_vfe_sync - wait for the VFE events in flight
+ * @pipe: claimed pipe
+ *
+ * Returns once no vfe_error op runs for an interrupt taken before the
+ * call. Must not be called from an op.
+ */
+void camss_hw_vfe_sync(struct camss_hw_pipe *pipe)
+{
+	synchronize_irq(pipe->vfe->irq);
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_vfe_sync, "QCOM_CAMSS");
 
 /**
  * camss_hw_bus_status - read the VFE bus overflow and violation status

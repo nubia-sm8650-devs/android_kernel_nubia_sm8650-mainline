@@ -384,6 +384,8 @@ void vfe_780_ubwc_static(struct vfe_device *vfe);
 void vfe_780_in_start(struct vfe_device *vfe, bool camif, u32 epoch_line);
 void vfe_780_in_stop(struct vfe_device *vfe);
 void vfe_780_bus_status(struct vfe_device *vfe, u32 *overflow, u32 *violation);
+void vfe_780_err_irq_init(struct vfe_device *vfe);
+void vfe_780_err_irq_mask(struct vfe_device *vfe, unsigned int errs);
 
 int vfe_get(struct vfe_device *vfe);
 void vfe_put(struct vfe_device *vfe);
