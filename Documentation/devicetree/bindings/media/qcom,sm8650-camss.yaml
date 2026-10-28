@@ -129,6 +129,16 @@ properties:
       - const: ife2
       - const: top
 
+  qcom,rt-wrapper-base:
+    $ref: /schemas/types.yaml#/definitions/uint64-array
+    description:
+      Bus addresses the real-time camera CDMs take as the origin of the
+      change-base offsets they program to write CSID and VFE registers by
+      DMA.
+    items:
+      - description: Origin of the CSID and VFE full blocks.
+      - description: Origin of the CSID and VFE lite blocks.
+
   ports:
     $ref: /schemas/graph.yaml#/properties/ports
 
