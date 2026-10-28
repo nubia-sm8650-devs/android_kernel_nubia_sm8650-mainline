@@ -21,6 +21,9 @@
 #define CSID_IO_PATH_CFG0(csid)		(0x4 * (csid))
 #define		OUTPUT_IFE_EN			0x100
 #define		INTERNAL_CSID			1
+#define		INPUT_SEL_SFE(n)		(2 + (n))
+#define		SFE_OFFLINE_EN			BIT(12)
+#define		RDI_LCR_SHIFT			16
 
 #define CSID_DUAL_CFG0(csid)		(0xC + 0x4 * (csid))
 #define		DUAL_CFG0_EN			BIT(0)
@@ -529,6 +532,25 @@ void csid_gen3_hw_dual(struct camss_hw_pipe *pipe, enum camss_hw_sync sync,
 	}
 
 	writel(val, csid->camss->csid_wrapper_base + CSID_DUAL_CFG0(csid->id));
+}
+
+void csid_gen3_hw_route(struct camss_hw_pipe *pipe,
+			const struct camss_hw_csid_route *route)
+{
+	struct csid_device *csid = pipe->csid;
+	u32 val;
+
+	if (route->sfe >= 0)
+		val = INPUT_SEL_SFE(route->sfe);
+	else
+		val = route->vfe_out ? INTERNAL_CSID : 0;
+	if (route->vfe_out)
+		val |= OUTPUT_IFE_EN;
+	if (route->sfe_offline)
+		val |= SFE_OFFLINE_EN;
+	val |= (u32)route->lcr_rdis << RDI_LCR_SHIFT;
+
+	writel(val, csid->camss->csid_wrapper_base + CSID_IO_PATH_CFG0(csid->id));
 }
 
 static void csid_gen3_top_mask_set(struct camss_hw_pipe *pipe, u32 bits)

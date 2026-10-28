@@ -34,6 +34,8 @@ unsigned int csid_gen3_hw_path_num(struct csid_device *csid);
 void csid_gen3_hw_init(struct camss_hw_pipe *pipe);
 void csid_gen3_hw_dual(struct camss_hw_pipe *pipe, enum camss_hw_sync sync,
 		       unsigned int peer);
+void csid_gen3_hw_route(struct camss_hw_pipe *pipe,
+			const struct camss_hw_csid_route *route);
 void csid_gen3_hw_rx(struct camss_hw_pipe *pipe,
 		     const struct camss_hw_rx_cfg *cfg);
 void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,

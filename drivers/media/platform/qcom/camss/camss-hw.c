@@ -231,6 +231,9 @@ void camss_hw_release(struct camss_hw_pipe *pipe)
 		csid_gen3_hw_stop(pipe);
 	if (pipe->dual)
 		csid_gen3_hw_dual(pipe, CAMSS_HW_SYNC_NONE, 0);
+	if (pipe->wrapper_size)
+		csid_gen3_hw_route(pipe, &(struct camss_hw_csid_route){
+			.sfe = -1, .vfe_out = true });
 	camss_hw_wm_disable_all(pipe);
 	camss_hw_vfe_err_enable(pipe, CAMSS_HW_VFE_ERR_CAMIF | CAMSS_HW_VFE_ERR_BUS,
 				false);
@@ -332,6 +335,33 @@ int camss_hw_csid_dual(struct camss_hw_pipe *pipe, enum camss_hw_sync sync,
 	return 0;
 }
 EXPORT_SYMBOL_NS_GPL(camss_hw_csid_dual, "QCOM_CAMSS");
+
+/**
+ * camss_hw_csid_route - route a full CSID to the VFE, an SFE or both
+ * @pipe: claimed full pipe
+ * @route: routing to apply
+ *
+ * A claimed pipe starts with the CSID feeding the VFE directly, and
+ * releasing it restores that. Set the routing before starting the paths.
+ *
+ * Return: 0 on success, -EINVAL on a lite pipe, for an SFE other than 0 to
+ * 2, or for an SFE offline or LCR setting without an SFE
+ */
+int camss_hw_csid_route(struct camss_hw_pipe *pipe,
+			const struct camss_hw_csid_route *route)
+{
+	if (!pipe->wrapper_size || route->sfe > 2 ||
+	    route->lcr_rdis & ~GENMASK(CAMSS_HW_PATH_RDI4 - CAMSS_HW_PATH_RDI0, 0))
+		return -EINVAL;
+
+	if (route->sfe < 0 && (route->sfe_offline || route->lcr_rdis))
+		return -EINVAL;
+
+	csid_gen3_hw_route(pipe, route);
+
+	return 0;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_csid_route, "QCOM_CAMSS");
 
 /**
  * camss_hw_path_resume - resume a path at its next frame boundary

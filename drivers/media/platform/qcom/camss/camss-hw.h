@@ -108,6 +108,21 @@ enum camss_hw_sync {
 	CAMSS_HW_SYNC_SLAVE,
 };
 
+/**
+ * struct camss_hw_csid_route - where a full CSID sends its paths
+ * @sfe: SFE whose output feeds the VFE, -1 for a VFE fed by the CSID
+ * @vfe_out: the CSID drives the VFE, false when only the SFE consumes it
+ * @sfe_offline: the SFE reads its input back from memory
+ * @lcr_rdis: RDI paths sent to the PDAF LCR through the SFE, bit n for
+ *            CAMSS_HW_PATH_RDI0 + n
+ */
+struct camss_hw_csid_route {
+	int sfe;
+	bool vfe_out;
+	bool sfe_offline;
+	u8 lcr_rdis;
+};
+
 struct camss_hw_path_cfg {
 	u8 vc;
 	u8 dt;
@@ -182,6 +197,8 @@ int camss_hw_path_config(struct camss_hw_pipe *pipe, enum camss_hw_path path,
 			 const struct camss_hw_path_cfg *cfg);
 int camss_hw_csid_dual(struct camss_hw_pipe *pipe, enum camss_hw_sync sync,
 		       unsigned int peer);
+int camss_hw_csid_route(struct camss_hw_pipe *pipe,
+			const struct camss_hw_csid_route *route);
 int camss_hw_path_resume(struct camss_hw_pipe *pipe, enum camss_hw_path path);
 int camss_hw_path_resume_global(struct camss_hw_pipe *pipe,
 				enum camss_hw_path path);
