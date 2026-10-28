@@ -107,14 +107,34 @@ typedef enum {
 
 #define VFE_WM_REG(r, o, v)	((r)[n].offset = (o), (r)[n++].value = (v))
 
-static bool vfe_780_wm_has_ubwc(unsigned int wm)
+#define VFE_780_COMP_NUM	16
+#define VFE_LITE_780_COMP_NUM	5
+
+unsigned int vfe_780_wm_num(struct vfe_device *vfe)
 {
+	return vfe_is_lite(vfe) ? VFE_LITE_WM_STATS_BG + 1 :
+				  VFE_WM_STATS_ALSC + 1;
+}
+
+unsigned int vfe_780_comp_num(struct vfe_device *vfe)
+{
+	return vfe_is_lite(vfe) ? VFE_LITE_780_COMP_NUM : VFE_780_COMP_NUM;
+}
+
+static bool vfe_780_wm_has_ubwc(struct vfe_device *vfe, unsigned int wm)
+{
+	if (vfe_is_lite(vfe))
+		return false;
+
 	return wm == VFE_WM_VIDEO_FULL_Y || wm == VFE_WM_VIDEO_FULL_C ||
 	       wm == VFE_WM_DISPLAY_FULL_Y || wm == VFE_WM_DISPLAY_FULL_C;
 }
 
-static bool vfe_780_wm_has_frame_header(unsigned int wm)
+static bool vfe_780_wm_has_frame_header(struct vfe_device *vfe, unsigned int wm)
 {
+	if (vfe_is_lite(vfe))
+		return true;
+
 	return wm != VFE_WM_VIDEO_DS_4 && wm != VFE_WM_VIDEO_DS_16 &&
 	       wm != VFE_WM_DISPLAY_DS_4 && wm != VFE_WM_DISPLAY_DS_16 &&
 	       wm != VFE_WM_FD_C;
@@ -156,7 +176,7 @@ int vfe_780_wm_start_regs(struct vfe_device *vfe, unsigned int wm,
 {
 	unsigned int n = 0;
 
-	if (cfg->ubwc && !vfe_780_wm_has_ubwc(wm))
+	if (cfg->ubwc && !vfe_780_wm_has_ubwc(vfe, wm))
 		return -EINVAL;
 
 	VFE_WM_REG(regs, VFE_BUS_WM_IMAGE_CFG_0(wm), cfg->height << 16 | cfg->width);
@@ -169,8 +189,10 @@ int vfe_780_wm_start_regs(struct vfe_device *vfe, unsigned int wm,
 					 cfg->ubwc_cfg.mode_cfg | WM_UBWC_MODE_EN,
 					 regs, n);
 
-	VFE_WM_REG(regs, VFE_BUS_WM_FRAMEDROP_PERIOD(wm), 0);
-	VFE_WM_REG(regs, VFE_BUS_WM_FRAMEDROP_PATTERN(wm), 1);
+	if (!vfe_is_lite(vfe)) {
+		VFE_WM_REG(regs, VFE_BUS_WM_FRAMEDROP_PERIOD(wm), 0);
+		VFE_WM_REG(regs, VFE_BUS_WM_FRAMEDROP_PATTERN(wm), 1);
+	}
 	VFE_WM_REG(regs, VFE_BUS_WM_IRQ_SUBSAMPLE_PERIOD(wm), 0);
 	VFE_WM_REG(regs, VFE_BUS_WM_IRQ_SUBSAMPLE_PATTERN(wm), 1);
 	VFE_WM_REG(regs, VFE_BUS_WM_MMU_PREFETCH_CFG(wm), 1);
@@ -191,10 +213,10 @@ int vfe_780_wm_update_regs(struct vfe_device *vfe, unsigned int wm,
 	unsigned int n = 0;
 	u32 offset;
 
-	if (cfg->ubwc && !vfe_780_wm_has_ubwc(wm))
+	if (cfg->ubwc && !vfe_780_wm_has_ubwc(vfe, wm))
 		return -EINVAL;
 
-	if (cfg->frame_header && !vfe_780_wm_has_frame_header(wm))
+	if (cfg->frame_header && !vfe_780_wm_has_frame_header(vfe, wm))
 		return -EINVAL;
 
 	VFE_WM_REG(regs, VFE_BUS_WM_CFG(wm), en_cfg);
@@ -240,7 +262,7 @@ int vfe_780_wm_frame_header_regs(struct vfe_device *vfe, unsigned int wm,
 {
 	unsigned int n = 0;
 
-	if (!vfe_780_wm_has_frame_header(wm) || iova & 0xff)
+	if (!vfe_780_wm_has_frame_header(vfe, wm) || iova & 0xff)
 		return -EINVAL;
 
 	VFE_WM_REG(regs, VFE_BUS_WM_FRAME_HEADER_ADDR(wm), iova >> 8);
@@ -255,8 +277,10 @@ int vfe_780_wm_hfr_regs(struct vfe_device *vfe, unsigned int wm,
 {
 	unsigned int n = 0;
 
-	VFE_WM_REG(regs, VFE_BUS_WM_FRAMEDROP_PATTERN(wm), hfr->framedrop_pattern);
-	VFE_WM_REG(regs, VFE_BUS_WM_FRAMEDROP_PERIOD(wm), hfr->framedrop_period);
+	if (!vfe_is_lite(vfe)) {
+		VFE_WM_REG(regs, VFE_BUS_WM_FRAMEDROP_PATTERN(wm), hfr->framedrop_pattern);
+		VFE_WM_REG(regs, VFE_BUS_WM_FRAMEDROP_PERIOD(wm), hfr->framedrop_period);
+	}
 	VFE_WM_REG(regs, VFE_BUS_WM_IRQ_SUBSAMPLE_PERIOD(wm), hfr->subsample_period);
 	VFE_WM_REG(regs, VFE_BUS_WM_IRQ_SUBSAMPLE_PATTERN(wm), hfr->subsample_pattern);
 
@@ -269,7 +293,7 @@ int vfe_780_wm_bw_limit_regs(struct vfe_device *vfe, unsigned int wm,
 {
 	unsigned int n = 0;
 
-	if (counter > CAMSS_HW_WM_BW_LIMIT_MAX)
+	if (vfe_is_lite(vfe) || counter > CAMSS_HW_WM_BW_LIMIT_MAX)
 		return -EINVAL;
 
 	VFE_WM_REG(regs, VFE_BUS_WM_BW_LIMIT(wm), counter ? counter << 1 | 1 : 0);

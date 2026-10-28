@@ -75,7 +75,7 @@ static void camss_hw_wm_disable_all(struct camss_hw_pipe *pipe)
 	struct camss_hw_reg reg;
 	unsigned int wm;
 
-	for (wm = 0; wm < CAMSS_HW_WM_NUM; wm++)
+	for (wm = 0; wm < pipe->wm_num; wm++)
 		if (vfe_780_wm_stop_regs(pipe->vfe, wm, &reg) == 1)
 			vfe_780_write_regs(pipe->vfe, &reg, 1);
 }
@@ -108,8 +108,8 @@ struct camss_hw_pipe *camss_hw_claim(struct camss *camss, unsigned int index,
 
 	csid = &camss->csid[index];
 	vfe = &camss->vfe[index];
-	if (csid->res->hw_ops != &csid_ops_gen3 || csid_is_lite(csid) ||
-	    vfe->res->hw_ops != &vfe_ops_780 || vfe->res->is_lite)
+	if (csid->res->hw_ops != &csid_ops_gen3 || vfe->res->hw_ops != &vfe_ops_780 ||
+	    csid_is_lite(csid) != vfe_is_lite(vfe))
 		return ERR_PTR(-EOPNOTSUPP);
 
 	pipe = kzalloc(sizeof(*pipe), GFP_KERNEL);
@@ -121,6 +121,9 @@ struct camss_hw_pipe *camss_hw_claim(struct camss *camss, unsigned int index,
 	pipe->vfe = vfe;
 	pipe->ops = ops;
 	pipe->priv = priv;
+	pipe->path_num = csid_gen3_hw_path_num(csid);
+	pipe->comp_num = vfe_780_comp_num(vfe);
+	pipe->wm_num = vfe_780_wm_num(vfe);
 	spin_lock_init(&pipe->lock);
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
@@ -153,6 +156,8 @@ struct camss_hw_pipe *camss_hw_claim(struct camss *camss, unsigned int index,
 
 	csid_gen3_hw_init(pipe);
 	camss_hw_wm_disable_all(pipe);
+	if (!vfe_is_lite(vfe))
+		vfe_780_ubwc_static(vfe);
 	smp_store_release(&vfe->claim, pipe);
 
 	mutex_unlock(&camss->media_dev.graph_mutex);
@@ -165,6 +170,48 @@ err_unlock:
 	return ERR_PTR(ret);
 }
 EXPORT_SYMBOL_NS_GPL(camss_hw_claim, "QCOM_CAMSS");
+
+static struct camss_clock *camss_hw_clk(struct camss_hw_pipe *pipe,
+					enum camss_hw_block block)
+{
+	struct camss_clock *clocks;
+	char name[16];
+	int i, nclocks;
+
+	switch (block) {
+	case CAMSS_HW_CSID:
+		clocks = pipe->csid->clock;
+		nclocks = pipe->csid->nclocks;
+		strscpy(name, csid_is_lite(pipe->csid) ? "vfe_lite_csid" : "csid",
+			sizeof(name));
+		break;
+	case CAMSS_HW_IFE:
+		clocks = pipe->vfe->clock;
+		nclocks = pipe->vfe->nclocks;
+		if (vfe_is_lite(pipe->vfe))
+			strscpy(name, "vfe_lite", sizeof(name));
+		else
+			snprintf(name, sizeof(name), "vfe%u", pipe->vfe->id);
+		break;
+	default:
+		return NULL;
+	}
+
+	for (i = 0; i < nclocks; i++)
+		if (!strcmp(clocks[i].name, name))
+			return &clocks[i];
+
+	return NULL;
+}
+
+static void camss_hw_clk_drop(struct camss_hw_pipe *pipe,
+			      enum camss_hw_block block)
+{
+	struct camss_clock *clock = camss_hw_clk(pipe, block);
+
+	if (clock)
+		clk_set_min_rate(clock->clk, 0);
+}
 
 void camss_hw_release(struct camss_hw_pipe *pipe)
 {
@@ -179,6 +226,8 @@ void camss_hw_release(struct camss_hw_pipe *pipe)
 	WRITE_ONCE(pipe->vfe->claim, NULL);
 	csid_power(csid, false);
 	csid->claim = NULL;
+	camss_hw_clk_drop(pipe, CAMSS_HW_CSID);
+	camss_hw_clk_drop(pipe, CAMSS_HW_IFE);
 
 	mutex_unlock(&camss->media_dev.graph_mutex);
 
@@ -202,7 +251,7 @@ EXPORT_SYMBOL_NS_GPL(camss_hw_csid_rx, "QCOM_CAMSS");
 int camss_hw_path_config(struct camss_hw_pipe *pipe, enum camss_hw_path path,
 			 const struct camss_hw_path_cfg *cfg)
 {
-	if (path >= CAMSS_HW_PATH_NUM || cfg->vc > 0x1f || cfg->dt > 0x3f ||
+	if (path >= pipe->path_num || cfg->vc > 0x1f || cfg->dt > 0x3f ||
 	    cfg->cid > 3 || cfg->decode_format > 0xf || cfg->plain_format > 3 ||
 	    cfg->epoch_line > 0xffff)
 		return -EINVAL;
@@ -218,7 +267,7 @@ EXPORT_SYMBOL_NS_GPL(camss_hw_path_config, "QCOM_CAMSS");
 
 int camss_hw_path_resume(struct camss_hw_pipe *pipe, enum camss_hw_path path)
 {
-	if (path >= CAMSS_HW_PATH_NUM || !(pipe->paths & BIT(path)))
+	if (path >= pipe->path_num || !(pipe->paths & BIT(path)))
 		return -EINVAL;
 
 	csid_gen3_hw_path_resume(pipe, path);
@@ -254,7 +303,7 @@ EXPORT_SYMBOL_NS_GPL(camss_hw_csid_stop, "QCOM_CAMSS");
 int camss_hw_path_sof_ts(struct camss_hw_pipe *pipe, enum camss_hw_path path,
 			 bool prev, u64 *ns)
 {
-	if (path >= CAMSS_HW_PATH_NUM || !(pipe->paths & BIT(path)))
+	if (path >= pipe->path_num || !(pipe->paths & BIT(path)))
 		return -EINVAL;
 
 	*ns = csid_gen3_hw_path_sof_ts(pipe, path, prev);
@@ -263,74 +312,64 @@ int camss_hw_path_sof_ts(struct camss_hw_pipe *pipe, enum camss_hw_path path,
 }
 EXPORT_SYMBOL_NS_GPL(camss_hw_path_sof_ts, "QCOM_CAMSS");
 
-static int camss_hw_clk_set(struct camss_clock *clocks, int nclocks,
-			    const char *name, unsigned long rate,
-			    unsigned long *applied)
-{
-	struct camss_clock *clock;
-	long round;
-	int i, j, ret;
-
-	for (i = 0; i < nclocks; i++) {
-		clock = &clocks[i];
-		if (strcmp(clock->name, name))
-			continue;
-
-		for (j = 0; j < clock->nfreqs; j++)
-			if (clock->freq[j] >= rate)
-				break;
-
-		if (j == clock->nfreqs)
-			return -ERANGE;
-
-		round = clk_round_rate(clock->clk, clock->freq[j]);
-		if (round < 0)
-			return round;
-
-		ret = clk_set_rate(clock->clk, round);
-		if (ret)
-			return ret;
-
-		*applied = round;
-
-		return 0;
-	}
-
-	return -ENOENT;
-}
-
 /**
  * camss_hw_set_clk_rate - set the core clock of a claimed CSID or VFE
  * @pipe: claimed pipe
  * @block: CAMSS_HW_CSID or CAMSS_HW_IFE
  * @rate: minimum rate in Hz
- * @applied: rate set, the lowest supported rate not below @rate
+ * @applied: rate the clock runs at, at least the lowest supported rate not
+ *	below @rate
+ *
+ * The CSIDs and the lite VFEs share their core clocks. The rate holds as a
+ * minimum until the claim is released, so the clock runs at the highest rate
+ * any claimed pipe asks for.
  *
  * Return: 0 on success, -ERANGE if @rate is above every supported rate
  */
 int camss_hw_set_clk_rate(struct camss_hw_pipe *pipe, enum camss_hw_block block,
 			  unsigned long rate, unsigned long *applied)
 {
-	char name[8];
+	struct camss_clock *clock;
+	long round;
+	int i, ret;
 
-	switch (block) {
-	case CAMSS_HW_CSID:
-		return camss_hw_clk_set(pipe->csid->clock, pipe->csid->nclocks,
-					"csid", rate, applied);
-	case CAMSS_HW_IFE:
-		snprintf(name, sizeof(name), "vfe%u", pipe->vfe->id);
-		return camss_hw_clk_set(pipe->vfe->clock, pipe->vfe->nclocks,
-					name, rate, applied);
-	default:
+	if (block != CAMSS_HW_CSID && block != CAMSS_HW_IFE)
 		return -EINVAL;
-	}
+
+	clock = camss_hw_clk(pipe, block);
+	if (!clock)
+		return -ENOENT;
+
+	for (i = 0; i < clock->nfreqs; i++)
+		if (clock->freq[i] >= rate)
+			break;
+
+	if (i == clock->nfreqs)
+		return -ERANGE;
+
+	round = clk_round_rate(clock->clk, clock->freq[i]);
+	if (round < 0)
+		return round;
+
+	ret = clk_set_min_rate(clock->clk, round);
+	if (ret)
+		return ret;
+
+	ret = clk_set_rate(clock->clk, round);
+	if (ret)
+		return ret;
+
+	*applied = clk_get_rate(clock->clk);
+
+	return 0;
 }
+
 EXPORT_SYMBOL_NS_GPL(camss_hw_set_clk_rate, "QCOM_CAMSS");
 
 struct camss_hw_reg camss_hw_rup_reg(struct camss_hw_pipe *pipe,
 				     unsigned long paths, bool mup)
 {
-	return csid_gen3_hw_rup_reg(paths & GENMASK(CAMSS_HW_PATH_NUM - 1, 0), mup);
+	return csid_gen3_hw_rup_reg(paths & GENMASK(pipe->path_num - 1, 0), mup);
 }
 EXPORT_SYMBOL_NS_GPL(camss_hw_rup_reg, "QCOM_CAMSS");
 
@@ -345,11 +384,9 @@ EXPORT_SYMBOL_NS_GPL(camss_hw_rup, "QCOM_CAMSS");
 int camss_hw_comp_start(struct camss_hw_pipe *pipe, unsigned int comp,
 			unsigned int wm)
 {
-	if (comp >= CAMSS_HW_COMP_NUM || wm >= CAMSS_HW_WM_NUM)
+	if (comp >= pipe->comp_num || wm >= pipe->wm_num)
 		return -EINVAL;
 
-	if (comp <= 1)
-		vfe_780_ubwc_static(pipe->vfe);
 	csid_gen3_hw_buf_done(pipe, comp, wm, true);
 
 	return 0;
@@ -359,7 +396,7 @@ EXPORT_SYMBOL_NS_GPL(camss_hw_comp_start, "QCOM_CAMSS");
 void camss_hw_comp_stop(struct camss_hw_pipe *pipe, unsigned int comp,
 			unsigned int wm)
 {
-	if (comp >= CAMSS_HW_COMP_NUM || wm >= CAMSS_HW_WM_NUM)
+	if (comp >= pipe->comp_num || wm >= pipe->wm_num)
 		return;
 
 	csid_gen3_hw_buf_done(pipe, comp, wm, false);
@@ -370,7 +407,7 @@ int camss_hw_wm_start_regs(struct camss_hw_pipe *pipe, unsigned int wm,
 			   const struct camss_hw_wm_cfg *cfg,
 			   struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS])
 {
-	if (wm >= CAMSS_HW_WM_NUM)
+	if (wm >= pipe->wm_num)
 		return -EINVAL;
 
 	return vfe_780_wm_start_regs(pipe->vfe, wm, cfg, regs);
@@ -382,7 +419,7 @@ int camss_hw_wm_update_regs(struct camss_hw_pipe *pipe, unsigned int wm,
 			    unsigned int flags,
 			    struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS])
 {
-	if (wm >= CAMSS_HW_WM_NUM)
+	if (wm >= pipe->wm_num)
 		return -EINVAL;
 
 	return vfe_780_wm_update_regs(pipe->vfe, wm, cfg, iova, flags, regs);
@@ -393,7 +430,7 @@ int camss_hw_wm_frame_header_regs(struct camss_hw_pipe *pipe, unsigned int wm,
 				  u64 iova, u32 id,
 				  struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS])
 {
-	if (wm >= CAMSS_HW_WM_NUM)
+	if (wm >= pipe->wm_num)
 		return -EINVAL;
 
 	return vfe_780_wm_frame_header_regs(pipe->vfe, wm, iova, id, regs);
@@ -404,7 +441,7 @@ int camss_hw_wm_hfr_regs(struct camss_hw_pipe *pipe, unsigned int wm,
 			 const struct camss_hw_wm_hfr *hfr,
 			 struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS])
 {
-	if (wm >= CAMSS_HW_WM_NUM)
+	if (wm >= pipe->wm_num)
 		return -EINVAL;
 
 	return vfe_780_wm_hfr_regs(pipe->vfe, wm, hfr, regs);
@@ -415,7 +452,7 @@ int camss_hw_wm_bw_limit_regs(struct camss_hw_pipe *pipe, unsigned int wm,
 			      u32 counter,
 			      struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS])
 {
-	if (wm >= CAMSS_HW_WM_NUM)
+	if (wm >= pipe->wm_num)
 		return -EINVAL;
 
 	return vfe_780_wm_bw_limit_regs(pipe->vfe, wm, counter, regs);
@@ -424,7 +461,7 @@ EXPORT_SYMBOL_NS_GPL(camss_hw_wm_bw_limit_regs, "QCOM_CAMSS");
 
 u32 camss_hw_wm_last_addr(struct camss_hw_pipe *pipe, unsigned int wm)
 {
-	if (wm >= CAMSS_HW_WM_NUM)
+	if (wm >= pipe->wm_num)
 		return 0;
 
 	return vfe_780_wm_last_addr(pipe->vfe, wm);
@@ -434,7 +471,7 @@ EXPORT_SYMBOL_NS_GPL(camss_hw_wm_last_addr, "QCOM_CAMSS");
 int camss_hw_wm_stop_regs(struct camss_hw_pipe *pipe, unsigned int wm,
 			  struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS])
 {
-	if (wm >= CAMSS_HW_WM_NUM)
+	if (wm >= pipe->wm_num)
 		return -EINVAL;
 
 	return vfe_780_wm_stop_regs(pipe->vfe, wm, regs);

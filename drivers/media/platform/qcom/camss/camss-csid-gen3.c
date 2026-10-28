@@ -235,6 +235,18 @@ static const u8 csid_gen3_buf_done_bit[CAMSS_HW_COMP_NUM] = {
 	0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 11,
 };
 
+/* The lite CSID reports each VFE lite completion group at its own bit */
+static u32 csid_gen3_buf_done_mask(struct camss_hw_pipe *pipe,
+				   unsigned int comp)
+{
+	return BIT(csid_is_lite(pipe->csid) ? comp : csid_gen3_buf_done_bit[comp]);
+}
+
+unsigned int csid_gen3_hw_path_num(struct csid_device *csid)
+{
+	return csid_is_lite(csid) ? CAMSS_HW_PATH_RDI4 : CAMSS_HW_PATH_NUM;
+}
+
 static void __csid_configure_rx(struct csid_device *csid,
 				struct csid_phy_config *phy, int vc)
 {
@@ -442,14 +454,16 @@ void csid_gen3_hw_init(struct camss_hw_pipe *pipe)
 
 	writel(0, csid->base + CSID_CSI2_RX_IRQ_MASK);
 	writel(0, csid->base + CSID_BUF_DONE_IRQ_MASK);
-	writel(0, csid->base + CSID_CSI2_PPP_IRQ_MASK);
-	for (i = 0; i < CAMSS_HW_PATH_NUM; i++)
+	if (!csid_is_lite(csid))
+		writel(0, csid->base + CSID_CSI2_PPP_IRQ_MASK);
+	for (i = 0; i < pipe->path_num; i++)
 		writel(0, csid->base + csid_gen3_paths[i].irq_mask);
 
 	writel(TOP_IRQ_STATUS_RESET_DONE, csid->base + CSID_TOP_IRQ_CLEAR);
 	writel(0xFFFFFFF, csid->base + CSID_CSI2_RX_IRQ_CLEAR);
-	writel(0xFFFFFFFF, csid->base + CSID_CSI2_PPP_IRQ_CLEAR);
-	for (i = 0; i < CAMSS_HW_PATH_NUM; i++)
+	if (!csid_is_lite(csid))
+		writel(0xFFFFFFFF, csid->base + CSID_CSI2_PPP_IRQ_CLEAR);
+	for (i = 0; i < pipe->path_num; i++)
 		writel(csid_gen3_paths[i].irq_clear_all,
 		       csid->base + csid_gen3_paths[i].irq_clear);
 	writel(IRQ_CMD_CLEAR, csid->base + CSID_IRQ_CMD);
@@ -633,7 +647,7 @@ struct camss_hw_reg csid_gen3_hw_rup_reg(unsigned long paths, bool mup)
 void csid_gen3_hw_buf_done(struct camss_hw_pipe *pipe, unsigned int comp,
 			   unsigned int wm, bool enable)
 {
-	u32 bit = BIT(csid_gen3_buf_done_bit[comp]);
+	u32 bit = csid_gen3_buf_done_mask(pipe, comp);
 	unsigned long flags;
 
 	spin_lock_irqsave(&pipe->lock, flags);
@@ -746,13 +760,13 @@ static irqreturn_t csid_isr_claimed(struct csid_device *csid,
 		ev.buf_done = readl(csid->base + CSID_BUF_DONE_IRQ_STATUS);
 		writel(ev.buf_done, csid->base + CSID_BUF_DONE_IRQ_CLEAR);
 
-		for (i = 0; i < CAMSS_HW_COMP_NUM; i++) {
-			if (!(ev.buf_done & BIT(csid_gen3_buf_done_bit[i])))
+		for (i = 0; i < pipe->comp_num; i++) {
+			if (!(ev.buf_done & csid_gen3_buf_done_mask(pipe, i)))
 				continue;
 
 			ev.comp_wms[i] = pipe->comp_wms[i];
 			wms = ev.comp_wms[i];
-			for_each_set_bit(wm, &wms, CAMSS_HW_WM_NUM)
+			for_each_set_bit(wm, &wms, pipe->wm_num)
 				ev.addr[wm] = vfe_780_wm_last_addr(pipe->vfe, wm);
 		}
 	}

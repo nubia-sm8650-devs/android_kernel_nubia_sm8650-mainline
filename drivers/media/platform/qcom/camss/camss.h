@@ -169,6 +169,9 @@ struct camss_hw_pipe {
 	resource_size_t csid_size;
 	resource_size_t vfe_size;
 	resource_size_t wrapper_size;
+	unsigned int path_num;
+	unsigned int comp_num;
+	unsigned int wm_num;
 	spinlock_t lock;	/* protects the masks, @comp_wms and @gen */
 	unsigned long paths;
 	u32 top_mask;

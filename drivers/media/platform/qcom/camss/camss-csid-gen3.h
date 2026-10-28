@@ -28,7 +28,9 @@
 #define CSID_780_CUSTOM_PORT_ID_IPP0	0x100
 
 struct camss_hw_pipe;
+struct csid_device;
 
+unsigned int csid_gen3_hw_path_num(struct csid_device *csid);
 void csid_gen3_hw_init(struct camss_hw_pipe *pipe);
 void csid_gen3_hw_rx(struct camss_hw_pipe *pipe,
 		     const struct camss_hw_rx_cfg *cfg);
