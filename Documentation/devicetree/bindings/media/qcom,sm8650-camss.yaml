@@ -105,12 +105,15 @@ properties:
       - const: vfe_lite1
 
   interconnects:
-    maxItems: 2
+    minItems: 2
+    maxItems: 3
 
   interconnect-names:
+    minItems: 2
     items:
       - const: ahb
       - const: hf_mnoc
+      - const: camnoc
 
   iommus:
     maxItems: 3
