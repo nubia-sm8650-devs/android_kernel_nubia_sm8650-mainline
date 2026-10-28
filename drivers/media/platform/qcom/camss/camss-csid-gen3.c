@@ -159,6 +159,14 @@
 #define CSID_IPP_CFG1_CROP_V_EN		BIT(13)
 #define CSID_IPP_CFG1_PIX_STORE		BIT(14)
 #define CSID_IPP_CFG1_EARLY_EOF		BIT(16)
+#define CSID_IPP_CFG1_BIN_EN		BIT(18)
+#define CSID_IPP_CFG1_BIN_QCFA_EN	BIT(19)
+#define CSID_IPP_CFG1_BIN_H_EN		BIT(20)
+#define CSID_IPP_CFG1_BIN_V_EN		BIT(21)
+
+#define CSID_PATH_CTRL_START_MODE	GENMASK(3, 2)
+#define		START_MODE_MASTER		2
+#define		START_MODE_SLAVE		3
 
 #define CSID_RDI_CFG1_PLAIN_ALIGN	11
 #define CSID_RDI_CFG1_PLAIN_FMT		12
@@ -519,7 +527,7 @@ void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 {
 	const struct csid_gen3_path *p = &csid_gen3_paths[path];
 	struct csid_device *csid = pipe->csid;
-	u32 cfg0, cfg1, mask;
+	u32 cfg0, cfg1, mask, ctrl = 0;
 
 	cfg0 = cfg->cid << RDI_CFG0_DT_ID;
 	cfg0 |= cfg->vc << RDI_CFG0_VC;
@@ -536,6 +544,19 @@ void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 				CSID_IPP_CFG1_EARLY_EOF;
 		if (cfg->drop)
 			cfg1 |= CSID_IPP_CFG1_DROP_H_EN | CSID_IPP_CFG1_DROP_V_EN;
+		if (cfg->bin_h)
+			cfg1 |= CSID_IPP_CFG1_BIN_H_EN;
+		if (cfg->bin_v)
+			cfg1 |= CSID_IPP_CFG1_BIN_V_EN;
+		if (cfg->bin_qcfa)
+			cfg1 |= CSID_IPP_CFG1_BIN_QCFA_EN;
+		if (cfg->bin_h || cfg->bin_v || cfg->bin_qcfa)
+			cfg1 |= CSID_IPP_CFG1_BIN_EN;
+
+		if (cfg->sync == CAMSS_HW_SYNC_MASTER)
+			ctrl = FIELD_PREP(CSID_PATH_CTRL_START_MODE, START_MODE_MASTER);
+		else if (cfg->sync == CAMSS_HW_SYNC_SLAVE)
+			ctrl = FIELD_PREP(CSID_PATH_CTRL_START_MODE, START_MODE_SLAVE);
 	} else {
 		cfg1 = cfg->packing_mipi << CSID_RDI_CFG1_PACKING;
 		cfg1 |= cfg->plain_format << CSID_RDI_CFG1_PLAIN_FMT;
@@ -565,6 +586,7 @@ void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 	if (cfg->events & CAMSS_HW_EV_RUP)
 		mask |= CSID_PATH_IRQ_RUP_DONE;
 	writel(mask, csid->base + p->irq_mask);
+	writel(ctrl, csid->base + p->ctrl);
 
 	pipe->paths |= BIT(path);
 	csid_gen3_top_mask_set(pipe, p->top_bit | CSID_TOP_IRQ_BUF_DONE |

@@ -75,6 +75,12 @@ struct camss_hw_rx_cfg {
 	bool vc_full_width;
 };
 
+enum camss_hw_sync {
+	CAMSS_HW_SYNC_NONE,
+	CAMSS_HW_SYNC_MASTER,
+	CAMSS_HW_SYNC_SLAVE,
+};
+
 struct camss_hw_path_cfg {
 	u8 vc;
 	u8 dt;
@@ -88,6 +94,10 @@ struct camss_hw_path_cfg {
 	bool drop;
 	bool vfr;
 	bool frame_id_dec;
+	bool bin_h;
+	bool bin_v;
+	bool bin_qcfa;
+	enum camss_hw_sync sync;
 	u32 epoch_line;
 	u32 events;
 };
