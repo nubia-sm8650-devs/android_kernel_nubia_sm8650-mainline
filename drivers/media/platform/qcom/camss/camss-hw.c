@@ -222,6 +222,8 @@ void camss_hw_release(struct camss_hw_pipe *pipe)
 
 	if (pipe->paths)
 		csid_gen3_hw_stop(pipe);
+	if (pipe->dual)
+		csid_gen3_hw_dual(pipe, CAMSS_HW_SYNC_NONE, 0);
 	camss_hw_wm_disable_all(pipe);
 	WRITE_ONCE(pipe->vfe->claim, NULL);
 	csid_power(csid, false);
@@ -272,6 +274,45 @@ int camss_hw_path_config(struct camss_hw_pipe *pipe, enum camss_hw_path path,
 	return 0;
 }
 EXPORT_SYMBOL_NS_GPL(camss_hw_path_config, "QCOM_CAMSS");
+
+/**
+ * camss_hw_csid_dual - pair a full CSID with another for dual IFE
+ * @pipe: claimed full pipe
+ * @sync: role of @pipe, CAMSS_HW_SYNC_NONE to unpair
+ * @peer: index of the other full CSID
+ *
+ * The master starts both CSIDs and its register update latches both. Set
+ * the role before configuring the IPP path. Releasing the pipe unpairs it.
+ * Unpairing a pipe that is not paired does nothing.
+ *
+ * Return: 0 on success, -EINVAL when pairing a lite pipe or with an invalid
+ * peer
+ */
+int camss_hw_csid_dual(struct camss_hw_pipe *pipe, enum camss_hw_sync sync,
+		       unsigned int peer)
+{
+	struct camss *camss = pipe->camss;
+
+	if (sync > CAMSS_HW_SYNC_SLAVE)
+		return -EINVAL;
+
+	if (sync == CAMSS_HW_SYNC_NONE && !pipe->dual)
+		return 0;
+
+	if (!pipe->wrapper_size)
+		return -EINVAL;
+
+	if (sync != CAMSS_HW_SYNC_NONE &&
+	    (peer >= camss->res->csid_num || peer == pipe->csid->id ||
+	     csid_is_lite(&camss->csid[peer])))
+		return -EINVAL;
+
+	csid_gen3_hw_dual(pipe, sync, peer);
+	pipe->dual = sync != CAMSS_HW_SYNC_NONE;
+
+	return 0;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_csid_dual, "QCOM_CAMSS");
 
 int camss_hw_path_resume(struct camss_hw_pipe *pipe, enum camss_hw_path path)
 {

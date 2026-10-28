@@ -152,6 +152,8 @@ int camss_hw_csid_rx(struct camss_hw_pipe *pipe,
 		     const struct camss_hw_rx_cfg *cfg);
 int camss_hw_path_config(struct camss_hw_pipe *pipe, enum camss_hw_path path,
 			 const struct camss_hw_path_cfg *cfg);
+int camss_hw_csid_dual(struct camss_hw_pipe *pipe, enum camss_hw_sync sync,
+		       unsigned int peer);
 int camss_hw_path_resume(struct camss_hw_pipe *pipe, enum camss_hw_path path);
 int camss_hw_csid_stop(struct camss_hw_pipe *pipe);
 int camss_hw_path_sof_ts(struct camss_hw_pipe *pipe, enum camss_hw_path path,

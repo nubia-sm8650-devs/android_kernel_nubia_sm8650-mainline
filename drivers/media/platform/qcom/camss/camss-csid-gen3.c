@@ -22,6 +22,11 @@
 #define		OUTPUT_IFE_EN			0x100
 #define		INTERNAL_CSID			1
 
+#define CSID_DUAL_CFG0(csid)		(0xC + 0x4 * (csid))
+#define		DUAL_CFG0_EN			BIT(0)
+#define		DUAL_CFG0_SLAVE			BIT(1)
+#define		DUAL_CFG0_SYNC_SEL		8
+
 #define CSID_RST_CFG			0xC
 #define		RST_MODE			BIT(0)
 #define		RST_LOCATION			BIT(4)
@@ -483,6 +488,21 @@ void csid_gen3_hw_init(struct camss_hw_pipe *pipe)
 	memset(pipe->comp_wms, 0, sizeof(pipe->comp_wms));
 	writel(pipe->top_mask, csid->base + CSID_TOP_IRQ_MASK);
 	spin_unlock_irqrestore(&pipe->lock, flags);
+}
+
+void csid_gen3_hw_dual(struct camss_hw_pipe *pipe, enum camss_hw_sync sync,
+		       unsigned int peer)
+{
+	struct csid_device *csid = pipe->csid;
+	u32 val = 0;
+
+	if (sync != CAMSS_HW_SYNC_NONE) {
+		val = (peer + 1) << DUAL_CFG0_SYNC_SEL | DUAL_CFG0_EN;
+		if (sync == CAMSS_HW_SYNC_SLAVE)
+			val |= DUAL_CFG0_SLAVE;
+	}
+
+	writel(val, csid->camss->csid_wrapper_base + CSID_DUAL_CFG0(csid->id));
 }
 
 static void csid_gen3_top_mask_set(struct camss_hw_pipe *pipe, u32 bits)
