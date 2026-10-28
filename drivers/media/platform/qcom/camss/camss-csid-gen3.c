@@ -185,7 +185,10 @@
 #define CSID_IPP_CFG1_BIN_V_EN		BIT(21)
 #define CSID_PPP_CFG1_BIN_H_EN		BIT(18)
 
+#define CSID_PATH_CFG0_OFFLINE		BIT(2)
 #define CSID_PATH_CFG0_SOF_RETIME_DIS	BIT(5)
+#define CSID_OFFLINE_CMD		0x1C
+#define		OFFLINE_CMD_GO			BIT(0)
 
 #define CSID_PATH_CTRL_START_MODE	GENMASK(3, 2)
 #define		START_MODE_GLOBAL		1
@@ -618,6 +621,12 @@ void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 	struct csid_device *csid = pipe->csid;
 	u32 cfg0, cfg1, mask, ctrl = 0;
 
+	if (cfg->offline) {
+		writel(0, csid->base + p->ctrl);
+		writel(CSID_PATH_CFG0_OFFLINE | RDI_CFG0_EN, csid->base + p->cfg0);
+		goto irqs;
+	}
+
 	cfg0 = cfg->cid << RDI_CFG0_DT_ID;
 	cfg0 |= cfg->vc << RDI_CFG0_VC;
 	cfg0 |= cfg->dt << RDI_CFG0_DT;
@@ -681,6 +690,7 @@ void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 		pipe->shdr = true;
 	}
 
+irqs:
 	mask = CSID_PATH_IRQ_FATAL | CSID_PATH_IRQ_NON_FATAL;
 	if (cfg->events & CAMSS_HW_EV_SOF)
 		mask |= CSID_PATH_IRQ_SOF;
@@ -793,6 +803,11 @@ struct camss_hw_reg csid_gen3_hw_rup_reg(unsigned long paths, bool mup)
 		reg.value |= CSID_RUP_AUP_MUP;
 
 	return reg;
+}
+
+struct camss_hw_reg csid_gen3_hw_offline_go_reg(void)
+{
+	return (struct camss_hw_reg){ CSID_OFFLINE_CMD, OFFLINE_CMD_GO };
 }
 
 void csid_gen3_hw_buf_done(struct camss_hw_pipe *pipe, unsigned int comp,

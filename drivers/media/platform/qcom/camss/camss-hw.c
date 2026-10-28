@@ -291,6 +291,10 @@ int camss_hw_path_config(struct camss_hw_pipe *pipe, enum camss_hw_path path,
 			  path > CAMSS_HW_PATH_RDI2))
 		return -EINVAL;
 
+	if (cfg->offline && (csid_is_lite(pipe->csid) || path < CAMSS_HW_PATH_RDI0 ||
+			     path > CAMSS_HW_PATH_RDI4 || cfg->lcr || cfg->shdr))
+		return -EINVAL;
+
 	if (cfg->sync > CAMSS_HW_SYNC_SLAVE ||
 	    (cfg->sync && csid_is_lite(pipe->csid)))
 		return -EINVAL;
@@ -527,6 +531,29 @@ void camss_hw_rup(struct camss_hw_pipe *pipe, unsigned long paths, bool mup)
 	writel(reg.value, pipe->csid->base + reg.offset);
 }
 EXPORT_SYMBOL_NS_GPL(camss_hw_rup, "QCOM_CAMSS");
+
+/**
+ * camss_hw_csid_offline_go_reg - command one offline frame
+ * @pipe: claimed full pipe
+ * @reg: register write to apply
+ *
+ * An offline path stays configured across frames and reads one frame from
+ * the SFE fetch per write of @reg, which the consumer queues per request.
+ * Offline paths are not resumed.
+ *
+ * Return: 0 on success, -EINVAL on a lite pipe
+ */
+int camss_hw_csid_offline_go_reg(struct camss_hw_pipe *pipe,
+				 struct camss_hw_reg *reg)
+{
+	if (csid_is_lite(pipe->csid))
+		return -EINVAL;
+
+	*reg = csid_gen3_hw_offline_go_reg();
+
+	return 0;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_csid_offline_go_reg, "QCOM_CAMSS");
 
 /**
  * camss_hw_vfe_in_start - start a VFE input

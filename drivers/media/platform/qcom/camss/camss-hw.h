@@ -143,6 +143,7 @@ struct camss_hw_path_cfg {
 	bool bin_qcfa;
 	bool lcr;	/* RDI0 feeds the VFE PDAF LCR input, the PPP follows it */
 	bool shdr;	/* RDI0 to RDI2 carry staggered exposures, RDI0 leads */
+	bool offline;	/* the SFE fetch feeds the RDI, one frame per GO command */
 	enum camss_hw_sync sync;
 	u32 epoch_line;
 	u32 events;
@@ -214,6 +215,8 @@ int camss_hw_set_clk_rate(struct camss_hw_pipe *pipe, enum camss_hw_block block,
 struct camss_hw_reg camss_hw_rup_reg(struct camss_hw_pipe *pipe,
 				     unsigned long paths, bool mup);
 void camss_hw_rup(struct camss_hw_pipe *pipe, unsigned long paths, bool mup);
+int camss_hw_csid_offline_go_reg(struct camss_hw_pipe *pipe,
+				 struct camss_hw_reg *reg);
 
 int camss_hw_vfe_in_start(struct camss_hw_pipe *pipe, bool camif,
 			  u32 epoch_line);
