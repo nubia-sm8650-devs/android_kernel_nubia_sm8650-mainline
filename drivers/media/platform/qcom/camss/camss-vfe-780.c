@@ -56,7 +56,16 @@ typedef enum {
 	VFE_LITE_WM_STATS_BG,
 } vfe_lite_wm_t;
 
+#define VFE_TOP_EPOCH_HEIGHT_CFG	0x9C
+#define VFE_TOP_DEBUG_CFG		(vfe_is_lite(vfe) ? 0x74 : 0xFC)
+#define		TOP_DEBUG_CFG_EN		3
+#define VFE_TOP_PDAF_INPUT_CFG_1	0x134
+#define		PDAF_INPUT_CFG_1_DEFAULT	1
+
 #define BUS_REG_BASE (vfe_is_lite(vfe) ? 0x200 : 0xC00)
+
+#define VFE_BUS_VIOLATION_STATUS	(BUS_REG_BASE + 0x64)
+#define VFE_BUS_OVERFLOW_STATUS		(BUS_REG_BASE + 0x68)
 
 #define VFE_BUS_WM_TEST_BUS_CTRL (BUS_REG_BASE + 0xDC)
 
@@ -323,6 +332,25 @@ void vfe_780_write_regs(struct vfe_device *vfe, const struct camss_hw_reg *regs,
 u32 vfe_780_wm_last_addr(struct vfe_device *vfe, unsigned int wm)
 {
 	return readl(vfe->base + VFE_BUS_WM_ADDR_STATUS_0(wm));
+}
+
+void vfe_780_in_start(struct vfe_device *vfe, bool camif, u32 epoch_line)
+{
+	writel(TOP_DEBUG_CFG_EN, vfe->base + VFE_TOP_DEBUG_CFG);
+	if (camif)
+		writel(epoch_line, vfe->base + VFE_TOP_EPOCH_HEIGHT_CFG);
+}
+
+void vfe_780_in_stop(struct vfe_device *vfe)
+{
+	if (!vfe_is_lite(vfe))
+		writel(PDAF_INPUT_CFG_1_DEFAULT, vfe->base + VFE_TOP_PDAF_INPUT_CFG_1);
+}
+
+void vfe_780_bus_status(struct vfe_device *vfe, u32 *overflow, u32 *violation)
+{
+	*overflow = readl(vfe->base + VFE_BUS_OVERFLOW_STATUS);
+	*violation = readl(vfe->base + VFE_BUS_VIOLATION_STATUS);
 }
 
 void vfe_780_ubwc_static(struct vfe_device *vfe)

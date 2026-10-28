@@ -435,6 +435,46 @@ void camss_hw_rup(struct camss_hw_pipe *pipe, unsigned long paths, bool mup)
 }
 EXPORT_SYMBOL_NS_GPL(camss_hw_rup, "QCOM_CAMSS");
 
+/**
+ * camss_hw_vfe_in_start - start a VFE input
+ * @pipe: claimed pipe
+ * @camif: the input is the pixel pipe, on full pipes only
+ * @epoch_line: line at which the pixel pipe raises its epoch
+ *
+ * Return: 0 on success, -EINVAL for the pixel pipe of a lite pipe or a line
+ * out of range
+ */
+int camss_hw_vfe_in_start(struct camss_hw_pipe *pipe, bool camif,
+			  u32 epoch_line)
+{
+	if (camif && (vfe_is_lite(pipe->vfe) || epoch_line > 0xffff))
+		return -EINVAL;
+
+	vfe_780_in_start(pipe->vfe, camif, epoch_line);
+
+	return 0;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_vfe_in_start, "QCOM_CAMSS");
+
+void camss_hw_vfe_in_stop(struct camss_hw_pipe *pipe)
+{
+	vfe_780_in_stop(pipe->vfe);
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_vfe_in_stop, "QCOM_CAMSS");
+
+/**
+ * camss_hw_bus_status - read the VFE bus overflow and violation status
+ * @pipe: claimed pipe
+ * @overflow: write masters that overflowed
+ * @violation: write masters that violated the CCIF protocol
+ */
+void camss_hw_bus_status(struct camss_hw_pipe *pipe, u32 *overflow,
+			 u32 *violation)
+{
+	vfe_780_bus_status(pipe->vfe, overflow, violation);
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_bus_status, "QCOM_CAMSS");
+
 int camss_hw_comp_start(struct camss_hw_pipe *pipe, unsigned int comp,
 			unsigned int wm)
 {

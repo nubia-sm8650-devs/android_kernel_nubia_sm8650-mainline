@@ -164,6 +164,12 @@ struct camss_hw_reg camss_hw_rup_reg(struct camss_hw_pipe *pipe,
 				     unsigned long paths, bool mup);
 void camss_hw_rup(struct camss_hw_pipe *pipe, unsigned long paths, bool mup);
 
+int camss_hw_vfe_in_start(struct camss_hw_pipe *pipe, bool camif,
+			  u32 epoch_line);
+void camss_hw_vfe_in_stop(struct camss_hw_pipe *pipe);
+void camss_hw_bus_status(struct camss_hw_pipe *pipe, u32 *overflow,
+			 u32 *violation);
+
 int camss_hw_comp_start(struct camss_hw_pipe *pipe, unsigned int comp,
 			unsigned int wm);
 void camss_hw_comp_stop(struct camss_hw_pipe *pipe, unsigned int comp,
