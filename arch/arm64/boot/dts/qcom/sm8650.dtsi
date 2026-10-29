@@ -773,6 +773,54 @@
 		};
 	};
 
+	ipclite {
+		compatible = "qcom,sm8650-ipclite";
+		memory-region = <&global_sync_mem>;
+		hwlocks = <&tcsr_mutex 11>;
+
+		mboxes = <&ipcc_compute IPCC_CLIENT_BROADCAST
+				IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MEM_INIT>,
+			 <&ipcc_compute IPCC_CLIENT_APSS
+				IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG>,
+			 <&ipcc_compute IPCC_CLIENT_CDSP
+				IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG>,
+			 <&ipcc_compute IPCC_CLIENT_CVP
+				IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG>,
+			 <&ipcc_compute IPCC_CLIENT_CAM
+				IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG>,
+			 <&ipcc_compute IPCC_CLIENT_CDSP
+				IPCC_COMPUTE_L0_SIGNAL_IPCLITE_SSR>,
+			 <&ipcc_compute IPCC_CLIENT_CVP
+				IPCC_COMPUTE_L0_SIGNAL_IPCLITE_SSR>,
+			 <&ipcc_compute IPCC_CLIENT_CAM
+				IPCC_COMPUTE_L0_SIGNAL_IPCLITE_SSR>;
+		mbox-names = "mem-init",
+			     "apss",
+			     "cdsp",
+			     "cvp",
+			     "cam",
+			     "cdsp-ssr",
+			     "cvp-ssr",
+			     "cam-ssr";
+
+		interrupts-extended = <&ipcc_compute IPCC_CLIENT_APSS
+					IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG
+					IRQ_TYPE_EDGE_RISING>,
+				      <&ipcc_compute IPCC_CLIENT_CDSP
+					IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG
+					IRQ_TYPE_EDGE_RISING>,
+				      <&ipcc_compute IPCC_CLIENT_CVP
+					IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG
+					IRQ_TYPE_EDGE_RISING>,
+				      <&ipcc_compute IPCC_CLIENT_CAM
+					IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG
+					IRQ_TYPE_EDGE_RISING>;
+		interrupt-names = "apss",
+				  "cdsp",
+				  "cvp",
+				  "cam";
+	};
+
 	memory@a0000000 {
 		device_type = "memory";
 		/* We expect the bootloader to fill in the size */
