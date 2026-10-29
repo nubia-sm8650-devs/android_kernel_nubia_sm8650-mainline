@@ -882,6 +882,12 @@
 	};
 };
 
+&camss_icp {
+	firmware-name = "CAMERA_ICP.mbn";
+
+	status = "okay";
+};
+
 &csiphy1 {
 	vdda-phy-supply = <&vreg_l2i_0p88>;
 	vdda-pll-supply = <&vreg_l3i_1p2>;
