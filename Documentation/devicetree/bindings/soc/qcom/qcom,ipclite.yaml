@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/soc/qcom/qcom,ipclite.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Qualcomm IPCLite shared memory protocol
+
+maintainers:
+  - Cosmin Tanislav <demonsingur@gmail.com>
+
+description:
+  IPCLite is a shared memory protocol that the application processor, the
+  compute DSP, the camera ICP and the EVA processor use to exchange hardware
+  fence messages and global fence state. The application processor lays out
+  the shared memory, signals every other core through the compute IPCC that
+  it is ready, and then exchanges 64-bit messages with each core through a
+  FIFO pair in the shared memory and an IPCC signal per direction.
+
+properties:
+  compatible:
+    const: qcom,sm8650-ipclite
+
+  memory-region:
+    maxItems: 1
+    description: The IPCLite shared memory.
+
+  hwlocks:
+    maxItems: 1
+    description:
+      The IPCLite hardware mutex, released when the core holding it crashes.
+
+  mboxes:
+    items:
+      - description: Broadcast mem-init signal
+      - description: Message signal to the application processor
+      - description: Message signal to the compute DSP
+      - description: Message signal to the EVA processor
+      - description: Message signal to the camera ICP
+      - description: Recovery signal to the compute DSP
+      - description: Recovery signal to the EVA processor
+      - description: Recovery signal to the camera ICP
+
+  mbox-names:
+    items:
+      - const: mem-init
+      - const: apss
+      - const: cdsp
+      - const: cvp
+      - const: cam
+      - const: cdsp-ssr
+      - const: cvp-ssr
+      - const: cam-ssr
+
+  interrupts:
+    items:
+      - description: Messages from the application processor
+      - description: Messages from the compute DSP
+      - description: Messages from the EVA processor
+      - description: Messages from the camera ICP
+
+  interrupt-names:
+    items:
+      - const: apss
+      - const: cdsp
+      - const: cvp
+      - const: cam
+
+required:
+  - compatible
+  - memory-region
+  - hwlocks
+  - mboxes
+  - mbox-names
+  - interrupts
+  - interrupt-names
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/irq.h>
+    #include <dt-bindings/mailbox/qcom-ipcc.h>
+
+    ipclite {
+        compatible = "qcom,sm8650-ipclite";
+        memory-region = <&global_sync_mem>;
+        hwlocks = <&tcsr_mutex 11>;
+
+        mboxes = <&ipcc_compute IPCC_CLIENT_BROADCAST IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MEM_INIT>,
+                 <&ipcc_compute IPCC_CLIENT_APSS IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG>,
+                 <&ipcc_compute IPCC_CLIENT_CDSP IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG>,
+                 <&ipcc_compute IPCC_CLIENT_CVP IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG>,
+                 <&ipcc_compute IPCC_CLIENT_CAM IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG>,
+                 <&ipcc_compute IPCC_CLIENT_CDSP IPCC_COMPUTE_L0_SIGNAL_IPCLITE_SSR>,
+                 <&ipcc_compute IPCC_CLIENT_CVP IPCC_COMPUTE_L0_SIGNAL_IPCLITE_SSR>,
+                 <&ipcc_compute IPCC_CLIENT_CAM IPCC_COMPUTE_L0_SIGNAL_IPCLITE_SSR>;
+        mbox-names = "mem-init", "apss", "cdsp", "cvp", "cam",
+                     "cdsp-ssr", "cvp-ssr", "cam-ssr";
+
+        interrupts-extended = <&ipcc_compute IPCC_CLIENT_APSS IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG
+                               IRQ_TYPE_EDGE_RISING>,
+                              <&ipcc_compute IPCC_CLIENT_CDSP IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG
+                               IRQ_TYPE_EDGE_RISING>,
+                              <&ipcc_compute IPCC_CLIENT_CVP IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG
+                               IRQ_TYPE_EDGE_RISING>,
+                              <&ipcc_compute IPCC_CLIENT_CAM IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG
+                               IRQ_TYPE_EDGE_RISING>;
+        interrupt-names = "apss", "cdsp", "cvp", "cam";
+    };
