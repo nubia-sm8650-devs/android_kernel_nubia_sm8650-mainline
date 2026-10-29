@@ -1167,6 +1167,10 @@ properties:
               - zte,nx721j
           - const: qcom,sm8650
 
+      - description: ZTE SM8650 base, completed by a board DTBO
+        items:
+          - const: qcom,sm8650
+
       - items:
           - enum:
               - qcom,sm8750-mtp
@@ -1326,36 +1330,42 @@ allOf:
   - if:
       properties:
         compatible:
-          contains:
-            enum:
-              - qcom,apq8026
-              - qcom,apq8094
-              - qcom,apq8096
-              - qcom,msm8917
-              - qcom,msm8937
-              - qcom,msm8939
-              - qcom,msm8953
-              - qcom,msm8956
-              - qcom,msm8992
-              - qcom,msm8994
-              - qcom,msm8996
-              - qcom,msm8998
-              - qcom,sdm450
-              - qcom,sdm630
-              - qcom,sdm632
-              - qcom,sdm636
-              - qcom,sdm845
-              - qcom,sdx55
-              - qcom,sdx65
-              - qcom,sdx75
-              - qcom,sm4250
-              - qcom,sm6115
-              - qcom,sm6125
-              - qcom,sm6350
-              - qcom,sm7125
-              - qcom,sm7225
-              - qcom,sm8150
-              - qcom,sm8250
+          anyOf:
+            - items:
+                - const: qcom,sm8650
+            - contains:
+                enum:
+                  - zte,nx721j
+            - contains:
+                enum:
+                  - qcom,apq8026
+                  - qcom,apq8094
+                  - qcom,apq8096
+                  - qcom,msm8917
+                  - qcom,msm8937
+                  - qcom,msm8939
+                  - qcom,msm8953
+                  - qcom,msm8956
+                  - qcom,msm8992
+                  - qcom,msm8994
+                  - qcom,msm8996
+                  - qcom,msm8998
+                  - qcom,sdm450
+                  - qcom,sdm630
+                  - qcom,sdm632
+                  - qcom,sdm636
+                  - qcom,sdm845
+                  - qcom,sdx55
+                  - qcom,sdx65
+                  - qcom,sdx75
+                  - qcom,sm4250
+                  - qcom,sm6115
+                  - qcom,sm6125
+                  - qcom,sm6350
+                  - qcom,sm7125
+                  - qcom,sm7225
+                  - qcom,sm8150
+                  - qcom,sm8250
     then:
       properties:
         qcom,board-id: true
