@@ -18,6 +18,7 @@ properties:
   compatible:
     enum:
       - qcom,sm8650-csi2-phy
+      - qcom,sm8650-csi2-phy-z60u-tele
 
   reg:
     maxItems: 1
