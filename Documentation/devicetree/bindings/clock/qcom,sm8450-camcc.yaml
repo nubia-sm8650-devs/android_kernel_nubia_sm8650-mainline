@@ -46,9 +46,11 @@ properties:
   power-domains:
     description:
       Power domains required for the clock controller to operate
+    minItems: 2
     items:
       - description: MMCX power domain
       - description: MXC power domain
+      - description: MX power domain
 
   required-opps:
     description:
