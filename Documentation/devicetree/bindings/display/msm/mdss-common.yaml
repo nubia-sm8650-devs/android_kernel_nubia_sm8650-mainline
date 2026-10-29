@@ -84,8 +84,11 @@ properties:
           - const: cpu-cfg
 
   resets:
+    minItems: 1
     items:
       - description: MDSS_CORE reset
+      - description: MDSS_CORE_INT2 reset
+      - description: MDSS RSCC reset
 
   memory-region:
     maxItems: 1
