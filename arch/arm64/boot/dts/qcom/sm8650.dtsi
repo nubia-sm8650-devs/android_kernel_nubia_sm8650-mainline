@@ -5888,7 +5888,41 @@
 					<&camcc CAM_CC_TITAN_TOP_GDSC>;
 			power-domain-names = "ife0", "ife1", "ife2", "top";
 
+			#address-cells = <2>;
+			#size-cells = <2>;
+			ranges;
+
 			status = "disabled";
+
+			camss_icp: icp@ac01000 {
+				compatible = "qcom,sm8650-camss-icp";
+				reg = <0 0x0ac01000 0 0x1000>,
+				      <0 0x0ac04000 0 0x1000>;
+				reg-names = "csr",
+					    "wd";
+
+				interrupts = <GIC_SPI 463 IRQ_TYPE_EDGE_RISING 0>;
+
+				clocks = <&camcc CAM_CC_ICP_AHB_CLK>,
+					 <&camcc CAM_CC_ICP_CLK>,
+					 <&camcc CAM_CC_QDSS_DEBUG_XO_CLK>;
+				clock-names = "ahb",
+					      "core",
+					      "debug_xo";
+
+				power-domains = <&camcc CAM_CC_TITAN_TOP_GDSC>;
+
+				iommus = <&apps_smmu 0x1820 0x0>,
+					 <&apps_smmu 0x18c0 0x0>,
+					 <&apps_smmu 0x1800 0x0>,
+					 <&apps_smmu 0x1840 0x0>,
+					 <&apps_smmu 0x1880 0x0>;
+				dma-coherent;
+
+				memory-region = <&camera_mem>;
+
+				status = "disabled";
+			};
 
 			ports {
 				#address-cells = <1>;
