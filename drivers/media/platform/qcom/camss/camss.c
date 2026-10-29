@@ -5634,7 +5634,7 @@ static int camss_probe(struct platform_device *pdev)
 	ret = of_platform_populate(dev->of_node, camss_child_match, NULL, dev);
 	if (ret) {
 		dev_err(dev, "Failed to populate child devices: %d\n", ret);
-		goto err_of_platform_depopulate;
+		goto err_v4l2_device_unregister;
 	}
 
 	ret = camss_init_pm_clks(camss);
@@ -5681,7 +5681,6 @@ err_v4l2_device_unregister:
 	v4l2_device_unregister(&camss->v4l2_dev);
 	v4l2_async_nf_cleanup(&camss->notifier);
 	pm_runtime_disable(dev);
-err_of_platform_depopulate:
 	of_platform_depopulate(&pdev->dev);
 err_media_device_cleanup:
 	media_device_cleanup(&camss->media_dev);
@@ -5710,6 +5709,7 @@ static void camss_remove(struct platform_device *pdev)
 {
 	struct camss *camss = platform_get_drvdata(pdev);
 
+	of_platform_depopulate(&pdev->dev);
 	v4l2_async_nf_unregister(&camss->notifier);
 	v4l2_async_nf_cleanup(&camss->notifier);
 	camss_unregister_entities(camss);
