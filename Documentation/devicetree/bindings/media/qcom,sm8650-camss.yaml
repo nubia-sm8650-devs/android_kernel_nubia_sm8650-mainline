@@ -124,6 +124,14 @@ properties:
       - items:
           - description: S1 HLOS IFE and IFE_LITE non-protected
 
+  '#address-cells':
+    const: 2
+
+  '#size-cells':
+    const: 2
+
+  ranges: true
+
   power-domains:
     items:
       - description: IFE0 GDSC - Image Front End, Global Distributed Switch Controller.
@@ -203,6 +211,10 @@ properties:
   vdd-csiphy35-1p2-supply:
     description:
       Phandle to a 1.2V regulator supply to CSIPHY3 and CSIPHY5 IP blocks.
+
+patternProperties:
+  "^icp@[0-9a-f]+$":
+    $ref: qcom,sm8650-camss-icp.yaml#
 
 required:
   - compatible

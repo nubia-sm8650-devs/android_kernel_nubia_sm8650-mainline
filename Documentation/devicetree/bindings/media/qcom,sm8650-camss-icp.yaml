@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/qcom,sm8650-camss-icp.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Qualcomm SM8650 CAMSS Image Control Processor
+
+maintainers:
+  - Cosmin Tanislav <demonsingur@gmail.com>
+
+description:
+  The Image Control Processor (ICP) is a microcontroller inside the camera
+  subsystem. It runs the camera firmware, which drives the Image Processing
+  Engine (IPE) and the Bayer Processing Segment (BPS).
+
+properties:
+  compatible:
+    const: qcom,sm8650-camss-icp
+
+  reg:
+    maxItems: 2
+
+  reg-names:
+    items:
+      - const: csr
+      - const: wd
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    items:
+      - description: ICP AHB clock
+      - description: ICP core clock
+      - description: QDSS debug XO clock
+
+  clock-names:
+    items:
+      - const: ahb
+      - const: core
+      - const: debug_xo
+
+  power-domains:
+    maxItems: 1
+
+  iommus:
+    maxItems: 5
+
+  dma-coherent: true
+
+  memory-region:
+    maxItems: 1
+    description: Region the firmware is loaded into.
+
+  firmware-name:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - interrupts
+  - clocks
+  - clock-names
+  - power-domains
+  - iommus
+  - memory-region
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/clock/qcom,sm8650-camcc.h>
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+
+    icp@ac01000 {
+        compatible = "qcom,sm8650-camss-icp";
+        reg = <0x0ac01000 0x1000>,
+              <0x0ac04000 0x1000>;
+        reg-names = "csr",
+                    "wd";
+
+        interrupts = <GIC_SPI 463 IRQ_TYPE_EDGE_RISING>;
+
+        clocks = <&camcc CAM_CC_ICP_AHB_CLK>,
+                 <&camcc CAM_CC_ICP_CLK>,
+                 <&camcc CAM_CC_QDSS_DEBUG_XO_CLK>;
+        clock-names = "ahb",
+                      "core",
+                      "debug_xo";
+
+        power-domains = <&camcc CAM_CC_TITAN_TOP_GDSC>;
+
+        iommus = <&apps_smmu 0x1820 0x0>,
+                 <&apps_smmu 0x18c0 0x0>,
+                 <&apps_smmu 0x1800 0x0>,
+                 <&apps_smmu 0x1840 0x0>,
+                 <&apps_smmu 0x1880 0x0>;
+        dma-coherent;
+
+        memory-region = <&camera_mem>;
+        firmware-name = "qcom/sm8650/CAMERA_ICP.mbn";
+    };
+...
