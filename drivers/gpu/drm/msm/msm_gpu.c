@@ -597,11 +597,11 @@ void msm_gpu_fault_crashstate_capture(struct msm_gpu *gpu, struct msm_gpu_fault_
 	char *comm = NULL, *cmd = NULL;
 	unsigned int noreclaim_flag;
 
-	mutex_lock(&gpu->lock);
+	WARN_ON(!mutex_is_locked(&gpu->lock));
 
 	submit = find_submit(cur_ring, cur_ring->memptrs->fence + 1);
 	if (submit && submit->fault_dumped)
-		goto resume_smmu;
+		return;
 
 	noreclaim_flag = memalloc_noreclaim_save();
 
@@ -624,9 +624,6 @@ void msm_gpu_fault_crashstate_capture(struct msm_gpu *gpu, struct msm_gpu_fault_
 
 	kfree(cmd);
 	kfree(comm);
-
-resume_smmu:
-	mutex_unlock(&gpu->lock);
 }
 
 static void hangcheck_timer_reset(struct msm_gpu *gpu)

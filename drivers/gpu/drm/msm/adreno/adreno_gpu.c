@@ -337,20 +337,26 @@ int adreno_fault_handler(struct msm_gpu *gpu, unsigned long iova, int flags,
 		/* Turn off the hangcheck timer to keep it from bothering us */
 		timer_delete(&gpu->hangcheck_timer);
 
-		/* Let any concurrent GMU transactions know that the MMU may be
-		 * blocked for a while and they should wait on us.
-		 */
-		reinit_completion(&adreno_gpu->fault_coredump_done);
-
 		fault_info.ttbr0 = info->ttbr0;
 		fault_info.iova  = iova;
 		fault_info.flags = flags;
 		fault_info.type  = type;
 		fault_info.block = block;
 
+		mutex_lock(&gpu->lock);
+
+		/* Let any concurrent GMU transactions know that the MMU may be
+		 * blocked for a while and they should wait on us. A GMU
+		 * transaction under gpu->lock must not wait, since we cannot
+		 * finish until it drops the lock.
+		 */
+		reinit_completion(&adreno_gpu->fault_coredump_done);
+
 		msm_gpu_fault_crashstate_capture(gpu, &fault_info);
 
 		complete_all(&adreno_gpu->fault_coredump_done);
+
+		mutex_unlock(&gpu->lock);
 	}
 
 	return 0;
