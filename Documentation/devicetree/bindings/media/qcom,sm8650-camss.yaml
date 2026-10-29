@@ -116,7 +116,13 @@ properties:
       - const: camnoc
 
   iommus:
-    maxItems: 3
+    oneOf:
+      - items:
+          - description: S1 HLOS IFE and IFE_LITE non-protected
+          - description: S1 HLOS JPEG and CRE non-protected
+          - description: S1 HLOS RT CDM non-protected
+      - items:
+          - description: S1 HLOS IFE and IFE_LITE non-protected
 
   power-domains:
     items:
