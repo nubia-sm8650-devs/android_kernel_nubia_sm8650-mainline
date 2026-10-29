@@ -762,3 +762,22 @@ const struct mipi_csi2phy_soc_cfg mipi_csi2_dphy_sm8650 = {
 	.genpds = sm8650_genpds,
 	.num_genpds = ARRAY_SIZE(sm8650_genpds),
 };
+
+const struct mipi_csi2phy_soc_cfg mipi_csi2_dphy_sm8650_tele = {
+	.ops = &phy_qcom_mipi_csi2_ops_3ph_1_0,
+	.reg_info = {
+		.init_seq = lane_regs_sm8650,
+		.lane_array_size = ARRAY_SIZE(lane_regs_sm8650),
+		.common_regs_offset = 0x1000,
+	},
+	.ops_cphy = &phy_qcom_mipi_csi2_ops_3ph_cphy_2_2_0,
+	.reg_info_cphy = &mipi_csi2_3ph_cphy_regs_sm8650_tele,
+	.supply_names = (const char **)sm8650_supplies,
+	.num_supplies = ARRAY_SIZE(sm8650_supplies),
+	.clk_names = (const char **)sm8650_clks,
+	.num_clk = ARRAY_SIZE(sm8650_clks),
+	.timer_clk_name = "timer",
+	.opp_clk_name = "core",
+	.genpds = sm8650_genpds,
+	.num_genpds = ARRAY_SIZE(sm8650_genpds),
+};

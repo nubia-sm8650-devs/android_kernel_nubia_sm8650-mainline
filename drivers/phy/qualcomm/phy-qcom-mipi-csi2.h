@@ -124,12 +124,14 @@ extern const struct mipi_csi2phy_soc_cfg mipi_csi2_dphy_4nm_x1e;
 extern const struct mipi_csi2phy_soc_cfg mipi_csi2_dphy_sa8775p;
 extern const struct mipi_csi2phy_soc_cfg mipi_csi2_dphy_sc7280;
 extern const struct mipi_csi2phy_soc_cfg mipi_csi2_dphy_sm8650;
+extern const struct mipi_csi2phy_soc_cfg mipi_csi2_dphy_sm8650_tele;
 
 extern const struct mipi_csi2phy_hw_ops phy_qcom_mipi_csi2_ops_3ph_cphy;
 extern const struct mipi_csi2phy_hw_ops phy_qcom_mipi_csi2_ops_3ph_cphy_2_2_0;
 extern const struct mipi_csi2phy_device_regs mipi_csi2_3ph_cphy_regs_sa8775p;
 extern const struct mipi_csi2phy_device_regs mipi_csi2_3ph_cphy_regs_sc7280;
 extern const struct mipi_csi2phy_device_regs mipi_csi2_3ph_cphy_regs_sm8650;
+extern const struct mipi_csi2phy_device_regs mipi_csi2_3ph_cphy_regs_sm8650_tele;
 
 void phy_qcom_mipi_csi2_hw_version_read(struct mipi_csi2phy_device *csi2phy);
 void phy_qcom_mipi_csi2_reset(struct mipi_csi2phy_device *csi2phy);

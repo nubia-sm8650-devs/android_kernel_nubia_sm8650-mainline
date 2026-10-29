@@ -2081,6 +2081,52 @@ static const struct mipi_csi2phy_lane_regs datarate_sm8650_cphy_6p0Gsps[] = {
 };
 
 
+static const struct mipi_csi2phy_lane_regs datarate_sm8650_cphy_2p0Gsps_z60u_tele[] = {
+	{.reg_addr = 0x0268, .reg_data = 0xf1, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0294, .reg_data = 0x01, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0278, .reg_data = 0xa8, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0288, .reg_data = 0x20, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x026c, .reg_data = 0x3d, .param_type = CSIPHY_SHORT_CHANNEL_PARAMS},
+	{.reg_addr = 0x026c, .reg_data = 0x3d, .param_type = CSIPHY_STANDARD_CHANNEL_PARAMS},
+	{.reg_addr = 0x028c, .reg_data = 0x28, .param_type = CSIPHY_SHORT_CHANNEL_PARAMS},
+	{.reg_addr = 0x028c, .reg_data = 0x28, .param_type = CSIPHY_STANDARD_CHANNEL_PARAMS},
+	{.reg_addr = 0x0270, .reg_data = 0x00, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0274, .reg_data = 0x03, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0668, .reg_data = 0xf1, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0694, .reg_data = 0x01, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0678, .reg_data = 0xa8, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0688, .reg_data = 0x20, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x066c, .reg_data = 0x3d, .param_type = CSIPHY_SHORT_CHANNEL_PARAMS},
+	{.reg_addr = 0x066c, .reg_data = 0x3d, .param_type = CSIPHY_STANDARD_CHANNEL_PARAMS},
+	{.reg_addr = 0x068c, .reg_data = 0x28, .param_type = CSIPHY_SHORT_CHANNEL_PARAMS},
+	{.reg_addr = 0x068c, .reg_data = 0x28, .param_type = CSIPHY_STANDARD_CHANNEL_PARAMS},
+	{.reg_addr = 0x0670, .reg_data = 0x00, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0674, .reg_data = 0x03, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0a68, .reg_data = 0xf1, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0a94, .reg_data = 0x01, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0a78, .reg_data = 0xa8, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0a88, .reg_data = 0x20, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0a6c, .reg_data = 0x3d, .param_type = CSIPHY_SHORT_CHANNEL_PARAMS},
+	{.reg_addr = 0x0a6c, .reg_data = 0x3d, .param_type = CSIPHY_STANDARD_CHANNEL_PARAMS},
+	{.reg_addr = 0x0a8c, .reg_data = 0x28, .param_type = CSIPHY_SHORT_CHANNEL_PARAMS},
+	{.reg_addr = 0x0a8c, .reg_data = 0x28, .param_type = CSIPHY_STANDARD_CHANNEL_PARAMS},
+	{.reg_addr = 0x0a70, .reg_data = 0x00, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0a74, .reg_data = 0x03, .delay_us = 0x0a, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x020c, .reg_data = 0x27, .param_type = CSIPHY_SETTLE_CNT_LOWER_BYTE},
+	{.reg_addr = 0x0208, .reg_data = 0x00, .param_type = CSIPHY_SETTLE_CNT_HIGHER_BYTE},
+	{.reg_addr = 0x0210, .reg_data = 0x00, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0214, .reg_data = 0x00, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x060c, .reg_data = 0x27, .param_type = CSIPHY_SETTLE_CNT_LOWER_BYTE},
+	{.reg_addr = 0x0608, .reg_data = 0x00, .param_type = CSIPHY_SETTLE_CNT_HIGHER_BYTE},
+	{.reg_addr = 0x0610, .reg_data = 0x00, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0614, .reg_data = 0x00, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0a0c, .reg_data = 0x27, .param_type = CSIPHY_SETTLE_CNT_LOWER_BYTE},
+	{.reg_addr = 0x0a08, .reg_data = 0x00, .param_type = CSIPHY_SETTLE_CNT_HIGHER_BYTE},
+	{.reg_addr = 0x0a10, .reg_data = 0x00, .param_type = CSIPHY_DEFAULT_PARAMS},
+	{.reg_addr = 0x0a14, .reg_data = 0x00, .param_type = CSIPHY_DEFAULT_PARAMS},
+};
+
+
 static const struct mipi_csi2phy_datarate_regs datarate_regs_sm8650_cphy[] = {
 	{
 		.bandwidth = 40000000,
@@ -2236,4 +2282,20 @@ const struct mipi_csi2phy_device_regs mipi_csi2_3ph_cphy_regs_sm8650 = {
 	.common_regs_offset = 0x1000,
 	.datarate_regs = datarate_regs_sm8650_cphy,
 	.num_datarate_regs = ARRAY_SIZE(datarate_regs_sm8650_cphy),
+};
+
+static const struct mipi_csi2phy_datarate_regs datarate_regs_sm8650_cphy_z60u_tele[] = {
+	{
+		.bandwidth = 1000000000,
+		.reg_array = datarate_sm8650_cphy_2p0Gsps_z60u_tele,
+		.reg_array_size = ARRAY_SIZE(datarate_sm8650_cphy_2p0Gsps_z60u_tele),
+	},
+};
+
+const struct mipi_csi2phy_device_regs mipi_csi2_3ph_cphy_regs_sm8650_tele = {
+	.init_seq = lane_regs_sm8650_cphy,
+	.lane_array_size = ARRAY_SIZE(lane_regs_sm8650_cphy),
+	.common_regs_offset = 0x1000,
+	.datarate_regs = datarate_regs_sm8650_cphy_z60u_tele,
+	.num_datarate_regs = ARRAY_SIZE(datarate_regs_sm8650_cphy_z60u_tele),
 };
