@@ -440,6 +440,16 @@ static int qcom_clk_dvfs_notifier(struct notifier_block *nb,
 	return NOTIFY_OK;
 }
 
+static void qcom_clk_dvfs_debugfs_remove(void *data)
+{
+	struct qcom_clk_dvfs *dvfs = data;
+
+	guard(mutex)(&qcom_clk_dvfs_debugfs_lock);
+	if (!IS_ERR_OR_NULL(qcom_clk_dvfs_debugfs_root))
+		debugfs_lookup_and_remove(dev_name(dvfs->dev),
+					  qcom_clk_dvfs_debugfs_root);
+}
+
 static void qcom_clk_dvfs_cleanup(void *data)
 {
 	struct qcom_clk_dvfs *dvfs = data;
@@ -633,7 +643,7 @@ int qcom_clk_dvfs_register(struct device *dev,
 					    qcom_clk_dvfs_debugfs_show);
 	}
 
-	return 0;
+	return devm_add_action_or_reset(dev, qcom_clk_dvfs_debugfs_remove, dvfs);
 
 err_cleanup:
 	qcom_clk_dvfs_cleanup(dvfs);
