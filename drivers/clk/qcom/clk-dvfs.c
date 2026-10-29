@@ -247,6 +247,7 @@ static int qcom_clk_dvfs_remove_vote(struct qcom_clk_dvfs_rail_voter *rail_voter
 int qcom_clk_dvfs_prepare_rate(struct clk_hw *hw, unsigned long rate)
 {
 	struct qcom_clk_dvfs_clock *clock = to_clk_regmap(hw)->dvfs;
+	unsigned int *old_levels;
 	unsigned int level;
 	size_t i;
 	int ret;
@@ -258,14 +259,22 @@ int qcom_clk_dvfs_prepare_rate(struct clk_hw *hw, unsigned long rate)
 	if (ret)
 		return ret;
 
+	old_levels = kcalloc(clock->data->num_pd_indices, sizeof(*old_levels),
+			     GFP_KERNEL);
+	if (!old_levels)
+		return -ENOMEM;
+
 	for (i = 0; i < clock->data->num_pd_indices; i++) {
 		unsigned int pd_index = clock->data->pd_indices[i];
 
+		old_levels[i] = clock->votes[i].level;
 		ret = qcom_clk_dvfs_replace_vote(&clock->rail_voters[pd_index],
 						 &clock->votes[i], level);
 		if (ret)
 			goto unwind;
 	}
+
+	kfree(old_levels);
 
 	return 0;
 
@@ -274,8 +283,10 @@ unwind:
 		unsigned int pd_index = clock->data->pd_indices[i];
 
 		qcom_clk_dvfs_replace_vote(&clock->rail_voters[pd_index],
-					   &clock->votes[i], 0);
+					   &clock->votes[i], old_levels[i]);
 	}
+
+	kfree(old_levels);
 
 	return ret;
 }
