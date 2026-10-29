@@ -80,7 +80,7 @@ static int st_nci_i2c_enable(void *phy_id)
 		usleep_range(5000, 6000);
 	}
 
-	if (phy->ndlc->powered == 0 && phy->irq_active == 0) {
+	if (!phy->irq_active) {
 		enable_irq(phy->i2c_dev->irq);
 		phy->irq_active = true;
 	}

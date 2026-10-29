@@ -49,10 +49,10 @@ int ndlc_open(struct llt_ndlc *ndlc)
 	skb_queue_purge(&ndlc->send_q);
 	skb_queue_purge(&ndlc->ack_pending_q);
 	ndlc->hard_fault = 0;
+	ndlc->powered = 1;
 
 	/* toggle reset pin */
 	ndlc->ops->enable(ndlc->phy_id);
-	ndlc->powered = 1;
 	return 0;
 }
 EXPORT_SYMBOL(ndlc_open);

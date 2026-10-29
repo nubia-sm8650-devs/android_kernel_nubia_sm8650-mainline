@@ -50,7 +50,7 @@ static int st_nci_spi_enable(void *phy_id)
 	gpiod_set_value(phy->gpiod_reset, 1);
 	usleep_range(80000, 85000);
 
-	if (phy->ndlc->powered == 0 && phy->irq_active == 0) {
+	if (!phy->irq_active) {
 		enable_irq(phy->spi_dev->irq);
 		phy->irq_active = true;
 	}
