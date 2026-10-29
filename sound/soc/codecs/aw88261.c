@@ -418,9 +418,6 @@ static int aw88261_dev_reg_update(struct aw88261 *aw88261,
 	if (ret)
 		return ret;
 
-	if (aw_dev->prof_cur != aw_dev->prof_index)
-		vol_desc->ctl_volume = 0;
-
 	/* keep min volume */
 	aw88261_dev_set_volume(aw_dev, vol_desc->mute_volume);
 
