@@ -13,6 +13,7 @@
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_uapi.h>
 #include <drm/drm_blend.h>
+#include <drm/drm_color_mgmt.h>
 #include <drm/drm_damage_helper.h>
 #include <drm/drm_framebuffer.h>
 #include <drm/drm_gem_atomic_helper.h>
@@ -510,19 +511,14 @@ static void _dpu_plane_setup_pixel_ext(struct dpu_hw_scaler3_cfg *scale_cfg,
 }
 
 static const struct dpu_csc_cfg *_dpu_plane_get_csc(struct dpu_sw_pipe *pipe,
-						    const struct msm_format *fmt)
+						    const struct msm_format *fmt,
+						    const struct drm_plane_state *state)
 {
-	const struct dpu_csc_cfg *csc_ptr;
-
 	if (!MSM_FORMAT_IS_YUV(fmt))
 		return NULL;
 
-	if (BIT(DPU_SSPP_CSC_10BIT) & pipe->sspp->cap->features)
-		csc_ptr = &dpu_csc10_YUV2RGB_601L;
-	else
-		csc_ptr = &dpu_csc_YUV2RGB_601L;
-
-	return csc_ptr;
+	return dpu_csc_get_yuv2rgb(state->color_encoding, state->color_range,
+				   BIT(DPU_SSPP_CSC_10BIT) & pipe->sspp->cap->features);
 }
 
 static void _dpu_plane_setup_scaler(struct dpu_sw_pipe *pipe,
@@ -1395,7 +1391,7 @@ static void dpu_plane_flush_csc(struct dpu_plane *pdpu, struct dpu_sw_pipe *pipe
 	if (!pipe->sspp || !pipe->sspp->ops.setup_csc)
 		return;
 
-	csc_ptr = _dpu_plane_get_csc(pipe, format);
+	csc_ptr = _dpu_plane_get_csc(pipe, format, pdpu->base.state);
 	if (!csc_ptr)
 		return;
 
@@ -1824,6 +1820,7 @@ static struct drm_plane *dpu_plane_init_common(struct drm_device *dev,
 					       bool inline_rotation,
 					       const uint32_t *format_list,
 					       uint32_t num_formats,
+					       bool has_csc,
 					       enum dpu_sspp pipe)
 {
 	struct drm_plane *plane = NULL;
@@ -1866,6 +1863,19 @@ static struct drm_plane *dpu_plane_init_common(struct drm_device *dev,
 
 	drm_plane_enable_fb_damage_clips(plane);
 
+	if (has_csc) {
+		ret = drm_plane_create_color_properties(plane,
+				BIT(DRM_COLOR_YCBCR_BT601) |
+				BIT(DRM_COLOR_YCBCR_BT709) |
+				BIT(DRM_COLOR_YCBCR_BT2020),
+				BIT(DRM_COLOR_YCBCR_LIMITED_RANGE) |
+				BIT(DRM_COLOR_YCBCR_FULL_RANGE),
+				DRM_COLOR_YCBCR_BT601,
+				DRM_COLOR_YCBCR_LIMITED_RANGE);
+		if (ret)
+			DPU_ERROR("failed to install color properties, rc = %d\n", ret);
+	}
+
 	DPU_DEBUG("%s created for pipe:%u id:%u\n", plane->name,
 					pipe, plane->base.id);
 	return plane;
@@ -1901,6 +1911,7 @@ struct drm_plane *dpu_plane_init(struct drm_device *dev,
 				      pipe_hw->cap->features & BIT(DPU_SSPP_INLINE_ROTATION),
 				      pipe_hw->cap->sblk->format_list,
 				      pipe_hw->cap->sblk->num_formats,
+				      pipe_hw->cap->sblk->csc_blk.len,
 				      pipe);
 	if (IS_ERR(plane))
 		return plane;
@@ -1929,6 +1940,7 @@ struct drm_plane *dpu_plane_init_virtual(struct drm_device *dev,
 	struct msm_drm_private *priv = dev->dev_private;
 	struct dpu_kms *kms = to_dpu_kms(priv->kms);
 	bool has_inline_rotation = false;
+	bool has_csc = false;
 	const u32 *format_list = NULL;
 	u32 num_formats = 0;
 	int i;
@@ -1939,6 +1951,9 @@ struct drm_plane *dpu_plane_init_virtual(struct drm_device *dev,
 
 		if (test_bit(DPU_SSPP_INLINE_ROTATION, &cfg->features))
 			has_inline_rotation = true;
+
+		if (cfg->sblk->csc_blk.len)
+			has_csc = true;
 
 		if (!format_list ||
 		    cfg->sblk->csc_blk.len) {
@@ -1951,6 +1966,7 @@ struct drm_plane *dpu_plane_init_virtual(struct drm_device *dev,
 				      has_inline_rotation,
 				      format_list,
 				      num_formats,
+				      has_csc,
 				      SSPP_NONE);
 	if (IS_ERR(plane))
 		return plane;

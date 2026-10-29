@@ -578,35 +578,120 @@ bool dpu_hw_clk_force_ctrl(struct dpu_hw_blk_reg_map *c,
 
 #define TO_S15D16(_x_)((_x_) << 7)
 
-const struct dpu_csc_cfg dpu_csc_YUV2RGB_601L = {
-	{
-		/* S15.16 format */
-		0x00012A00, 0x00000000, 0x00019880,
-		0x00012A00, 0xFFFF9B80, 0xFFFF3000,
-		0x00012A00, 0x00020480, 0x00000000,
+#define DPU_CSC_YUV2RGB_L(...) {					\
+	.csc_mv = { __VA_ARGS__ },					\
+	.csc_pre_bv = { 0xfff0, 0xff80, 0xff80 },			\
+	.csc_pre_lv = { 0x10, 0xeb, 0x10, 0xf0, 0x10, 0xf0 },		\
+	.csc_post_lv = { 0x00, 0xff, 0x00, 0xff, 0x00, 0xff },		\
+}
+
+#define DPU_CSC_YUV2RGB_F(...) {					\
+	.csc_mv = { __VA_ARGS__ },					\
+	.csc_pre_bv = { 0x0000, 0xff80, 0xff80 },			\
+	.csc_pre_lv = { 0x00, 0xff, 0x00, 0xff, 0x00, 0xff },		\
+	.csc_post_lv = { 0x00, 0xff, 0x00, 0xff, 0x00, 0xff },		\
+}
+
+#define DPU_CSC10_YUV2RGB_L(...) {					\
+	.csc_mv = { __VA_ARGS__ },					\
+	.csc_pre_bv = { 0xffc0, 0xfe00, 0xfe00 },			\
+	.csc_pre_lv = { 0x40, 0x3ac, 0x40, 0x3c0, 0x40, 0x3c0 },	\
+	.csc_post_lv = { 0x00, 0x3ff, 0x00, 0x3ff, 0x00, 0x3ff },	\
+}
+
+#define DPU_CSC10_YUV2RGB_F(...) {					\
+	.csc_mv = { __VA_ARGS__ },					\
+	.csc_pre_bv = { 0x0000, 0xfe00, 0xfe00 },			\
+	.csc_pre_lv = { 0x00, 0x3ff, 0x00, 0x3ff, 0x00, 0x3ff },	\
+	.csc_post_lv = { 0x00, 0x3ff, 0x00, 0x3ff, 0x00, 0x3ff },	\
+}
+
+/* S15.16 matrices, rounded to the S4.9 precision of the hardware */
+static const struct dpu_csc_cfg
+dpu_csc_yuv2rgb[DRM_COLOR_ENCODING_MAX][DRM_COLOR_RANGE_MAX] = {
+	[DRM_COLOR_YCBCR_BT601] = {
+		[DRM_COLOR_YCBCR_LIMITED_RANGE] = DPU_CSC_YUV2RGB_L(
+			0x00012A00, 0x00000000, 0x00019880,
+			0x00012A00, 0xFFFF9B80, 0xFFFF3000,
+			0x00012A00, 0x00020480, 0x00000000),
+		[DRM_COLOR_YCBCR_FULL_RANGE] = DPU_CSC_YUV2RGB_F(
+			0x00010000, 0x00000000, 0x00016700,
+			0x00010000, 0xFFFFA800, 0xFFFF4900,
+			0x00010000, 0x0001C580, 0x00000000),
 	},
-	/* signed bias */
-	{ 0xfff0, 0xff80, 0xff80,},
-	{ 0x0, 0x0, 0x0,},
-	/* unsigned clamp */
-	{ 0x10, 0xeb, 0x10, 0xf0, 0x10, 0xf0,},
-	{ 0x00, 0xff, 0x00, 0xff, 0x00, 0xff,},
+	[DRM_COLOR_YCBCR_BT709] = {
+		[DRM_COLOR_YCBCR_LIMITED_RANGE] = DPU_CSC_YUV2RGB_L(
+			0x00012A00, 0x00000000, 0x0001CB00,
+			0x00012A00, 0xFFFFC980, 0xFFFF7780,
+			0x00012A00, 0x00021D00, 0x00000000),
+		[DRM_COLOR_YCBCR_FULL_RANGE] = DPU_CSC_YUV2RGB_F(
+			0x00010000, 0x00000000, 0x00019300,
+			0x00010000, 0xFFFFD000, 0xFFFF8800,
+			0x00010000, 0x0001DB00, 0x00000000),
+	},
+	[DRM_COLOR_YCBCR_BT2020] = {
+		[DRM_COLOR_YCBCR_LIMITED_RANGE] = DPU_CSC_YUV2RGB_L(
+			0x00012A00, 0x00000000, 0x0001AD80,
+			0x00012A00, 0xFFFFD000, 0xFFFF5980,
+			0x00012A00, 0x00022480, 0x00000000),
+		[DRM_COLOR_YCBCR_FULL_RANGE] = DPU_CSC_YUV2RGB_F(
+			0x00010000, 0x00000000, 0x00017980,
+			0x00010000, 0xFFFFD600, 0xFFFF6D80,
+			0x00010000, 0x0001E180, 0x00000000),
+	},
 };
 
-const struct dpu_csc_cfg dpu_csc10_YUV2RGB_601L = {
-	{
-		/* S15.16 format */
-		0x00012A00, 0x00000000, 0x00019880,
-		0x00012A00, 0xFFFF9B80, 0xFFFF3000,
-		0x00012A00, 0x00020480, 0x00000000,
+static const struct dpu_csc_cfg
+dpu_csc10_yuv2rgb[DRM_COLOR_ENCODING_MAX][DRM_COLOR_RANGE_MAX] = {
+	[DRM_COLOR_YCBCR_BT601] = {
+		[DRM_COLOR_YCBCR_LIMITED_RANGE] = DPU_CSC10_YUV2RGB_L(
+			0x00012A00, 0x00000000, 0x00019880,
+			0x00012A00, 0xFFFF9B80, 0xFFFF3000,
+			0x00012A00, 0x00020480, 0x00000000),
+		[DRM_COLOR_YCBCR_FULL_RANGE] = DPU_CSC10_YUV2RGB_F(
+			0x00010000, 0x00000000, 0x00016700,
+			0x00010000, 0xFFFFA800, 0xFFFF4900,
+			0x00010000, 0x0001C580, 0x00000000),
 	},
-	/* signed bias */
-	{ 0xffc0, 0xfe00, 0xfe00,},
-	{ 0x0, 0x0, 0x0,},
-	/* unsigned clamp */
-	{ 0x40, 0x3ac, 0x40, 0x3c0, 0x40, 0x3c0,},
-	{ 0x00, 0x3ff, 0x00, 0x3ff, 0x00, 0x3ff,},
+	[DRM_COLOR_YCBCR_BT709] = {
+		[DRM_COLOR_YCBCR_LIMITED_RANGE] = DPU_CSC10_YUV2RGB_L(
+			0x00012A00, 0x00000000, 0x0001CB00,
+			0x00012A00, 0xFFFFC980, 0xFFFF7780,
+			0x00012A00, 0x00021D00, 0x00000000),
+		[DRM_COLOR_YCBCR_FULL_RANGE] = DPU_CSC10_YUV2RGB_F(
+			0x00010000, 0x00000000, 0x00019300,
+			0x00010000, 0xFFFFD000, 0xFFFF8800,
+			0x00010000, 0x0001DB00, 0x00000000),
+	},
+	[DRM_COLOR_YCBCR_BT2020] = {
+		[DRM_COLOR_YCBCR_LIMITED_RANGE] = DPU_CSC10_YUV2RGB_L(
+			0x00012A00, 0x00000000, 0x0001AD80,
+			0x00012A00, 0xFFFFD000, 0xFFFF5980,
+			0x00012A00, 0x00022480, 0x00000000),
+		[DRM_COLOR_YCBCR_FULL_RANGE] = DPU_CSC10_YUV2RGB_F(
+			0x00010000, 0x00000000, 0x00017980,
+			0x00010000, 0xFFFFD600, 0xFFFF6D80,
+			0x00010000, 0x0001E180, 0x00000000),
+	},
 };
+
+/**
+ * dpu_csc_get_yuv2rgb - get the YCbCr to RGB conversion for a plane
+ * @encoding:	YCbCr encoding of the framebuffer
+ * @range:	quantization range of the framebuffer
+ * @csc10:	whether the pipe has a 10-bit CSC block
+ * Return: CSC configuration to program, or NULL for an unknown encoding
+ */
+const struct dpu_csc_cfg *dpu_csc_get_yuv2rgb(enum drm_color_encoding encoding,
+					      enum drm_color_range range,
+					      bool csc10)
+{
+	if (encoding >= DRM_COLOR_ENCODING_MAX || range >= DRM_COLOR_RANGE_MAX)
+		return NULL;
+
+	return csc10 ? &dpu_csc10_yuv2rgb[encoding][range] :
+		       &dpu_csc_yuv2rgb[encoding][range];
+}
 
 const struct dpu_csc_cfg dpu_csc10_rgb2yuv_601l = {
 	{
