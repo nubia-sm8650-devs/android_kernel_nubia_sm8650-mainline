@@ -2588,12 +2588,19 @@ clk_finish_rate_notifications(struct clk_resource_transaction *tx,
 	struct clk_rate_notification *notification, *tmp;
 
 	list_for_each_entry(notification, &tx->notifications, node) {
+		struct clk_core *core = notification->core;
+
 		if (!notification->sent)
 			break;
 
-		__clk_notify(notification->core, event, notification->old_rate,
-			     event == POST_RATE_CHANGE ?
-			     notification->core->rate : notification->new_rate);
+		if (event == POST_RATE_CHANGE ||
+		    core->rate != notification->old_rate)
+			__clk_notify(core, POST_RATE_CHANGE,
+				     notification->old_rate, core->rate);
+		else
+			__clk_notify(core, ABORT_RATE_CHANGE,
+				     notification->old_rate,
+				     notification->new_rate);
 	}
 
 	list_for_each_entry_safe(notification, tmp, &tx->notifications, node) {
