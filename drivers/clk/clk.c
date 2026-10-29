@@ -3053,7 +3053,7 @@ static int clk_core_set_rate_nolock(struct clk_core *core,
 	/* change the rates */
 	ret = clk_change_rate(top, resource_managed);
 	if (ret) {
-		__clk_recalc_rates(top, true, 0);
+		__clk_recalc_rates(top, false, 0);
 		clk_finish_rate_notifications(&tx, ABORT_RATE_CHANGE);
 		release_ret = clk_resource_release(&tx,
 						    CLK_RESOURCE_HW_CHANGED);
