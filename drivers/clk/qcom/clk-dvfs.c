@@ -377,8 +377,10 @@ int qcom_clk_dvfs_resource_release(struct clk_hw *hw,
 	if (result == CLK_RESOURCE_COMPLETE) {
 		ret = qcom_clk_dvfs_find_level(clock->data, transition->actual_rate,
 					   &level);
-		if (ret)
+		if (ret) {
 			first_error = ret;
+			result = CLK_RESOURCE_HW_CHANGED;
+		}
 	}
 
 	for (size_t i = 0; i < dvfs_transition->num_votes; i++) {
@@ -387,20 +389,14 @@ int qcom_clk_dvfs_resource_release(struct clk_hw *hw,
 		if (!clock->votes[i].level)
 			continue;
 
-		if (result == CLK_RESOURCE_COMPLETE) {
-			ret = first_error;
-		} else if (result == CLK_RESOURCE_HW_CHANGED) {
+		if (result == CLK_RESOURCE_HW_CHANGED)
 			level = max(clock->votes[i].level,
 				    dvfs_transition->votes[i].level);
-			ret = 0;
-		} else {
+		else if (result != CLK_RESOURCE_COMPLETE)
 			continue;
-		}
 
-		if (!ret) {
-			ret = qcom_clk_dvfs_replace_vote(&clock->rail_voters[pd_index],
-							 &clock->votes[i], level);
-		}
+		ret = qcom_clk_dvfs_replace_vote(&clock->rail_voters[pd_index],
+						 &clock->votes[i], level);
 		if (ret && !first_error)
 			first_error = ret;
 	}
