@@ -10,6 +10,9 @@
 
 #include <linux/types.h>
 
+struct icp_device;
+struct icp_ubwc_cfg;
+
 #define HFI_QTBL_VERSION			0xFFFFFFFF
 
 /* ICP firmware boot command/response */
