@@ -25,6 +25,8 @@
 #include <linux/string.h>
 #include <linux/stringhash.h>
 
+#include <kunit/visibility.h>
+
 #include "clk.h"
 
 static DEFINE_SPINLOCK(enable_lock);
@@ -642,6 +644,7 @@ unsigned int __clk_get_enable_count(struct clk *clk)
 {
 	return !clk ? 0 : clk->core->enable_count;
 }
+EXPORT_SYMBOL_IF_KUNIT(__clk_get_enable_count);
 
 static unsigned long clk_core_get_rate_nolock(struct clk_core *core)
 {
