@@ -892,11 +892,94 @@ static void socinfo_debugfs_init(struct qcom_socinfo *qcom_socinfo,
 static void socinfo_debugfs_exit(struct qcom_socinfo *qcom_socinfo) {  }
 #endif /* CONFIG_DEBUG_FS */
 
+static struct socinfo *socinfo_smem;
+static size_t socinfo_smem_size;
+
+static u32 socinfo_num_subset_parts(void)
+{
+	if (le32_to_cpu(socinfo_smem->fmt) < SOCINFO_VERSION(0, 14) ||
+	    offsetofend(struct socinfo, nsubset_parts_array_offset) > socinfo_smem_size)
+		return 0;
+
+	return le32_to_cpu(socinfo_smem->num_subset_parts);
+}
+
+static ssize_t num_subset_parts_show(struct device *dev,
+				     struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "0x%x\n", socinfo_num_subset_parts());
+}
+static DEVICE_ATTR_RO(num_subset_parts);
+
+static ssize_t socinfo_part_show(struct device *dev,
+				 struct device_attribute *attr, char *buf)
+{
+	unsigned long part = (unsigned long)container_of(attr,
+		struct dev_ext_attribute, attr)->var;
+	u32 offset;
+
+	if (le32_to_cpu(socinfo_smem->fmt) >= SOCINFO_VERSION(0, 21) &&
+	    offsetofend(struct socinfo, nsubpart_feat_array_offset) <= socinfo_smem_size)
+		offset = le32_to_cpu(socinfo_smem->nsubpart_feat_array_offset);
+	else
+		offset = le32_to_cpu(socinfo_smem->nsubset_parts_array_offset);
+
+	if (!offset || offset + (part + 1) * sizeof(u32) > socinfo_smem_size)
+		return -EINVAL;
+
+	return sysfs_emit(buf, "0x%x\n",
+			  get_unaligned_le32((void *)socinfo_smem + offset +
+					     part * sizeof(u32)));
+}
+
+static const char *const socinfo_part_names[] = {
+	"unknown", "gpu", "video", "camera", "display", "audio", "modem",
+	"wlan", "comp", "sensors", "npu", "spss", "nav", "comp1", "display1",
+	"nsp", "eva",
+};
+
+static int socinfo_parts_init(struct device *dev, struct soc_device_attribute *attr)
+{
+	u32 num_parts = min_t(u32, socinfo_num_subset_parts(),
+			      ARRAY_SIZE(socinfo_part_names));
+	struct dev_ext_attribute *part_attrs;
+	struct attribute_group *group;
+	struct attribute **attrs;
+	u32 i;
+
+	if (!num_parts)
+		return 0;
+
+	group = devm_kzalloc(dev, sizeof(*group), GFP_KERNEL);
+	attrs = devm_kcalloc(dev, num_parts + 1, sizeof(*attrs), GFP_KERNEL);
+	part_attrs = devm_kcalloc(dev, num_parts, sizeof(*part_attrs), GFP_KERNEL);
+	if (!group || !attrs || !part_attrs)
+		return -ENOMEM;
+
+	attrs[0] = &dev_attr_num_subset_parts.attr;
+	for (i = 1; i < num_parts; i++) {
+		struct dev_ext_attribute *ea = &part_attrs[i];
+
+		sysfs_attr_init(&ea->attr.attr);
+		ea->attr.attr.name = socinfo_part_names[i];
+		ea->attr.attr.mode = 0444;
+		ea->attr.show = socinfo_part_show;
+		ea->var = (void *)(unsigned long)i;
+		attrs[i] = &ea->attr.attr;
+	}
+
+	group->attrs = attrs;
+	attr->custom_attr_group = group;
+
+	return 0;
+}
+
 static int qcom_socinfo_probe(struct platform_device *pdev)
 {
 	struct qcom_socinfo *qs;
 	struct socinfo *info;
 	size_t item_size;
+	int ret;
 
 	info = qcom_smem_get(QCOM_SMEM_HOST_ANY, SMEM_HW_SW_BUILD_ID,
 			      &item_size);
@@ -927,6 +1010,13 @@ static int qcom_socinfo_probe(struct platform_device *pdev)
 		if (!qs->attr.serial_number)
 			return -ENOMEM;
 	}
+
+	socinfo_smem = info;
+	socinfo_smem_size = item_size;
+
+	ret = socinfo_parts_init(&pdev->dev, &qs->attr);
+	if (ret)
+		return ret;
 
 	qs->soc_dev = soc_device_register(&qs->attr);
 	if (IS_ERR(qs->soc_dev))

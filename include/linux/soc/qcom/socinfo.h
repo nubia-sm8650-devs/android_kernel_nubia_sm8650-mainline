@@ -84,8 +84,10 @@ struct socinfo {
 	__le32 boot_core;
 	/* Version 20 */
 	__le32 raw_package_type;
-	/* Version 21, 22, 23 */
-	__le32 reserve1[4];
+	/* Version 21 */
+	__le32 nsubpart_feat_array_offset;
+	/* Version 22, 23 */
+	__le32 reserve1[3];
 };
 
 /* Internal feature codes */
