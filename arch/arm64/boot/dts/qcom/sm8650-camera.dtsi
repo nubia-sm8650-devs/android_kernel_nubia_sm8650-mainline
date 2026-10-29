@@ -56,7 +56,7 @@
 
 		msm_cam_smmu_jpeg {
 			compatible = "qcom,msm-cam-smmu-cb";
-			qcom,smmu-client-device = <&camss>;
+			iommus = <&apps_smmu 0x18a0 0x0>;
 			cam-smmu-label = "jpeg";
 			qcom,iommu-faults = "stall-disable", "non-fatal";
 			dma-coherent;
@@ -78,7 +78,7 @@
 
 		msm_cam_smmu_cdm {
 			compatible = "qcom,msm-cam-smmu-cb";
-			qcom,smmu-client-device = <&camss>;
+			iommus = <&apps_smmu 0x1860 0x0>;
 			cam-smmu-label = "rt-cdm";
 			qcom,iommu-faults = "stall-disable", "non-fatal";
 			dma-coherent;
@@ -1363,4 +1363,8 @@
 		status = "ok";
 	};
 
+};
+
+&camss {
+	iommus = <&apps_smmu 0x800 0x20>;
 };
