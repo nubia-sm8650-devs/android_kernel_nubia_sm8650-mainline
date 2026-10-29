@@ -66,6 +66,7 @@ typedef enum {
 #define VFE_BUS_WM_CFG(n)		(BUS_REG_BASE + 0x200 + (n) * 0x100)
 #define		WM_CFG_EN			BIT(0)
 #define		WM_VIR_FRM_EN			BIT(1)
+#define		WM_FRAME_HEADER_EN		BIT(2)
 #define		WM_CFG_MODE			BIT(16)
 #define VFE_BUS_WM_IMAGE_ADDR(n)	(BUS_REG_BASE + 0x204 + (n) * 0x100)
 #define VFE_BUS_WM_FRAME_INCR(n)	(BUS_REG_BASE + 0x208 + (n) * 0x100)
@@ -83,135 +84,264 @@ typedef enum {
 
 #define VFE_BUS_WM_MMU_PREFETCH_CFG(n)		(BUS_REG_BASE + 0x260 + (n) * 0x100)
 #define VFE_BUS_WM_MMU_PREFETCH_MAX_OFFSET(n)	(BUS_REG_BASE + 0x264 + (n) * 0x100)
+#define VFE_BUS_WM_ADDR_CFG(n)			(BUS_REG_BASE + 0x270 + (n) * 0x100)
+#define VFE_BUS_WM_DEBUG_STATUS_CFG(n)		(BUS_REG_BASE + 0x288 + (n) * 0x100)
+#define		WM_DEBUG_STATUS_1_EN		(11 << 8)
 
-/* Each write master of the PIX output writes one plane: Y, then CbCr at half height */
-static void vfe_output_start_pix(struct vfe_device *vfe, struct vfe_output *output)
+#define VFE_BUS_WM_BW_LIMIT(n)			(BUS_REG_BASE + 0x21c + (n) * 0x100)
+#define VFE_BUS_WM_UBWC_META_ADDR(n)		(BUS_REG_BASE + 0x240 + (n) * 0x100)
+#define VFE_BUS_WM_UBWC_META_CFG(n)		(BUS_REG_BASE + 0x244 + (n) * 0x100)
+#define VFE_BUS_WM_UBWC_MODE_CFG(n)		(BUS_REG_BASE + 0x248 + (n) * 0x100)
+#define		WM_UBWC_MODE_EN			BIT(0)
+#define VFE_BUS_WM_UBWC_CTRL_2(n)		(BUS_REG_BASE + 0x250 + (n) * 0x100)
+#define VFE_BUS_WM_UBWC_LOSSY_THRESH0(n)	(BUS_REG_BASE + 0x254 + (n) * 0x100)
+#define VFE_BUS_WM_UBWC_LOSSY_THRESH1(n)	(BUS_REG_BASE + 0x258 + (n) * 0x100)
+#define VFE_BUS_WM_UBWC_OFF_LOSSY_VAR(n)	(BUS_REG_BASE + 0x25c + (n) * 0x100)
+#define		WM_UBWC_BW_LIMIT_BLOB		0xFFFF
+
+#define VFE_WM_REG(r, o, v)	((r)[n].offset = (o), (r)[n++].value = (v))
+
+static bool vfe_780_wm_has_ubwc(unsigned int wm)
 {
-	struct v4l2_pix_format_mplane *pix = &output->video_out.active_fmt.fmt.pix_mp;
+	return wm == VFE_WM_VIDEO_FULL_Y || wm == VFE_WM_VIDEO_FULL_C ||
+	       wm == VFE_WM_DISPLAY_FULL_Y || wm == VFE_WM_DISPLAY_FULL_C;
+}
+
+static bool vfe_780_wm_has_frame_header(unsigned int wm)
+{
+	return wm != VFE_WM_VIDEO_DS_4 && wm != VFE_WM_VIDEO_DS_16 &&
+	       wm != VFE_WM_DISPLAY_DS_4 && wm != VFE_WM_DISPLAY_DS_16 &&
+	       wm != VFE_WM_FD_C;
+}
+
+static u32 vfe_780_wm_en_cfg(const struct camss_hw_wm_cfg *cfg)
+{
+	u32 val = cfg->mode << 16 | cfg->virtual_frame << 1 | WM_CFG_EN;
+
+	if (cfg->frame_header)
+		val |= WM_FRAME_HEADER_EN;
+
+	return val;
+}
+
+static unsigned int vfe_780_wm_ubwc_regs(struct vfe_device *vfe, unsigned int wm,
+					 const struct camss_hw_wm_cfg *cfg,
+					 u32 mode_cfg, struct camss_hw_reg *regs,
+					 unsigned int n)
+{
+	const struct camss_hw_wm_ubwc *u = &cfg->ubwc_cfg;
+
+	VFE_WM_REG(regs, VFE_BUS_WM_PACKER_CFG(wm), cfg->packer);
+	VFE_WM_REG(regs, VFE_BUS_WM_UBWC_META_CFG(wm), u->meta_cfg);
+	VFE_WM_REG(regs, VFE_BUS_WM_UBWC_MODE_CFG(wm), mode_cfg);
+	VFE_WM_REG(regs, VFE_BUS_WM_UBWC_CTRL_2(wm), u->ctrl_2);
+	VFE_WM_REG(regs, VFE_BUS_WM_UBWC_LOSSY_THRESH0(wm), u->lossy_thresh0);
+	VFE_WM_REG(regs, VFE_BUS_WM_UBWC_LOSSY_THRESH1(wm), u->lossy_thresh1);
+	VFE_WM_REG(regs, VFE_BUS_WM_UBWC_OFF_LOSSY_VAR(wm), u->off_lossy_var);
+	if (u->bw_limit < WM_UBWC_BW_LIMIT_BLOB)
+		VFE_WM_REG(regs, VFE_BUS_WM_BW_LIMIT(wm), u->bw_limit);
+
+	return n;
+}
+
+int vfe_780_wm_start_regs(struct vfe_device *vfe, unsigned int wm,
+			  const struct camss_hw_wm_cfg *cfg,
+			  struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS])
+{
+	unsigned int n = 0;
+
+	if (cfg->ubwc && !vfe_780_wm_has_ubwc(wm))
+		return -EINVAL;
+
+	VFE_WM_REG(regs, VFE_BUS_WM_IMAGE_CFG_0(wm), cfg->height << 16 | cfg->width);
+	if (cfg->mode == CAMSS_HW_WM_LINE)
+		VFE_WM_REG(regs, VFE_BUS_WM_IMAGE_CFG_1(wm), cfg->h_init);
+	VFE_WM_REG(regs, VFE_BUS_WM_IMAGE_CFG_2(wm), cfg->stride);
+	VFE_WM_REG(regs, VFE_BUS_WM_PACKER_CFG(wm), cfg->packer);
+	if (cfg->ubwc)
+		n = vfe_780_wm_ubwc_regs(vfe, wm, cfg,
+					 cfg->ubwc_cfg.mode_cfg | WM_UBWC_MODE_EN,
+					 regs, n);
+
+	VFE_WM_REG(regs, VFE_BUS_WM_FRAMEDROP_PERIOD(wm), 0);
+	VFE_WM_REG(regs, VFE_BUS_WM_FRAMEDROP_PATTERN(wm), 1);
+	VFE_WM_REG(regs, VFE_BUS_WM_IRQ_SUBSAMPLE_PERIOD(wm), 0);
+	VFE_WM_REG(regs, VFE_BUS_WM_IRQ_SUBSAMPLE_PATTERN(wm), 1);
+	VFE_WM_REG(regs, VFE_BUS_WM_MMU_PREFETCH_CFG(wm), 1);
+	VFE_WM_REG(regs, VFE_BUS_WM_MMU_PREFETCH_MAX_OFFSET(wm), 0xFFFFFFFF);
+	VFE_WM_REG(regs, VFE_BUS_WM_CFG(wm), vfe_780_wm_en_cfg(cfg));
+	VFE_WM_REG(regs, VFE_BUS_WM_DEBUG_STATUS_CFG(wm), WM_DEBUG_STATUS_1_EN);
+
+	return n;
+}
+
+int vfe_780_wm_update_regs(struct vfe_device *vfe, unsigned int wm,
+			   const struct camss_hw_wm_cfg *cfg, u64 iova,
+			   unsigned int flags,
+			   struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS])
+{
+	u32 en_cfg = vfe_780_wm_en_cfg(cfg);
+	u64 frame_incr, addr;
+	unsigned int n = 0;
+	u32 offset;
+
+	if (cfg->ubwc && !vfe_780_wm_has_ubwc(wm))
+		return -EINVAL;
+
+	if (cfg->frame_header && !vfe_780_wm_has_frame_header(wm))
+		return -EINVAL;
+
+	VFE_WM_REG(regs, VFE_BUS_WM_CFG(wm), en_cfg);
+	VFE_WM_REG(regs, VFE_BUS_WM_IMAGE_CFG_0(wm), cfg->height << 16 | cfg->width);
+	if (flags & CAMSS_HW_WM_UPDATE_STRIDE)
+		VFE_WM_REG(regs, VFE_BUS_WM_IMAGE_CFG_2(wm), cfg->stride);
+	if (flags & CAMSS_HW_WM_UPDATE_PACKER)
+		VFE_WM_REG(regs, VFE_BUS_WM_PACKER_CFG(wm), cfg->packer);
+	if (cfg->ubwc) {
+		if (flags & CAMSS_HW_WM_UPDATE_UBWC)
+			n = vfe_780_wm_ubwc_regs(vfe, wm, cfg,
+						 cfg->ubwc_cfg.mode_cfg | WM_UBWC_MODE_EN,
+						 regs, n);
+		VFE_WM_REG(regs, VFE_BUS_WM_UBWC_META_ADDR(wm), iova >> 8);
+	}
+
+	frame_incr = (u64)cfg->stride * cfg->slice_height;
+	if (cfg->ubwc)
+		frame_incr = ALIGN(frame_incr, SZ_4K) + cfg->ubwc_cfg.meta_size;
+
+	if (cfg->mode == CAMSS_HW_WM_LINE)
+		VFE_WM_REG(regs, VFE_BUS_WM_IMAGE_CFG_1(wm), cfg->h_init);
+
+	if (cfg->ubwc)
+		offset = cfg->ubwc_cfg.meta_size;
+	else if (cfg->mode != CAMSS_HW_WM_LINE)
+		offset = cfg->offset;
+	else
+		offset = 0;
+
+	addr = iova + offset;
+	VFE_WM_REG(regs, VFE_BUS_WM_IMAGE_ADDR(wm), addr >> 8);
+	VFE_WM_REG(regs, VFE_BUS_WM_ADDR_CFG(wm), addr & 0xff);
+	VFE_WM_REG(regs, VFE_BUS_WM_FRAME_INCR(wm), frame_incr >> 8);
+	VFE_WM_REG(regs, VFE_BUS_WM_CFG(wm), en_cfg);
+
+	return n;
+}
+
+int vfe_780_wm_stop_regs(struct vfe_device *vfe, unsigned int wm,
+			 struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS])
+{
+	unsigned int n = 0;
+
+	VFE_WM_REG(regs, VFE_BUS_WM_CFG(wm), 0);
+
+	return n;
+}
+
+void vfe_780_write_regs(struct vfe_device *vfe, const struct camss_hw_reg *regs,
+			unsigned int n)
+{
 	unsigned int i;
 
-	for (i = 0; i < output->wm_num; i++) {
-		u8 wm = output->wm[i].bus_client;
-		u8 plane = output->wm[i].plane;
-
-		writel((pix->height >> plane) << 16 | pix->width,
-		       vfe->base + VFE_BUS_WM_IMAGE_CFG_0(wm));
-		writel(0, vfe->base + VFE_BUS_WM_IMAGE_CFG_1(wm));
-		writel(pix->plane_fmt[0].bytesperline,
-		       vfe->base + VFE_BUS_WM_IMAGE_CFG_2(wm));
-		writel(0x3, vfe->base + VFE_BUS_WM_PACKER_CFG(wm));
-
-		/* no dropped frames, one irq per frame */
-		writel(0, vfe->base + VFE_BUS_WM_FRAMEDROP_PERIOD(wm));
-		writel(1, vfe->base + VFE_BUS_WM_FRAMEDROP_PATTERN(wm));
-		writel(0, vfe->base + VFE_BUS_WM_IRQ_SUBSAMPLE_PERIOD(wm));
-		writel(1, vfe->base + VFE_BUS_WM_IRQ_SUBSAMPLE_PATTERN(wm));
-
-		writel(1, vfe->base + VFE_BUS_WM_MMU_PREFETCH_CFG(wm));
-		writel(0xFFFFFFFF, vfe->base + VFE_BUS_WM_MMU_PREFETCH_MAX_OFFSET(wm));
-
-		/* frame based */
-		writel(WM_CFG_EN, vfe->base + VFE_BUS_WM_CFG(wm));
-	}
+	for (i = 0; i < n; i++)
+		writel(regs[i].value, vfe->base + regs[i].offset);
 }
 
-/* Statistics write masters are frame based and fill the output's kernel buffer */
-static void vfe_output_start_stats(struct vfe_device *vfe, struct vfe_output *output)
+static void vfe_780_wm_start(struct vfe_device *vfe, unsigned int wm,
+			     const struct camss_hw_wm_cfg *cfg)
 {
-	u8 wm = output->wm[0].bus_client;
+	struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS];
+	int n;
 
-	writel(0, vfe->base + VFE_BUS_WM_IMAGE_CFG_0(wm));
-	writel(0, vfe->base + VFE_BUS_WM_IMAGE_CFG_1(wm));
-	writel(1, vfe->base + VFE_BUS_WM_IMAGE_CFG_2(wm));
-	writel(VFE_BUS_WM_PACKER_FMT_V3_PLAIN_64,
-	       vfe->base + VFE_BUS_WM_PACKER_CFG(wm));
-
-	/* no dropped frames, one irq per frame */
-	writel(0, vfe->base + VFE_BUS_WM_FRAMEDROP_PERIOD(wm));
-	writel(1, vfe->base + VFE_BUS_WM_FRAMEDROP_PATTERN(wm));
-	writel(0, vfe->base + VFE_BUS_WM_IRQ_SUBSAMPLE_PERIOD(wm));
-	writel(1, vfe->base + VFE_BUS_WM_IRQ_SUBSAMPLE_PATTERN(wm));
-
-	writel(1, vfe->base + VFE_BUS_WM_MMU_PREFETCH_CFG(wm));
-	writel(0xFFFFFFFF, vfe->base + VFE_BUS_WM_MMU_PREFETCH_MAX_OFFSET(wm));
-
-	writel(WM_CFG_EN | WM_CFG_MODE, vfe->base + VFE_BUS_WM_CFG(wm));
+	n = vfe_780_wm_start_regs(vfe, wm, cfg, regs);
+	if (n > 0)
+		vfe_780_write_regs(vfe, regs, n);
 }
 
-/* An RDI output has one line based write master dumping the CSI-2 payload */
-static void vfe_output_start_rdi(struct vfe_device *vfe, struct vfe_output *output)
+static void vfe_780_output_wm_cfg(struct vfe_output *output, unsigned int i,
+				  struct camss_hw_wm_cfg *cfg)
 {
 	struct v4l2_pix_format_mplane *pix = &output->video_out.active_fmt.fmt.pix_mp;
-	u8 wm = output->wm[0].bus_client;
+	u8 plane = output->wm[i].plane;
 
-	writel(ALIGN(pix->plane_fmt[0].bytesperline, 16) * pix->height >> 8,
-	       vfe->base + VFE_BUS_WM_FRAME_INCR(wm));
+	memset(cfg, 0, sizeof(*cfg));
 
-	writel((WM_IMAGE_CFG_0_DEFAULT_WIDTH & 0xFFFF),
-	       vfe->base + VFE_BUS_WM_IMAGE_CFG_0(wm));
-	writel(WM_IMAGE_CFG_2_DEFAULT_STRIDE,
-	       vfe->base + VFE_BUS_WM_IMAGE_CFG_2(wm));
-	writel(0, vfe->base + VFE_BUS_WM_PACKER_CFG(wm));
-
-	/* no dropped frames, one irq per frame */
-	writel(0, vfe->base + VFE_BUS_WM_FRAMEDROP_PERIOD(wm));
-	writel(1, vfe->base + VFE_BUS_WM_FRAMEDROP_PATTERN(wm));
-	writel(0, vfe->base + VFE_BUS_WM_IRQ_SUBSAMPLE_PERIOD(wm));
-	writel(1, vfe->base + VFE_BUS_WM_IRQ_SUBSAMPLE_PATTERN(wm));
-
-	writel(1, vfe->base + VFE_BUS_WM_MMU_PREFETCH_CFG(wm));
-	writel(0xFFFFFFFF, vfe->base + VFE_BUS_WM_MMU_PREFETCH_MAX_OFFSET(wm));
-
-	writel(WM_CFG_EN | WM_CFG_MODE, vfe->base + VFE_BUS_WM_CFG(wm));
+	if (output->pad == MSM_VFE_PAD_SRC_STATS) {
+		cfg->mode = CAMSS_HW_WM_FRAME;
+		cfg->stride = 1;
+		cfg->packer = VFE_BUS_WM_PACKER_FMT_V3_PLAIN_64;
+	} else if (output->line->is_pix) {
+		cfg->mode = CAMSS_HW_WM_LINE;
+		cfg->width = pix->width;
+		cfg->height = pix->height >> plane;
+		cfg->stride = pix->plane_fmt[0].bytesperline;
+		cfg->slice_height = pix->height >> plane;
+		cfg->packer = VFE_BUS_WM_PACKER_FMT_V3_PLAIN_8_LSB_MSB_10;
+	} else {
+		cfg->mode = CAMSS_HW_WM_FRAME;
+		cfg->width = WM_IMAGE_CFG_0_DEFAULT_WIDTH;
+		cfg->stride = ALIGN(pix->plane_fmt[0].bytesperline, 16);
+		cfg->slice_height = pix->height;
+	}
 }
 
 static void vfe_output_start(struct vfe_device *vfe, struct vfe_output *output)
 {
+	struct camss_hw_wm_cfg cfg;
+	unsigned int i;
+
 	/* no clock gating at bus input */
 	writel(WM_CGC_OVERRIDE_ALL, vfe->base + VFE_BUS_WM_CGC_OVERRIDE);
 
 	writel(0x0, vfe->base + VFE_BUS_WM_TEST_BUS_CTRL);
 
-	if (output->pad == MSM_VFE_PAD_SRC_STATS)
-		vfe_output_start_stats(vfe, output);
-	else if (output->line->is_pix)
-		vfe_output_start_pix(vfe, output);
-	else
-		vfe_output_start_rdi(vfe, output);
+	for (i = 0; i < output->wm_num; i++) {
+		vfe_780_output_wm_cfg(output, i, &cfg);
+		vfe_780_wm_start(vfe, output->wm[i].bus_client, &cfg);
+	}
 }
 
 static void vfe_output_stop(struct vfe_device *vfe, struct vfe_output *output)
 {
+	struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS];
 	unsigned int i;
+	int n;
 
-	for (i = 0; i < output->wm_num; i++)
-		writel(0, vfe->base + VFE_BUS_WM_CFG(output->wm[i].bus_client));
+	for (i = 0; i < output->wm_num; i++) {
+		n = vfe_780_wm_stop_regs(vfe, output->wm[i].bus_client, regs);
+		vfe_780_write_regs(vfe, regs, n);
+	}
 }
 
 static void vfe_output_update(struct vfe_device *vfe, struct vfe_output *output,
 			      struct camss_buffer *buf)
 {
+	struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS];
+	struct camss_hw_wm_cfg cfg;
 	unsigned int i;
 
 	for (i = 0; i < output->wm_num; i++) {
 		u8 wm = output->wm[i].bus_client;
-		u32 addr;
+		dma_addr_t addr;
+		int n;
 
 		/*
-		 * Each frame consumes one programmed address. Statistics land
-		 * in the output's kernel buffer, handed over once per queued
-		 * buffer; camss-video sets addr[1] = addr[0] + bytesperline *
-		 * height for NV12.
+		 * Statistics land in the output's kernel buffer, handed over
+		 * once per queued buffer. camss-video sets addr[1] = addr[0] +
+		 * bytesperline * height for NV12.
 		 */
 		if (output->pad == MSM_VFE_PAD_SRC_STATS)
 			addr = output->dma_addr;
 		else
 			addr = buf->addr[output->wm[i].plane];
 
-		writel(addr >> 8, vfe->base + VFE_BUS_WM_IMAGE_ADDR(wm));
+		vfe_780_output_wm_cfg(output, i, &cfg);
+		n = vfe_780_wm_update_regs(vfe, wm, &cfg, addr, 0, regs);
+		if (n > 0)
+			vfe_780_write_regs(vfe, regs, n);
 
-		dev_dbg(vfe->camss->dev, "wm:%d, image buf addr:0x%x\n",
-			wm, addr);
+		dev_dbg(vfe->camss->dev, "wm:%d, image buf addr:%pad\n",
+			wm, &addr);
 	}
 }
 

@@ -17,6 +17,7 @@
 #include <media/v4l2-isp.h>
 #include <media/v4l2-subdev.h>
 
+#include "camss-hw.h"
 #include "camss-video.h"
 #include "camss-vfe-gen1.h"
 
@@ -353,6 +354,18 @@ extern const struct vfe_hw_ops vfe_ops_480;
 extern const struct vfe_hw_ops vfe_ops_680;
 extern const struct vfe_hw_ops vfe_ops_690;
 extern const struct vfe_hw_ops vfe_ops_780;
+
+int vfe_780_wm_start_regs(struct vfe_device *vfe, unsigned int wm,
+			  const struct camss_hw_wm_cfg *cfg,
+			  struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS]);
+int vfe_780_wm_update_regs(struct vfe_device *vfe, unsigned int wm,
+			   const struct camss_hw_wm_cfg *cfg, u64 iova,
+			   unsigned int flags,
+			   struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS]);
+int vfe_780_wm_stop_regs(struct vfe_device *vfe, unsigned int wm,
+			 struct camss_hw_reg regs[CAMSS_HW_WM_MAX_REGS]);
+void vfe_780_write_regs(struct vfe_device *vfe, const struct camss_hw_reg *regs,
+			unsigned int n);
 
 int vfe_get(struct vfe_device *vfe);
 void vfe_put(struct vfe_device *vfe);
