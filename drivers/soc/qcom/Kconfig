@@ -57,6 +57,19 @@ config QCOM_GSBI
 	  functions for connecting the underlying serial UART, SPI, and I2C
 	  devices to the output pins.
 
+config QCOM_IPCLITE
+	bool "Qualcomm IPCLite shared memory protocol"
+	depends on ARCH_QCOM || COMPILE_TEST
+	depends on HWSPINLOCK
+	depends on MAILBOX
+	help
+	  Say y here to support IPCLite, the shared memory protocol that the
+	  application processor, the compute DSP, the camera ICP and the EVA
+	  processor exchange hardware fence messages and global fence state
+	  through. The driver lays out the shared memory, tells the other
+	  cores through the IPCC that it is ready, and provides the message
+	  and recovery interface that the synx driver uses.
+
 config QCOM_LLCC
 	tristate "Qualcomm LLCC driver"
 	select REGMAP_MMIO
