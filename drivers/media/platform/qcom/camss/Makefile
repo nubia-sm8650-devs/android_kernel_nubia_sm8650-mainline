@@ -35,9 +35,9 @@ qcom-camss-objs += \
 
 obj-$(CONFIG_VIDEO_QCOM_CAMSS) += qcom-camss.o
 
-qcom-camss-icp-objs += camss-icp.o \
-		       camss-icp-hfi.o
-obj-$(CONFIG_VIDEO_QCOM_CAMSS_HARD_ISP) += qcom-camss-icp.o
+qcom-camss-icp-y += camss-icp.o
+qcom-camss-icp-$(if $(CONFIG_VIDEO_QCOM_CAMSS_HARD_ISP),y) += camss-icp-hfi.o
+obj-$(CONFIG_VIDEO_QCOM_CAMSS_ICP) += qcom-camss-icp.o
 
 qcom-camss-bps-objs += camss-bps.o \
 		       camss-bps-cmd.o

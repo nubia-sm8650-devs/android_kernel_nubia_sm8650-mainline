@@ -15,32 +15,34 @@
 #include <linux/iommu.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <linux/of_platform.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
 #include <linux/soc/qcom/mdt_loader.h>
 
+#include "camss-hw.h"
 #include "camss-icp.h"
 #include "camss-icp-hfi.h"
 
 /* CSR register offsets */
 #define ICP_CSR_HW_VERSION		0x00
 #define ICP_CSR_TCM_SIZE		0x08
+#define ICP_CSR_GP			0x20
 #define ICP_CSR_DBG_STATUS		0x44
 #define ICP_CSR_DBG_CTRL		0x48
 
-/* CIRQ register offsets */
-#define CIRQ_OB_MASK			0x00
-#define CIRQ_OB_STATUS			0x04
-#define CIRQ_OB_CLEAR			0x08
-#define CIRQ_HOST2ICPINT		0x124
+#define ICP_WD_CTRL			0x08
+#define ICP_WD_INTCLR			0x0c
 
-/* CIRQ bits */
-#define CIRQ_ICP2HOSTINT		BIT(0)
-#define CIRQ_WDT_BITE_WS0		BIT(6)
+#define ICP_TZ_STATE_SUSPEND		0
+#define ICP_TZ_STATE_RESUME		1
+
+#define ICP_EV_WDOG			0
 
 #define ICP_CLK_MAX			32
 
@@ -51,26 +53,44 @@
 #define HFI_POLL_DELAY_US		100
 #define HFI_POLL_TIMEOUT_US		2000000
 
+struct camss_icp_irq_regs {
+	u32 mask;
+	u32 status;
+	u32 clear;
+	u32 cmd;
+	u32 host2icp;
+	u32 host_irq;
+	u32 wdog_bite;
+	u32 clear_cmd;
+};
+
 /* ICC paths */
 #define HFI_MAX_ICC_PATHS		4
 struct camss_icp_resources {
 	int pas_id;
-	const char ** const clk_names;
+	const char * const *clk_names;
 	int clk_num;
-	const char ** const noc_names;
+	const char * const *noc_names;
 	int noc_num;
+	const unsigned long *rates;
+	unsigned int rate_num;
+	const struct camss_icp_irq_regs *irq_regs;
+	bool irq_regs_in_csr;
+	bool hfi_boot;
 	struct hfi_resources hfi_res;
 };
 
 struct camss_icp {
 	struct device *dev;
 	void __iomem *csr_base;
-	void __iomem *cirq_base;
+	void __iomem *irq_base;
+	void __iomem *wd_base;
 	int irq;
 
 	struct dev_pm_domain_list *pd_list;
 
 	struct clk_bulk_data clks[ICP_CLK_MAX];
+	struct clk *core_clk;
 	struct icc_path *icc_path[HFI_MAX_ICC_PATHS];
 
 	struct icp_hfi hfi;
@@ -79,6 +99,16 @@ struct camss_icp {
 	size_t fw_size;
 
 	const struct camss_icp_resources *icp_res;
+
+	/* serializes the claim, power and firmware state below */
+	struct mutex lock;
+	const struct camss_hw_icp_ops *ops;
+	void *priv;
+	bool claimed;
+	bool powered;
+	bool booted;
+	bool hfi_running;
+	unsigned long events;
 };
 
 struct icp_hfi *icp_hfi_get(struct device *dev)
@@ -107,16 +137,86 @@ EXPORT_SYMBOL(icp_hfi_put);
 static void icp_raise_irq(void *priv)
 {
 	struct camss_icp *icp = priv;
+	const struct camss_icp_irq_regs *regs = icp->icp_res->irq_regs;
 
 	dev_dbg(icp->dev, "Raising HOST2ICPINT (CIRQ STATUS before: 0x%x)\n",
-		readl(icp->cirq_base + CIRQ_OB_STATUS));
+		readl(icp->irq_base + regs->status));
 
-	writel(1, icp->cirq_base + CIRQ_HOST2ICPINT);
+	writel(1, icp->irq_base + regs->host2icp);
 
 	/* Small delay then check if anything changed */
 	udelay(100);
 	dev_dbg(icp->dev, "CIRQ STATUS after HOST2ICPINT: 0x%x\n",
-		readl(icp->cirq_base + CIRQ_OB_STATUS));
+		readl(icp->irq_base + regs->status));
+}
+
+static int icp_power_on(struct camss_icp *icp)
+{
+	const struct camss_icp_resources *icp_res = icp->icp_res;
+	int i, ret;
+
+	ret = pm_runtime_resume_and_get(icp->dev);
+	if (ret) {
+		dev_err(icp->dev, "Failed to power on: %d\n", ret);
+		return ret;
+	}
+
+	if (icp_res->rate_num) {
+		ret = clk_set_rate(icp->core_clk, icp_res->rates[0]);
+		if (ret) {
+			dev_err(icp->dev, "Failed to set the ICP rate: %d\n", ret);
+			goto err_pm;
+		}
+	}
+
+	ret = clk_bulk_prepare_enable(icp_res->clk_num, icp->clks);
+	if (ret) {
+		dev_err(icp->dev, "Failed to enable clocks: %d\n", ret);
+		goto err_pm;
+	}
+
+	for (i = 0; i < icp_res->noc_num; i++) {
+		if (!icp->icc_path[i])
+			continue;
+
+		dev_dbg(icp->dev, "Voting for BW now %s\n", icp_res->noc_names[i]);
+		ret = icc_set_bw(icp->icc_path[i], 100000000, 1000000000);
+		if (ret) {
+			dev_err(icp->dev, "Voting for %s failed\n", icp_res->noc_names[i]);
+			goto err_icc;
+		}
+	}
+
+	icp->powered = true;
+	enable_irq(icp->irq);
+
+	return 0;
+
+err_icc:
+	while (i--)
+		if (icp->icc_path[i])
+			icc_set_bw(icp->icc_path[i], 0, 0);
+	clk_bulk_disable_unprepare(icp_res->clk_num, icp->clks);
+err_pm:
+	pm_runtime_put_sync(icp->dev);
+	return ret;
+}
+
+static void icp_power_off(struct camss_icp *icp)
+{
+	const struct camss_icp_resources *icp_res = icp->icp_res;
+	int i;
+
+	disable_irq(icp->irq);
+	icp->powered = false;
+
+	for (i = 0; i < icp_res->noc_num; i++)
+		if (icp->icc_path[i])
+			icc_set_bw(icp->icc_path[i], 0, 0);
+
+	clk_bulk_disable_unprepare(icp_res->clk_num, icp->clks);
+
+	pm_runtime_put_sync(icp->dev);
 }
 
 /* Load firmware */
@@ -127,7 +227,6 @@ static int icp_load_firmware(struct camss_icp *icp)
 	struct device_node *node;
 	struct resource res;
 	const char *fw_name;
-	char fw_path[64];
 	void *vaddr;
 	ssize_t fw_size;
 	int ret;
@@ -135,8 +234,6 @@ static int icp_load_firmware(struct camss_icp *icp)
 	ret = of_property_read_string(icp->dev->of_node, "firmware-name", &fw_name);
 	if (ret)
 		return ret;
-
-	snprintf(fw_path, sizeof(fw_path), "%s.mdt", fw_name);
 
 	node = of_parse_phandle(icp->dev->of_node, "memory-region", 0);
 	if (!node)
@@ -150,9 +247,11 @@ static int icp_load_firmware(struct camss_icp *icp)
 	dev_dbg(icp->dev, "FW memory: phys=0x%pa size=%llu\n",
 		&res.start, resource_size(&res));
 
-	ret = firmware_request_nowarn(&fw, fw_path, icp->dev);
-	if (ret)
+	ret = firmware_request_nowarn(&fw, fw_name, icp->dev);
+	if (ret) {
+		dev_err(icp->dev, "Failed to request %s: %d\n", fw_name, ret);
 		return ret;
+	}
 
 	fw_size = qcom_mdt_get_size(fw);
 	if (fw_size < 0 || (size_t)fw_size > resource_size(&res)) {
@@ -166,13 +265,13 @@ static int icp_load_firmware(struct camss_icp *icp)
 		return -ENOMEM;
 	}
 
-	ret = qcom_mdt_load(icp->dev, fw, fw_path, icp_res->pas_id, vaddr,
+	ret = qcom_mdt_load(icp->dev, fw, fw_name, icp_res->pas_id, vaddr,
 			    res.start, resource_size(&res), NULL);
 	iounmap(vaddr);
 	release_firmware(fw);
 
 	if (ret == 0) {
-		dev_dbg(icp->dev, "Firmware loaded: %s (%zd bytes)\n", fw_path, fw_size);
+		dev_dbg(icp->dev, "Firmware loaded: %s (%zd bytes)\n", fw_name, fw_size);
 		icp->fw_phys = res.start;
 		icp->fw_size = fw_size;
 	}
@@ -183,14 +282,11 @@ static int icp_load_firmware(struct camss_icp *icp)
 static irqreturn_t camss_icp_isr_thread(int irq, void *data)
 {
 	struct camss_icp *icp = data;
-	u32 status;
 
-	/* Re-read status for logging */
-	status = readl(icp->cirq_base + CIRQ_OB_STATUS);
+	if (!IS_ENABLED(CONFIG_VIDEO_QCOM_CAMSS_HARD_ISP))
+		return IRQ_HANDLED;
 
-	dev_dbg(icp->dev, "IRQ thread: status=0x%x\n", status);
-
-	if (status & CIRQ_WDT_BITE_WS0) {
+	if (test_and_clear_bit(ICP_EV_WDOG, &icp->events)) {
 		dev_err(icp->dev, "ICP watchdog bite!\n");
 		icp_hfi_dump_sfr(&icp->hfi);
 	}
@@ -207,21 +303,39 @@ static irqreturn_t camss_icp_isr_thread(int irq, void *data)
 static irqreturn_t camss_icp_isr(int irq, void *data)
 {
 	struct camss_icp *icp = data;
+	const struct camss_icp_irq_regs *regs = icp->icp_res->irq_regs;
+	const struct camss_hw_icp_ops *ops;
+	bool wdog;
 	u32 status;
 
-	dev_dbg(icp->dev, "IRQ ISR\n");
+	status = readl(icp->irq_base + regs->status);
+	writel(status, icp->irq_base + regs->clear);
+	if (regs->clear_cmd)
+		writel(regs->clear_cmd, icp->irq_base + regs->cmd);
 
-	status = readl(icp->cirq_base + CIRQ_OB_STATUS);
+	wdog = status & regs->wdog_bite;
+	if (wdog) {
+		writel(0, icp->wd_base + ICP_WD_CTRL);
+		writel(1, icp->wd_base + ICP_WD_INTCLR);
+	}
+
+	ops = smp_load_acquire(&icp->ops);
+	if (ops) {
+		ops->irq(icp->priv, wdog);
+		return IRQ_HANDLED;
+	}
+
 	if (!status)
 		return IRQ_NONE;
 
-	writel(status, icp->cirq_base + CIRQ_OB_CLEAR);
+	if (wdog)
+		set_bit(ICP_EV_WDOG, &icp->events);
 
 	return IRQ_WAKE_THREAD;
 }
 
 /* Dump GP registers for debugging */
-void icp_dump_gp_regs(struct camss_icp *icp, const char *label)
+static void icp_dump_gp_regs(struct camss_icp *icp, const char *label)
 {
 	u32 regs[20];
 	int i;
@@ -237,10 +351,9 @@ void icp_dump_gp_regs(struct camss_icp *icp, const char *label)
 			 0x20 + i * 4, regs[i], regs[i+1], regs[i+2], regs[i+3]);
 }
 
-void icp_hfi_latch_regs(struct camss_icp *icp)
+static void icp_hfi_latch_regs(struct camss_icp *icp)
 {
 	struct icp_hfi *hfi = &icp->hfi;
-	struct device *dev = hfi->dev;
 
 	/* Shared memory */
 	writel(hfi->hfi_mem.shmem.dma_addr, icp->csr_base + HFI_REG_SHARED_MEM_PTR);
@@ -280,33 +393,13 @@ static const struct icp_hfi_ops hfi_ops = {
 static int icp_boot(struct camss_icp *icp)
 {
 	const struct camss_icp_resources *icp_res = icp->icp_res;
+	const struct camss_icp_irq_regs *regs = icp_res->irq_regs;
 	u32 hw_version, data;
-	int i, ret;
+	int ret;
 
-	/* Power on all domains via runtime PM */
-	ret = pm_runtime_resume_and_get(icp->dev);
-	if (ret) {
-		dev_err(icp->dev, "Failed to power on: %d\n", ret);
+	ret = icp_power_on(icp);
+	if (ret)
 		return ret;
-	}
-
-	/* Enable clocks */
-	ret = clk_bulk_prepare_enable(icp_res->clk_num, icp->clks);
-	if (ret) {
-		dev_err(icp->dev, "Failed to enable clocks: %d\n", ret);
-		return ret;
-	}
-
-	for (i = 0; i < icp_res->noc_num; i++) {
-		if (icp->icc_path[i]) {
-			dev_dbg(icp->dev, "Voting for BW now %s\n", icp_res->noc_names[i]);
-			ret = icc_set_bw(icp->icc_path[i], 100000000, 1000000000);
-			if (ret) {
-				dev_err(icp->dev, "Voting for %s failed\n", icp_res->noc_names[i]);
-				return ret;
-			}
-		}
-	}
 
 	/* Verify HW version */
 	hw_version = readl(icp->csr_base + ICP_CSR_HW_VERSION);
@@ -315,22 +408,22 @@ static int icp_boot(struct camss_icp *icp)
 	if (hw_version == 0 || hw_version == 0xffffffff) {
 		dev_err(icp->dev, "Invalid HW version\n");
 		ret = -EIO;
-		goto err_clk;
+		goto err_power;
 	}
 
 	/* Configure interrupts */
-	writel(0x7f, icp->cirq_base + CIRQ_OB_CLEAR);
-	writel(CIRQ_ICP2HOSTINT | CIRQ_WDT_BITE_WS0, icp->cirq_base + CIRQ_OB_MASK);
+	writel(0x7f, icp->irq_base + regs->clear);
+	writel(regs->host_irq | regs->wdog_bite, icp->irq_base + regs->mask);
 
 	/* Load firmware */
 	ret = icp_load_firmware(icp);
 	if (ret)
-		goto err_clk;
+		goto err_power;
 
 	/* Allocate HFI queues */
 	ret = icp_hfi_init_queues(&icp->hfi);
 	if (ret)
-		goto err_clk;
+		goto err_power;
 
 	/* Start firmware via TrustZone */
 	ret = qcom_scm_pas_auth_and_reset(icp_res->pas_id);
@@ -384,7 +477,7 @@ static int icp_boot(struct camss_icp *icp)
 		icp_dump_gp_regs(icp, "FW READY TIMEOUT");
 		icp_hfi_dump_sfr(&icp->hfi);
 		ret = -ETIMEDOUT;
-		goto err_hfi;
+		goto err_pas;
 	}
 
 	/* Read firmware version from GP1 */
@@ -393,8 +486,8 @@ static int icp_boot(struct camss_icp *icp)
 
 	/* Dump CIRQ state after FW init */
 	dev_info(icp->dev, "CIRQ after FW init: MASK=0x%x STATUS=0x%x\n",
-		 readl(icp->cirq_base + CIRQ_OB_MASK),
-		 readl(icp->cirq_base + CIRQ_OB_STATUS));
+		 readl(icp->irq_base + regs->mask),
+		 readl(icp->irq_base + regs->status));
 
 	/* Dump GP registers to verify what firmware sees */
 	dev_info(icp->dev, "GP registers after FW init:\n");
@@ -423,17 +516,313 @@ static int icp_boot(struct camss_icp *icp)
 	dev_info(icp->dev, "  GP18 (FWUNC_SIZE):   0x%08x (we wrote: 0x%08x)\n",
 		 readl(icp->csr_base + HFI_REG_FWUNCACHED_SIZE), HFI_FWUNCACHED_SIZE);
 
+	icp->booted = true;
+	icp->hfi_running = true;
+
 	return 0;
+err_pas:
+	qcom_scm_pas_shutdown(icp_res->pas_id);
 err_hfi:
 	icp_hfi_deinit_queues(&icp->hfi);
-err_clk:
-	for (i = 0; i < icp_res->noc_num; i++) {
-		if (icp->icc_path[i])
-			icc_set_bw(icp->icc_path[i], 0, 0);
-	}
-	clk_bulk_disable_unprepare(icp_res->clk_num, icp->clks);
+err_power:
+	icp_power_off(icp);
 	return ret;
 }
+
+/**
+ * camss_hw_icp_get - look up the ICP of a camera subsystem
+ * @consumer: device that will claim the ICP
+ * @np: ICP node
+ *
+ * The consumer is unbound before the ICP goes away.
+ *
+ * Return: the ICP, or -EPROBE_DEFER until the ICP has probed
+ */
+struct camss_icp *camss_hw_icp_get(struct device *consumer,
+				   struct device_node *np)
+{
+	struct platform_device *pdev;
+	struct device_link *link;
+	struct camss_icp *icp;
+
+	pdev = of_find_device_by_node(np);
+	if (!pdev)
+		return ERR_PTR(-EPROBE_DEFER);
+
+	icp = platform_get_drvdata(pdev);
+	if (!icp) {
+		put_device(&pdev->dev);
+		return ERR_PTR(-EPROBE_DEFER);
+	}
+
+	link = device_link_add(consumer, &pdev->dev, DL_FLAG_AUTOREMOVE_CONSUMER);
+	put_device(&pdev->dev);
+	if (!link)
+		return ERR_PTR(-EINVAL);
+
+	return icp;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_icp_get, "QCOM_CAMSS");
+
+/**
+ * camss_hw_icp_claim - take the ICP for a client that runs its own HFI
+ * @icp: ICP from camss_hw_icp_get()
+ * @ops: callbacks
+ * @priv: argument of the callbacks
+ *
+ * The client brings up the HFI queues through the GP registers from
+ * camss_hw_icp_gp_regs() and gets every ICP interrupt through @ops.
+ *
+ * Return: 0, or -EBUSY if another client holds the ICP
+ */
+int camss_hw_icp_claim(struct camss_icp *icp,
+		       const struct camss_hw_icp_ops *ops, void *priv)
+{
+	int ret = 0;
+
+	mutex_lock(&icp->lock);
+	if (icp->claimed || icp->hfi_running) {
+		ret = -EBUSY;
+	} else {
+		icp->claimed = true;
+		icp->priv = priv;
+		smp_store_release(&icp->ops, ops);
+	}
+	mutex_unlock(&icp->lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_icp_claim, "QCOM_CAMSS");
+
+/**
+ * camss_hw_icp_release - give up an ICP claim
+ * @icp: claimed ICP
+ *
+ * Shuts the firmware down and powers the ICP off if the client left them
+ * up. No callback runs once this returns.
+ */
+void camss_hw_icp_release(struct camss_icp *icp)
+{
+	mutex_lock(&icp->lock);
+
+	if (icp->booted) {
+		qcom_scm_pas_shutdown(icp->icp_res->pas_id);
+		icp->booted = false;
+	}
+
+	if (icp->powered)
+		icp_power_off(icp);
+
+	WRITE_ONCE(icp->ops, NULL);
+	synchronize_irq(icp->irq);
+	icp->priv = NULL;
+	icp->claimed = false;
+
+	mutex_unlock(&icp->lock);
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_icp_release, "QCOM_CAMSS");
+
+/**
+ * camss_hw_icp_power - power a claimed ICP on or off
+ * @icp: claimed ICP
+ * @on: power state
+ *
+ * Power on enables the ICP clocks at the lowest rate and the ICP
+ * interrupt. Powering to the current state does nothing.
+ */
+int camss_hw_icp_power(struct camss_icp *icp, bool on)
+{
+	int ret = 0;
+
+	mutex_lock(&icp->lock);
+
+	if (!icp->claimed)
+		ret = -EPERM;
+	else if (on && !icp->powered)
+		ret = icp_power_on(icp);
+	else if (!on && icp->powered)
+		icp_power_off(icp);
+
+	mutex_unlock(&icp->lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_icp_power, "QCOM_CAMSS");
+
+/**
+ * camss_hw_icp_set_clk_rate - set the ICP core clock
+ * @icp: claimed ICP
+ * @rate: minimum rate in Hz
+ * @applied: the lowest supported rate not below @rate
+ *
+ * A powered off ICP comes back at the lowest rate, so the request only
+ * applies while the ICP is powered.
+ *
+ * Return: 0 on success, -ERANGE if @rate is above every supported rate
+ */
+int camss_hw_icp_set_clk_rate(struct camss_icp *icp, unsigned long rate,
+			      unsigned long *applied)
+{
+	const struct camss_icp_resources *icp_res = icp->icp_res;
+	unsigned int i;
+	int ret = 0;
+
+	for (i = 0; i < icp_res->rate_num; i++)
+		if (icp_res->rates[i] >= rate)
+			break;
+
+	if (i == icp_res->rate_num)
+		return -ERANGE;
+
+	mutex_lock(&icp->lock);
+
+	if (!icp->claimed)
+		ret = -EPERM;
+	else if (icp->powered)
+		ret = clk_set_rate(icp->core_clk, icp_res->rates[i]);
+
+	mutex_unlock(&icp->lock);
+
+	if (!ret)
+		*applied = icp_res->rates[i];
+
+	return ret;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_icp_set_clk_rate, "QCOM_CAMSS");
+
+/**
+ * camss_hw_icp_boot - load the ICP firmware and take the ICP out of reset
+ * @icp: claimed and powered ICP
+ *
+ * Loads firmware-name into memory-region and has TrustZone authenticate
+ * and start it. The HFI handshake is up to the client.
+ */
+int camss_hw_icp_boot(struct camss_icp *icp)
+{
+	int ret;
+
+	mutex_lock(&icp->lock);
+
+	if (!icp->claimed || !icp->powered) {
+		ret = -EPERM;
+		goto out;
+	}
+
+	if (icp->booted) {
+		ret = -EBUSY;
+		goto out;
+	}
+
+	ret = icp_load_firmware(icp);
+	if (ret) {
+		dev_err(icp->dev, "Failed to load the firmware: %d\n", ret);
+		goto out;
+	}
+
+	ret = qcom_scm_pas_auth_and_reset(icp->icp_res->pas_id);
+	if (ret) {
+		dev_err(icp->dev, "TZ auth_and_reset failed: %d\n", ret);
+		goto out;
+	}
+
+	icp->booted = true;
+
+out:
+	mutex_unlock(&icp->lock);
+	return ret;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_icp_boot, "QCOM_CAMSS");
+
+/**
+ * camss_hw_icp_shutdown - stop the ICP firmware through TrustZone
+ * @icp: claimed ICP
+ */
+int camss_hw_icp_shutdown(struct camss_icp *icp)
+{
+	int ret = 0;
+
+	mutex_lock(&icp->lock);
+
+	if (!icp->claimed) {
+		ret = -EPERM;
+	} else if (icp->booted) {
+		ret = qcom_scm_pas_shutdown(icp->icp_res->pas_id);
+		icp->booted = false;
+	}
+
+	mutex_unlock(&icp->lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_icp_shutdown, "QCOM_CAMSS");
+
+/**
+ * camss_hw_icp_set_state - suspend or resume the ICP core through TrustZone
+ * @icp: claimed ICP with its firmware running
+ * @resume: resume when set, suspend otherwise
+ *
+ * Suspend follows the firmware's acknowledgement of HFI PC_PREP, resume
+ * comes before the client rewrites the HFI registers.
+ */
+int camss_hw_icp_set_state(struct camss_icp *icp, bool resume)
+{
+	int ret;
+
+	mutex_lock(&icp->lock);
+
+	if (!icp->claimed || !icp->booted)
+		ret = -EPERM;
+	else
+		ret = qcom_scm_set_remote_state(resume ? ICP_TZ_STATE_RESUME :
+						ICP_TZ_STATE_SUSPEND,
+						icp->icp_res->pas_id);
+
+	mutex_unlock(&icp->lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_icp_set_state, "QCOM_CAMSS");
+
+/**
+ * camss_hw_icp_irq_enable - unmask the host and watchdog bite interrupts
+ * @icp: claimed and powered ICP
+ */
+void camss_hw_icp_irq_enable(struct camss_icp *icp)
+{
+	const struct camss_icp_irq_regs *regs = icp->icp_res->irq_regs;
+
+	if (WARN_ON_ONCE(!icp->powered))
+		return;
+
+	writel(regs->host_irq | regs->wdog_bite, icp->irq_base + regs->mask);
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_icp_irq_enable, "QCOM_CAMSS");
+
+/**
+ * camss_hw_icp_raise_irq - interrupt the ICP firmware
+ * @icp: claimed and powered ICP
+ */
+void camss_hw_icp_raise_irq(struct camss_icp *icp)
+{
+	if (WARN_ON_ONCE(!icp->powered))
+		return;
+
+	writel(1, icp->irq_base + icp->icp_res->irq_regs->host2icp);
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_icp_raise_irq, "QCOM_CAMSS");
+
+/**
+ * camss_hw_icp_gp_regs - the general purpose registers of the ICP CSR
+ * @icp: claimed ICP
+ *
+ * The HFI handshake runs through these. They are only accessible while
+ * the ICP is powered.
+ */
+void __iomem *camss_hw_icp_gp_regs(struct camss_icp *icp)
+{
+	return icp->csr_base + ICP_CSR_GP;
+}
+EXPORT_SYMBOL_NS_GPL(camss_hw_icp_gp_regs, "QCOM_CAMSS");
 
 static int camss_icp_probe(struct platform_device *pdev)
 {
@@ -457,15 +846,25 @@ static int camss_icp_probe(struct platform_device *pdev)
 	icp->hfi.dev = icp->dev;
 	icp->hfi.priv = icp;
 
-	platform_set_drvdata(pdev, icp);
+	ret = devm_mutex_init(&pdev->dev, &icp->lock);
+	if (ret)
+		return ret;
 
 	icp->csr_base = devm_platform_ioremap_resource_byname(pdev, "csr");
 	if (IS_ERR(icp->csr_base))
 		return PTR_ERR(icp->csr_base);
 
-	icp->cirq_base = devm_platform_ioremap_resource_byname(pdev, "cirq");
-	if (IS_ERR(icp->cirq_base))
-		return PTR_ERR(icp->cirq_base);
+	if (icp_res->irq_regs_in_csr) {
+		icp->irq_base = icp->csr_base;
+	} else {
+		icp->irq_base = devm_platform_ioremap_resource_byname(pdev, "cirq");
+		if (IS_ERR(icp->irq_base))
+			return PTR_ERR(icp->irq_base);
+	}
+
+	icp->wd_base = devm_platform_ioremap_resource_byname(pdev, "wd");
+	if (IS_ERR(icp->wd_base))
+		return PTR_ERR(icp->wd_base);
 
 	icp->irq = platform_get_irq(pdev, 0);
 	if (icp->irq < 0)
@@ -495,6 +894,15 @@ static int camss_icp_probe(struct platform_device *pdev)
 		goto err_pd;
 	}
 
+	for (i = 0; i < icp_res->clk_num; i++)
+		if (!strcmp(icp->clks[i].id, "core"))
+			icp->core_clk = icp->clks[i].clk;
+
+	if (icp_res->rate_num && !icp->core_clk) {
+		ret = -EINVAL;
+		goto err_pd;
+	}
+
 	for (i = 0; i < icp_res->noc_num; i++) {
 		icp->icc_path[i] = devm_of_icc_get(&pdev->dev, icp_res->noc_names[i]);
 		if (IS_ERR(icp->icc_path[i])) {
@@ -508,22 +916,28 @@ static int camss_icp_probe(struct platform_device *pdev)
 
 	ret = devm_request_threaded_irq(&pdev->dev, icp->irq, camss_icp_isr,
 					camss_icp_isr_thread,
-					IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+					IRQF_ONESHOT | IRQF_NO_AUTOEN,
 					"camss-icp", icp);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to request IRQ: %d\n", ret);
 		goto err_pd;
 	}
 
-	pm_runtime_enable(&pdev->dev);
-
-	ret = icp_boot(icp);
+	ret = devm_pm_runtime_enable(&pdev->dev);
 	if (ret)
 		goto err_pd;
 
-	ret = icp_hfi_core_init(&icp->hfi);
-	if (ret)
-		goto err_pd;
+	if (IS_ENABLED(CONFIG_VIDEO_QCOM_CAMSS_HARD_ISP) && icp_res->hfi_boot) {
+		ret = icp_boot(icp);
+		if (ret)
+			goto err_pd;
+
+		ret = icp_hfi_core_init(&icp->hfi);
+		if (ret)
+			goto err_pd;
+	}
+
+	platform_set_drvdata(pdev, icp);
 
 	return 0;
 
@@ -537,19 +951,12 @@ err_pd:
 static void camss_icp_remove(struct platform_device *pdev)
 {
 	struct camss_icp *icp = platform_get_drvdata(pdev);
-	const struct camss_icp_resources *icp_res;
-	int i;
 
-	icp_res = icp->icp_res;
-	qcom_scm_pas_shutdown(icp_res->pas_id);
-
-	icp_hfi_deinit_queues(&icp->hfi);
-
-	for (i = 0; i < icp_res->noc_num; i++) {
-		if (icp->icc_path[i])
-			icc_set_bw(icp->icc_path[i], 0, 0);
+	if (IS_ENABLED(CONFIG_VIDEO_QCOM_CAMSS_HARD_ISP) && icp->hfi_running) {
+		qcom_scm_pas_shutdown(icp->icp_res->pas_id);
+		icp_hfi_deinit_queues(&icp->hfi);
+		icp_power_off(icp);
 	}
-	clk_bulk_disable_unprepare(icp_res->clk_num, icp->clks);
 
 	if (icp->pd_list)
 		dev_pm_domain_detach_list(icp->pd_list);
@@ -573,12 +980,23 @@ static const char * const x1e80100_noc_names [] = {
 	"sf_icp"
 };
 
-struct camss_icp_resources x1e80100_icp_res = {
+static const struct camss_icp_irq_regs x1e80100_icp_irq_regs = {
+	.mask = 0x00,
+	.status = 0x04,
+	.clear = 0x08,
+	.host2icp = 0x124,
+	.host_irq = BIT(0),
+	.wdog_bite = BIT(6),
+};
+
+static const struct camss_icp_resources x1e80100_icp_res = {
 	.pas_id = 33,
 	.clk_names = x1e80100_clk_names,
 	.clk_num = ARRAY_SIZE(x1e80100_clk_names),
 	.noc_names = x1e80100_noc_names,
 	.noc_num = ARRAY_SIZE(x1e80100_noc_names),
+	.irq_regs = &x1e80100_icp_irq_regs,
+	.hfi_boot = true,
 	.hfi_res = {
 		.shmem_size = SZ_1M,	 // change to 0x0FC00000 per downstream ?
 		.qdss_size = SZ_1M,
@@ -602,7 +1020,37 @@ struct camss_icp_resources x1e80100_icp_res = {
 	},
 };
 
+static const char * const sm8650_icp_clk_names[] = {
+	"ahb", "core", "debug_xo",
+};
+
+static const unsigned long sm8650_icp_rates[] = {
+	400000000, 480000000, 600000000,
+};
+
+static const struct camss_icp_irq_regs icp_v2_1_irq_regs = {
+	.mask = 0x200,
+	.clear = 0x204,
+	.status = 0x20c,
+	.cmd = 0x210,
+	.host2icp = 0x300,
+	.host_irq = BIT(2),
+	.wdog_bite = BIT(4),
+	.clear_cmd = BIT(1),
+};
+
+static const struct camss_icp_resources sm8650_icp_res = {
+	.pas_id = 33,
+	.clk_names = sm8650_icp_clk_names,
+	.clk_num = ARRAY_SIZE(sm8650_icp_clk_names),
+	.rates = sm8650_icp_rates,
+	.rate_num = ARRAY_SIZE(sm8650_icp_rates),
+	.irq_regs = &icp_v2_1_irq_regs,
+	.irq_regs_in_csr = true,
+};
+
 static const struct of_device_id camss_icp_of_match[] = {
+	{ .compatible = "qcom,sm8650-camss-icp", .data = &sm8650_icp_res },
 	{ .compatible = "qcom,x1e80100-camss-icp", .data = &x1e80100_icp_res},
 	{ }
 };

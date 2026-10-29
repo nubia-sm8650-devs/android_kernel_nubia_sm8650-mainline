@@ -12,11 +12,22 @@ config VIDEO_QCOM_CAMSS
 	select GENERIC_PHY
 	imply PHY_QCOM_MIPI_CSI2
 
-config VIDEO_QCOM_CAMSS_HARD_ISP
-	tristate "Qualcomm CAMSS Hardware ISP (ICP/IPE/BPS)"
+config VIDEO_QCOM_CAMSS_ICP
+	tristate "Qualcomm CAMSS ICP"
 	depends on VIDEO_QCOM_CAMSS
 	depends on QCOM_MDT_LOADER
 	depends on QCOM_SCM
+	help
+	  Enable the ICP (Image Control Processor) core of Qualcomm camera
+	  subsystems. It powers the ICP, loads its firmware through
+	  TrustZone and hands the processor to a client that runs the HFI.
+
+	  To compile this as a module, choose M here. The module will be
+	  called qcom-camss-icp.
+
+config VIDEO_QCOM_CAMSS_HARD_ISP
+	tristate "Qualcomm CAMSS Hardware ISP (ICP/IPE/BPS)"
+	depends on VIDEO_QCOM_CAMSS_ICP
 	depends on VIDEO_DEV
 	select VIDEOBUF2_DMA_CONTIG
 	select V4L2_MEM2MEM_DEV

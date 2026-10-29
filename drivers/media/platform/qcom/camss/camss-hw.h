@@ -208,6 +208,32 @@ int camss_hw_tpg_power(struct camss_hw_tpg *claim, bool on);
 void __iomem *camss_hw_tpg_regs(struct camss_hw_tpg *claim,
 				resource_size_t *size);
 
+struct camss_icp;
+
+/**
+ * struct camss_hw_icp_ops - callbacks of an ICP claim
+ * @irq: runs in the hard IRQ handler after the interrupt status is cleared,
+ *       with @wdog set on a watchdog bite
+ */
+struct camss_hw_icp_ops {
+	void (*irq)(void *priv, bool wdog);
+};
+
+struct camss_icp *camss_hw_icp_get(struct device *consumer,
+				   struct device_node *np);
+int camss_hw_icp_claim(struct camss_icp *icp,
+		       const struct camss_hw_icp_ops *ops, void *priv);
+void camss_hw_icp_release(struct camss_icp *icp);
+int camss_hw_icp_power(struct camss_icp *icp, bool on);
+int camss_hw_icp_set_clk_rate(struct camss_icp *icp, unsigned long rate,
+			      unsigned long *applied);
+int camss_hw_icp_boot(struct camss_icp *icp);
+int camss_hw_icp_shutdown(struct camss_icp *icp);
+int camss_hw_icp_set_state(struct camss_icp *icp, bool resume);
+void camss_hw_icp_irq_enable(struct camss_icp *icp);
+void camss_hw_icp_raise_irq(struct camss_icp *icp);
+void __iomem *camss_hw_icp_gp_regs(struct camss_icp *icp);
+
 int camss_hw_csid_rx(struct camss_hw_pipe *pipe,
 		     const struct camss_hw_rx_cfg *cfg);
 int camss_hw_path_config(struct camss_hw_pipe *pipe, enum camss_hw_path path,
