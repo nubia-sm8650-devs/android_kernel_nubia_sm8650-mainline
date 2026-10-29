@@ -3486,22 +3486,6 @@ int genpd_dev_pm_attach(struct device *dev)
 }
 EXPORT_SYMBOL_GPL(genpd_dev_pm_attach);
 
-/**
- * genpd_dev_pm_attach_by_id - Associate a device with one of its PM domains.
- * @dev: The device used to lookup the PM domain.
- * @index: The index of the PM domain.
- *
- * Parse device's OF node to find a PM domain specifier at the provided @index.
- * If such is found, creates a virtual device and attaches it to the retrieved
- * pm_domain ops. To deal with detaching of the virtual device, the ->detach()
- * callback in the struct dev_pm_domain are assigned to genpd_dev_pm_detach().
- *
- * Returns the created virtual device if successfully attached PM domain, NULL
- * when the device don't need a PM domain, else an ERR_PTR() in case of
- * failures. If a power-domain exists for the device, but cannot be found or
- * turned on, then ERR_PTR(-EPROBE_DEFER) is returned to ensure that the device
- * is not probed and to re-try again later.
- */
 static struct device *__genpd_dev_pm_attach_by_id(struct device *dev,
 						  unsigned int index,
 						  const char *suffix)
@@ -3555,6 +3539,22 @@ static struct device *__genpd_dev_pm_attach_by_id(struct device *dev,
 	return virt_dev;
 }
 
+/**
+ * genpd_dev_pm_attach_by_id - Associate a device with one of its PM domains.
+ * @dev: The device used to lookup the PM domain.
+ * @index: The index of the PM domain.
+ *
+ * Parse device's OF node to find a PM domain specifier at the provided @index.
+ * If such is found, creates a virtual device and attaches it to the retrieved
+ * pm_domain ops. To deal with detaching of the virtual device, the ->detach()
+ * callback in the struct dev_pm_domain are assigned to genpd_dev_pm_detach().
+ *
+ * Returns the created virtual device if successfully attached PM domain, NULL
+ * when the device don't need a PM domain, else an ERR_PTR() in case of
+ * failures. If a power-domain exists for the device, but cannot be found or
+ * turned on, then ERR_PTR(-EPROBE_DEFER) is returned to ensure that the device
+ * is not probed and to re-try again later.
+ */
 struct device *genpd_dev_pm_attach_by_id(struct device *dev,
 					 unsigned int index)
 {
@@ -3562,6 +3562,18 @@ struct device *genpd_dev_pm_attach_by_id(struct device *dev,
 }
 EXPORT_SYMBOL_GPL(genpd_dev_pm_attach_by_id);
 
+/**
+ * genpd_dev_pm_attach_by_id_suffix - Attach a named virtual device to a PM domain.
+ * @dev: The device used to lookup the PM domain.
+ * @index: The index of the PM domain.
+ * @suffix: Suffix appended to the virtual device name.
+ *
+ * Same as genpd_dev_pm_attach_by_id(), but names the virtual device after
+ * @suffix, so that one PM domain can be attached more than once.
+ *
+ * Return: the created virtual device, NULL or an ERR_PTR() as
+ * genpd_dev_pm_attach_by_id() does, and ERR_PTR(-EINVAL) for an empty @suffix.
+ */
 struct device *genpd_dev_pm_attach_by_id_suffix(struct device *dev,
 						unsigned int index,
 						const char *suffix)
