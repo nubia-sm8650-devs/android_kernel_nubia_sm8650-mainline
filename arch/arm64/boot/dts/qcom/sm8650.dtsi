@@ -5469,7 +5469,10 @@
 			      <0 0x0ac71000 0 0xf000>,
 			      <0 0x0ac80000 0 0xf000>,
 			      <0 0x0accc000 0 0x2000>,
-			      <0 0x0acd1000 0 0x2000>;
+			      <0 0x0acd1000 0 0x2000>,
+			      <0 0x0acf6000 0 0x400>,
+			      <0 0x0acf7000 0 0x400>,
+			      <0 0x0acf8000 0 0x400>;
 			reg-names = "csid_wrapper",
 				    "csid0",
 				    "csid1",
@@ -5486,7 +5489,10 @@
 				    "vfe1",
 				    "vfe2",
 				    "vfe_lite0",
-				    "vfe_lite1";
+				    "vfe_lite1",
+				    "tpg0",
+				    "tpg1",
+				    "tpg2";
 
 			clocks = <&camcc CAM_CC_CAMNOC_AXI_RT_CLK>,
 				 <&camcc CAM_CC_CPAS_AHB_CLK>,
@@ -5520,7 +5526,8 @@
 				 <&camcc CAM_CC_IFE_LITE_CLK>,
 				 <&camcc CAM_CC_IFE_LITE_AHB_CLK>,
 				 <&camcc CAM_CC_IFE_LITE_CPHY_RX_CLK>,
-				 <&camcc CAM_CC_IFE_LITE_CSID_CLK>;
+				 <&camcc CAM_CC_IFE_LITE_CSID_CLK>,
+				 <&camcc CAM_CC_CAMNOC_AXI_NRT_CLK>;
 			clock-names = "camnoc_axi",
 				      "cpas_ahb",
 				      "cpas_fast_ahb",
@@ -5553,7 +5560,8 @@
 				      "vfe_lite",
 				      "vfe_lite_ahb",
 				      "vfe_lite_cphy_rx",
-				      "vfe_lite_csid";
+				      "vfe_lite_csid",
+				      "camnoc_nrt_axi";
 
 			interrupts = <GIC_SPI 601 IRQ_TYPE_EDGE_RISING 0>,
 				     <GIC_SPI 603 IRQ_TYPE_EDGE_RISING 0>,
