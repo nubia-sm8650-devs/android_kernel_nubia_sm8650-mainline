@@ -4981,7 +4981,7 @@ static int camss_link_entities(struct camss *camss)
 		}
 	}
 
-	for (i = 0; i < camss->res->tpg_num; i++) {
+	for (i = 0; camss->tpg && i < camss->res->tpg_num; i++) {
 		for (j = 0; j < camss->res->csid_num; j++) {
 			ret = media_create_pad_link(&camss->tpg[i].subdev.entity,
 						    MSM_TPG_PAD_SRC,
@@ -5459,7 +5459,10 @@ static int camss_probe(struct platform_device *pdev)
 	if (!camss->csiphy)
 		return -ENOMEM;
 
-	if (camss->res->tpg_num > 0) {
+	/* TPG register spaces may be not described in old device trees */
+	if (camss->res->tpg_num > 0 &&
+	    platform_get_resource_byname(pdev, IORESOURCE_MEM,
+					 camss->res->tpg_res[0].reg[0])) {
 		camss->tpg = devm_kcalloc(dev, camss->res->tpg_num,
 					  sizeof(*camss->tpg), GFP_KERNEL);
 		if (!camss->tpg)
