@@ -3433,6 +3433,57 @@ static const struct camss_subdev_resources csiphy_res_sm8650[] = {
 	},
 };
 
+static const struct camss_subdev_resources tpg_res_sm8650[] = {
+	/* TPG0 */
+	{
+		.regulators = {},
+		.clock = { "cpas_ahb", "csiphy_rx", "camnoc_nrt_axi" },
+		.clock_rate = {
+			{ 0 },
+			{ 400000000 },
+			{ 0 },
+		},
+		.reg = { "tpg0" },
+		.tpg = {
+			.lane_cnt = 4,
+			.formats = &tpg_formats_gen1,
+			.hw_ops = &tpg_ops_gen1
+		}
+	},
+	/* TPG1 */
+	{
+		.regulators = {},
+		.clock = { "cpas_ahb", "csiphy_rx", "camnoc_nrt_axi" },
+		.clock_rate = {
+			{ 0 },
+			{ 400000000 },
+			{ 0 },
+		},
+		.reg = { "tpg1" },
+		.tpg = {
+			.lane_cnt = 4,
+			.formats = &tpg_formats_gen1,
+			.hw_ops = &tpg_ops_gen1
+		}
+	},
+	/* TPG2 */
+	{
+		.regulators = {},
+		.clock = { "cpas_ahb", "csiphy_rx", "camnoc_nrt_axi" },
+		.clock_rate = {
+			{ 0 },
+			{ 400000000 },
+			{ 0 },
+		},
+		.reg = { "tpg2" },
+		.tpg = {
+			.lane_cnt = 4,
+			.formats = &tpg_formats_gen1,
+			.hw_ops = &tpg_ops_gen1
+		}
+	},
+};
+
 static const struct camss_subdev_resources csid_res_sm8650[] = {
 	/* CSID0 */
 	{
@@ -5830,12 +5881,14 @@ static const struct camss_resources sm8650_resources = {
 	.version = CAMSS_8650,
 	.pd_name = "top",
 	.csiphy_res = csiphy_res_sm8650,
+	.tpg_res = tpg_res_sm8650,
 	.csid_res = csid_res_sm8650,
 	.csid_wrapper_res = &csid_wrapper_res_sm8550,
 	.vfe_res = vfe_res_sm8650,
 	.icc_res = icc_res_sm8650,
 	.icc_path_num = ARRAY_SIZE(icc_res_sm8650),
 	.csiphy_num = ARRAY_SIZE(csiphy_res_sm8650),
+	.tpg_num = ARRAY_SIZE(tpg_res_sm8650),
 	.csid_num = ARRAY_SIZE(csid_res_sm8650),
 	.vfe_num = ARRAY_SIZE(vfe_res_sm8650),
 };
