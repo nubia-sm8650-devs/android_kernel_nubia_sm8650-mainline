@@ -171,7 +171,7 @@ alternative_else_nop_endif
 
 #ifdef CONFIG_ARM64_PSEUDO_NMI
 alternative_if ARM64_HAS_GIC_PRIO_MASKING
-	mov	x1, #GIC_PRIO_IRQON
+	mov	x1, #GIC_PRIO_IRQON | GIC_PRIO_PSR_I_SET
 	msr_s	SYS_ICC_PMR_EL1, x1
 alternative_else_nop_endif
 #endif
