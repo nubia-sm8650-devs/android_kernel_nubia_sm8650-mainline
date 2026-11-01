@@ -224,6 +224,7 @@ struct fastrpc_buf {
 	void *virt;
 	dma_addr_t dma_addr;
 	u64 size;
+	unsigned long attrs;
 	/* Lock for dma buf attachments */
 	struct mutex lock;
 	struct list_head attachments;
@@ -473,13 +474,15 @@ static void fastrpc_buf_free(struct fastrpc_buf *buf)
 	if (!buf)
 		return;
 
-	dma_free_coherent(buf->dev, buf->size, buf->virt,
-			  fastrpc_ipa_to_dma_addr(buf->fl->cctx, buf->dma_addr));
+	dma_free_attrs(buf->dev, buf->size, buf->virt,
+		       fastrpc_ipa_to_dma_addr(buf->fl->cctx, buf->dma_addr),
+		       buf->attrs);
 	kfree(buf);
 }
 
 static int __fastrpc_buf_alloc(struct fastrpc_user *fl, struct device *dev,
-			     u64 size, struct fastrpc_buf **obuf)
+			     u64 size, unsigned long attrs,
+			     struct fastrpc_buf **obuf)
 {
 	struct fastrpc_buf *buf;
 
@@ -497,9 +500,10 @@ static int __fastrpc_buf_alloc(struct fastrpc_user *fl, struct device *dev,
 	buf->size = size;
 	buf->dev = dev;
 	buf->raddr = 0;
+	buf->attrs = attrs;
 
-	buf->virt = dma_alloc_coherent(dev, buf->size, &buf->dma_addr,
-				       GFP_KERNEL);
+	buf->virt = dma_alloc_attrs(dev, buf->size, &buf->dma_addr,
+				    GFP_KERNEL, attrs);
 	if (!buf->virt) {
 		mutex_destroy(&buf->lock);
 		kfree(buf);
@@ -511,13 +515,14 @@ static int __fastrpc_buf_alloc(struct fastrpc_user *fl, struct device *dev,
 	return 0;
 }
 
-static int fastrpc_buf_alloc(struct fastrpc_user *fl, struct device *dev,
-			     u64 size, struct fastrpc_buf **obuf)
+static int fastrpc_buf_alloc_attrs(struct fastrpc_user *fl, struct device *dev,
+				   u64 size, unsigned long attrs,
+				   struct fastrpc_buf **obuf)
 {
 	int ret;
 	struct fastrpc_buf *buf;
 
-	ret = __fastrpc_buf_alloc(fl, dev, size, obuf);
+	ret = __fastrpc_buf_alloc(fl, dev, size, attrs, obuf);
 	if (ret)
 		return ret;
 
@@ -529,12 +534,18 @@ static int fastrpc_buf_alloc(struct fastrpc_user *fl, struct device *dev,
 	return 0;
 }
 
+static int fastrpc_buf_alloc(struct fastrpc_user *fl, struct device *dev,
+			     u64 size, struct fastrpc_buf **obuf)
+{
+	return fastrpc_buf_alloc_attrs(fl, dev, size, 0, obuf);
+}
+
 static int fastrpc_remote_heap_alloc(struct fastrpc_user *fl, struct device *dev,
 				     u64 size, struct fastrpc_buf **obuf)
 {
 	struct device *rdev = &fl->cctx->rpdev->dev;
 
-	return  __fastrpc_buf_alloc(fl, rdev, size, obuf);
+	return  __fastrpc_buf_alloc(fl, rdev, size, 0, obuf);
 }
 
 static void fastrpc_channel_ctx_free(struct kref *ref)
@@ -877,9 +888,9 @@ static int fastrpc_dma_buf_attach(struct dma_buf *dmabuf,
 	if (!a)
 		return -ENOMEM;
 
-	ret = dma_get_sgtable(buffer->dev, &a->sgt, buffer->virt,
-			      fastrpc_ipa_to_dma_addr(buffer->fl->cctx, buffer->dma_addr),
-			      buffer->size);
+	ret = dma_get_sgtable_attrs(buffer->dev, &a->sgt, buffer->virt,
+				    fastrpc_ipa_to_dma_addr(buffer->fl->cctx, buffer->dma_addr),
+				    buffer->size, buffer->attrs);
 	if (ret < 0) {
 		dev_err(buffer->dev, "failed to get scatterlist from DMA API\n");
 		kfree(a);
@@ -927,8 +938,9 @@ static int fastrpc_mmap(struct dma_buf *dmabuf,
 
 	dma_resv_assert_held(dmabuf->resv);
 
-	return dma_mmap_coherent(buf->dev, vma, buf->virt,
-				 fastrpc_ipa_to_dma_addr(buf->fl->cctx, buf->dma_addr), size);
+	return dma_mmap_attrs(buf->dev, vma, buf->virt,
+			      fastrpc_ipa_to_dma_addr(buf->fl->cctx, buf->dma_addr),
+			      size, buf->attrs);
 }
 
 static const struct dma_buf_ops fastrpc_dma_buf_ops = {
@@ -2179,7 +2191,9 @@ static int fastrpc_req_mmap(struct fastrpc_user *fl, char __user *argp)
 		return -EINVAL;
 	}
 
-	err = fastrpc_buf_alloc(fl, dev, req.size, &buf);
+	/* The DSP sees the heap through the SMMU, so it needs no contiguous memory */
+	err = fastrpc_buf_alloc_attrs(fl, dev, req.size,
+				      DMA_ATTR_ALLOC_SINGLE_PAGES, &buf);
 
 	if (err) {
 		dev_err(dev, "failed to allocate buffer\n");
