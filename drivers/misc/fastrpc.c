@@ -272,7 +272,7 @@ struct fastrpc_invoke_ctx {
 	bool is_work_done;
 	/* process updates poll memory instead of glink response */
 	bool is_polled;
-	/* set once put_work has been scheduled for this ctx, guarded by fl->lock */
+	/* set once put_work has been claimed for this ctx, guarded by cctx->lock */
 	bool put_work_scheduled;
 	struct kref refcount;
 	struct list_head node; /* list of ctxs */
@@ -655,18 +655,15 @@ static void fastrpc_context_put_wq(struct work_struct *work)
 	fastrpc_context_put(ctx);
 }
 
-/* Ensures put_work is scheduled at most once per ctx; racing callers may both try. */
-static void fastrpc_context_schedule_put_work(struct fastrpc_invoke_ctx *ctx)
+static bool fastrpc_context_claim_put_work(struct fastrpc_invoke_ctx *ctx)
 {
-	bool do_schedule;
+	lockdep_assert_held(&ctx->cctx->lock);
 
-	spin_lock(&ctx->fl->lock);
-	do_schedule = !ctx->put_work_scheduled;
+	if (ctx->put_work_scheduled)
+		return false;
+
 	ctx->put_work_scheduled = true;
-	spin_unlock(&ctx->fl->lock);
-
-	if (do_schedule)
-		schedule_work(&ctx->put_work);
+	return true;
 }
 
 /* References taken for ctx are left intact; ownership just moves between lists. */
@@ -2767,10 +2764,8 @@ static void fastrpc_notify_users(struct fastrpc_user *user)
 	list_for_each_entry(ctx, &user->interrupted, node) {
 		ctx->retval = -EPIPE;
 		complete(&ctx->work);
-		if (!ctx->put_work_scheduled) {
-			ctx->put_work_scheduled = true;
+		if (fastrpc_context_claim_put_work(ctx))
 			schedule_work(&ctx->put_work);
-		}
 	}
 	spin_unlock(&user->lock);
 }
@@ -2827,6 +2822,7 @@ static int fastrpc_rpmsg_callback(struct rpmsg_device *rpdev, void *data,
 	struct fastrpc_invoke_ctx *ctx;
 	unsigned long flags;
 	unsigned long ctxid;
+	bool schedule_put;
 
 	if (len < sizeof(*rsp))
 		return -EINVAL;
@@ -2846,9 +2842,8 @@ static int fastrpc_rpmsg_callback(struct rpmsg_device *rpdev, void *data,
 
 	spin_lock_irqsave(&cctx->lock, flags);
 	ctx = idr_find(&cctx->ctx_idr, ctxid);
-	spin_unlock_irqrestore(&cctx->lock, flags);
-
 	if (!ctx) {
+		spin_unlock_irqrestore(&cctx->lock, flags);
 		dev_err(&rpdev->dev, "No context ID matches response\n");
 		return -ENOENT;
 	}
@@ -2863,12 +2858,16 @@ static int fastrpc_rpmsg_callback(struct rpmsg_device *rpdev, void *data,
 	 */
 	if (FIELD_GET(FASTRPC_CTXID_SEQ_MASK, rsp->ctx) !=
 	    FIELD_GET(FASTRPC_CTXID_SEQ_MASK, ctx->ctxid)) {
+		spin_unlock_irqrestore(&cctx->lock, flags);
 		dev_dbg(&rpdev->dev,
 			"Stale glink response ctx 0x%llx (expected seq 0x%llx), dropping\n",
 			rsp->ctx,
 			FIELD_GET(FASTRPC_CTXID_SEQ_MASK, ctx->ctxid));
 		return 0;
 	}
+
+	schedule_put = fastrpc_context_claim_put_work(ctx);
+	spin_unlock_irqrestore(&cctx->lock, flags);
 
 	ctx->retval = rsp->retval;
 	ctx->is_work_done = true;
@@ -2877,11 +2876,11 @@ static int fastrpc_rpmsg_callback(struct rpmsg_device *rpdev, void *data,
 	/*
 	 * The DMA buffer associated with the context cannot be freed in
 	 * interrupt context so schedule it through a worker thread to
-	 * avoid a kernel BUG. fastrpc_context_schedule_put_work() guards
-	 * against a concurrent fastrpc_notify_users() also scheduling this
-	 * same work item for an interrupted context.
+	 * avoid a kernel BUG. fastrpc_notify_users() may already have
+	 * claimed it for an interrupted context.
 	 */
-	fastrpc_context_schedule_put_work(ctx);
+	if (schedule_put)
+		schedule_work(&ctx->put_work);
 
 	return 0;
 }
