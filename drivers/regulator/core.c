@@ -113,6 +113,7 @@ static int regulator_balance_voltage(struct regulator_dev *rdev,
 				     suspend_state_t state);
 static void create_regulator(struct regulator_dev *rdev,
 			     struct regulator *regulator);
+static void unlink_and_remove_debugfs(struct regulator *regulator);
 static void destroy_regulator(struct regulator *regulator);
 static void _regulator_put(struct regulator *regulator);
 
@@ -1677,6 +1678,7 @@ static int set_machine_constraints(struct regulator_dev *rdev,
 			       ? _regulator_enable(rdev->supply)
 			       : regulator_enable(rdev->supply));
 			if (ret < 0) {
+				unlink_and_remove_debugfs(rdev->supply);
 				_regulator_put(rdev->supply);
 				rdev->supply = NULL;
 				return ret;
@@ -2013,6 +2015,20 @@ static void link_and_create_debugfs(struct regulator *regulator, struct regulato
 				   &regulator->voltage[PM_SUSPEND_ON].max_uV);
 		debugfs_create_file("constraint_flags", 0444, regulator->debugfs,
 				    regulator, &constraint_flags_fops);
+	}
+}
+
+static void unlink_and_remove_debugfs(struct regulator *regulator)
+{
+	struct regulator_dev *rdev = regulator->rdev;
+
+	debugfs_remove_recursive(regulator->debugfs);
+
+	if (regulator->dev) {
+		if (regulator->device_link)
+			device_link_remove(regulator->dev, &rdev->dev);
+
+		sysfs_remove_link(&rdev->dev.kobj, regulator->supply_name);
 	}
 }
 
@@ -2545,6 +2561,7 @@ struct regulator *_regulator_get_common(struct regulator_dev *rdev, struct devic
 			if (rdev->supply) {
 				ret = regulator_enable(rdev->supply);
 				if (ret < 0) {
+					unlink_and_remove_debugfs(regulator);
 					destroy_regulator(regulator);
 					module_put(rdev->owner);
 					put_device(&rdev->dev);
@@ -2656,16 +2673,6 @@ static void destroy_regulator(struct regulator *regulator)
 {
 	struct regulator_dev *rdev = regulator->rdev;
 
-	debugfs_remove_recursive(regulator->debugfs);
-
-	if (regulator->dev) {
-		if (regulator->device_link)
-			device_link_remove(regulator->dev, &rdev->dev);
-
-		/* remove any sysfs entries */
-		sysfs_remove_link(&rdev->dev.kobj, regulator->supply_name);
-	}
-
 	regulator_lock(rdev);
 	list_del(&regulator->list);
 
@@ -2708,6 +2715,11 @@ static void _regulator_put(struct regulator *regulator)
  */
 void regulator_put(struct regulator *regulator)
 {
+	if (IS_ERR_OR_NULL(regulator))
+		return;
+
+	unlink_and_remove_debugfs(regulator);
+
 	mutex_lock(&regulator_list_mutex);
 	_regulator_put(regulator);
 	mutex_unlock(&regulator_list_mutex);
