@@ -260,7 +260,7 @@ int qcom_clk_dvfs_prepare_rate(struct clk_hw *hw, unsigned long rate)
 		return ret;
 
 	old_levels = kcalloc(clock->data->num_pd_indices, sizeof(*old_levels),
-			     GFP_KERNEL);
+			     GFP_NOIO);
 	if (!old_levels)
 		return -ENOMEM;
 
@@ -330,12 +330,12 @@ int qcom_clk_dvfs_resource_acquire(struct clk_hw *hw,
 		return 0;
 	}
 
-	dvfs_transition = kzalloc_obj(*dvfs_transition);
+	dvfs_transition = kzalloc_obj(*dvfs_transition, GFP_NOIO);
 	if (!dvfs_transition)
 		return -ENOMEM;
 
 	votes = kcalloc(clock->data->num_pd_indices, sizeof(*votes),
-			 GFP_KERNEL);
+			 GFP_NOIO);
 	if (!votes)
 		return -ENOMEM;
 
