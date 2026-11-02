@@ -274,6 +274,8 @@ struct iris_firmware_data {
 	unsigned int dec_output_prop_vp9_size;
 	const u32 *dec_output_prop_av1;
 	unsigned int dec_output_prop_av1_size;
+	const u32 *enc_output_prop;
+	unsigned int enc_output_prop_size;
 
 	const u32 *dec_ip_int_buf_tbl;
 	unsigned int dec_ip_int_buf_tbl_size;

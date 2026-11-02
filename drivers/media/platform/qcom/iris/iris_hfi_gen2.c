@@ -1873,6 +1873,10 @@ static const u32 sm8550_vdec_subscribe_output_properties_av1[] = {
 	HFI_PROP_WORST_COMPLEXITY_FACTOR,
 };
 
+static const u32 sm8550_venc_subscribe_output_properties[] = {
+	HFI_PROP_PICTURE_TYPE,
+};
+
 static const u32 sm8550_dec_ip_int_buf_tbl[] = {
 	BUF_BIN,
 	BUF_COMV,
@@ -1951,6 +1955,9 @@ const struct iris_firmware_data iris_hfi_gen2_data = {
 	.dec_output_prop_av1 = sm8550_vdec_subscribe_output_properties_av1,
 	.dec_output_prop_av1_size =
 		ARRAY_SIZE(sm8550_vdec_subscribe_output_properties_av1),
+	.enc_output_prop = sm8550_venc_subscribe_output_properties,
+	.enc_output_prop_size =
+		ARRAY_SIZE(sm8550_venc_subscribe_output_properties),
 
 	.dec_ip_int_buf_tbl = sm8550_dec_ip_int_buf_tbl,
 	.dec_ip_int_buf_tbl_size = ARRAY_SIZE(sm8550_dec_ip_int_buf_tbl),
@@ -2010,6 +2017,9 @@ const struct iris_firmware_data iris_hfi_milos_data = {
 	.dec_output_prop_vp9 = sm8550_vdec_subscribe_output_properties_vp9,
 	.dec_output_prop_vp9_size =
 		ARRAY_SIZE(sm8550_vdec_subscribe_output_properties_vp9),
+	.enc_output_prop = sm8550_venc_subscribe_output_properties,
+	.enc_output_prop_size =
+		ARRAY_SIZE(sm8550_venc_subscribe_output_properties),
 
 	.dec_ip_int_buf_tbl = sm8550_dec_ip_int_buf_tbl,
 	.dec_ip_int_buf_tbl_size = ARRAY_SIZE(sm8550_dec_ip_int_buf_tbl),
