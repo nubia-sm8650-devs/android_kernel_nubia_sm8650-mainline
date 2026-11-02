@@ -156,6 +156,7 @@
 
 #define CSID_PATH_IRQ_EOF		BIT(3)
 #define CSID_PATH_IRQ_SOF		BIT(4)
+#define CSID_PATH_IRQ_INPUT_SOF		BIT(12)
 #define CSID_PATH_IRQ_EPOCH0		BIT(21)
 #define CSID_PATH_IRQ_RUP_DONE		BIT(23)
 #define CSID_PATH_IRQ_FATAL		0x20186001
@@ -649,6 +650,8 @@ void csid_gen3_hw_path_config(struct camss_hw_pipe *pipe,
 		mask |= CSID_PATH_IRQ_EPOCH0;
 	if (cfg->events & CAMSS_HW_EV_RUP)
 		mask |= CSID_PATH_IRQ_RUP_DONE;
+	if (cfg->events & CAMSS_HW_EV_INPUT_SOF)
+		mask |= CSID_PATH_IRQ_INPUT_SOF;
 	writel(mask, csid->base + p->irq_mask);
 	writel(ctrl, csid->base + p->ctrl);
 
@@ -662,6 +665,12 @@ void csid_gen3_hw_path_resume(struct camss_hw_pipe *pipe,
 {
 	const struct csid_gen3_path *p = &csid_gen3_paths[path];
 	struct csid_device *csid = pipe->csid;
+	unsigned long flags;
+
+	spin_lock_irqsave(&pipe->lock, flags);
+	writel(readl(csid->base + p->irq_mask) & ~CSID_PATH_IRQ_INPUT_SOF,
+	       csid->base + p->irq_mask);
+	spin_unlock_irqrestore(&pipe->lock, flags);
 
 	writel(readl(csid->base + p->ctrl) | CSID_PATH_CTRL_RESUME,
 	       csid->base + p->ctrl);
@@ -795,6 +804,8 @@ static void csid_gen3_dispatch(struct camss_hw_pipe *pipe,
 			ops->error(pipe->priv, CAMSS_HW_ERR_PATH, i, err,
 				   err & CSID_PATH_IRQ_FATAL);
 
+		if ((st & CSID_PATH_IRQ_INPUT_SOF) && ops->input_sof)
+			ops->input_sof(pipe->priv, i, ev->boot_ns);
 		if ((st & CSID_PATH_IRQ_EOF) && ops->eof)
 			ops->eof(pipe->priv, i, ev->boot_ns);
 		if ((st & CSID_PATH_IRQ_SOF) && ops->sof)

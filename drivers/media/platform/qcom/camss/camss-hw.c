@@ -333,6 +333,16 @@ int camss_hw_csid_dual(struct camss_hw_pipe *pipe, enum camss_hw_sync sync,
 }
 EXPORT_SYMBOL_NS_GPL(camss_hw_csid_dual, "QCOM_CAMSS");
 
+/**
+ * camss_hw_path_resume - resume a path at its next frame boundary
+ * @pipe: claimed pipe
+ * @path: configured path
+ *
+ * The path stops reporting CAMSS_HW_EV_INPUT_SOF, which only a halted path
+ * needs.
+ *
+ * Return: 0 on success, -EINVAL for a path that is not configured
+ */
 int camss_hw_path_resume(struct camss_hw_pipe *pipe, enum camss_hw_path path)
 {
 	if (path >= pipe->path_num || !(pipe->paths & BIT(path)))

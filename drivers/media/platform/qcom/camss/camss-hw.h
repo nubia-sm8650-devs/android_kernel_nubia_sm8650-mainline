@@ -49,6 +49,8 @@ enum camss_hw_err_src {
 #define CAMSS_HW_EV_EOF		BIT(1)
 #define CAMSS_HW_EV_EPOCH	BIT(2)
 #define CAMSS_HW_EV_RUP		BIT(3)
+/* data reached the path, raised while the path is halted too */
+#define CAMSS_HW_EV_INPUT_SOF	BIT(4)
 
 #define CAMSS_HW_VFE_ERR_CAMIF	BIT(0)
 #define CAMSS_HW_VFE_ERR_BUS	BIT(1)
@@ -78,6 +80,7 @@ struct camss_hw_vfe_err {
 struct camss_hw_ops {
 	void (*sof)(void *priv, enum camss_hw_path path, u64 qtimer_ns,
 		    u64 boot_ns);
+	void (*input_sof)(void *priv, enum camss_hw_path path, u64 boot_ns);
 	void (*epoch)(void *priv, enum camss_hw_path path, u64 boot_ns);
 	void (*eof)(void *priv, enum camss_hw_path path, u64 boot_ns);
 	void (*rup_done)(void *priv, enum camss_hw_path path, u64 boot_ns);
