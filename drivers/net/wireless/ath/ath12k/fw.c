@@ -156,7 +156,7 @@ static int ath12k_fw_request_firmware_api_n(struct ath12k_base *ab,
 
 err:
 	release_firmware(ab->fw.fw);
-	ab->fw.fw = NULL;
+	memset(&ab->fw, 0, sizeof(ab->fw));
 	return ret;
 }
 
