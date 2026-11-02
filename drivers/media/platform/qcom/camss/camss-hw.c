@@ -316,15 +316,16 @@ EXPORT_SYMBOL_NS_GPL(camss_hw_path_sof_ts, "QCOM_CAMSS");
  * camss_hw_set_clk_rate - set the core clock of a claimed CSID or VFE
  * @pipe: claimed pipe
  * @block: CAMSS_HW_CSID or CAMSS_HW_IFE
- * @rate: minimum rate in Hz
- * @applied: rate the clock runs at, at least the lowest supported rate not
- *	below @rate
+ * @rate: minimum rate in Hz, rounded by the clock first
+ * @applied: lowest supported rate not below the rounded @rate
  *
  * The CSIDs and the lite VFEs share their core clocks. The rate holds as a
  * minimum until the claim is released, so the clock runs at the highest rate
- * any claimed pipe asks for.
+ * any claimed pipe asks for. @applied is the supported rate itself, the PLL
+ * behind it can settle a few Hz off.
  *
- * Return: 0 on success, -ERANGE if @rate is above every supported rate
+ * Return: 0 on success, -ERANGE if the rounded @rate is above every supported
+ * rate
  */
 int camss_hw_set_clk_rate(struct camss_hw_pipe *pipe, enum camss_hw_block block,
 			  unsigned long rate, unsigned long *applied)
@@ -340,8 +341,12 @@ int camss_hw_set_clk_rate(struct camss_hw_pipe *pipe, enum camss_hw_block block,
 	if (!clock)
 		return -ENOENT;
 
+	round = clk_round_rate(clock->clk, rate);
+	if (round < 0)
+		return round;
+
 	for (i = 0; i < clock->nfreqs; i++)
-		if (clock->freq[i] >= rate)
+		if (clock->freq[i] >= round)
 			break;
 
 	if (i == clock->nfreqs)
@@ -359,7 +364,7 @@ int camss_hw_set_clk_rate(struct camss_hw_pipe *pipe, enum camss_hw_block block,
 	if (ret)
 		return ret;
 
-	*applied = clk_get_rate(clock->clk);
+	*applied = clock->freq[i];
 
 	return 0;
 }
