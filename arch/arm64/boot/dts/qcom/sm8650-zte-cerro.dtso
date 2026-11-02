@@ -1008,7 +1008,6 @@
 		height = <2480>;
 		stride = <(1116 * 4)>;
 		format = "a8b8g8r8";
-		panel = <&display_panel>;
 		interconnects = <&mmss_noc MASTER_MDP QCOM_ICC_TAG_ALWAYS
 				 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
 		clocks = <&gcc GCC_DISP_HF_AXI_CLK>;
