@@ -229,17 +229,14 @@ int ath12k_mhi_register(struct ath12k_pci *ab_pci)
 			goto free_controller;
 		}
 	} else {
-		if (ab->fw.amss_data && ab->fw.amss_len > 0) {
-			/* use MHI firmware file from firmware-N.bin */
-			mhi_ctrl->fw_data = ab->fw.amss_data;
-			mhi_ctrl->fw_sz = ab->fw.amss_len;
-		} else {
-			/* use the old separate mhi.bin MHI firmware file */
-			ath12k_core_create_firmware_path(ab, ATH12K_AMSS_FILE,
-							 ab_pci->amss_path,
-							 sizeof(ab_pci->amss_path));
-			mhi_ctrl->fw_image = ab_pci->amss_path;
+		ret = ath12k_fw_map_amss(ab);
+		if (ret) {
+			ath12k_err(ab, "failed to load AMSS firmware: %d\n", ret);
+			goto free_controller;
 		}
+
+		mhi_ctrl->fw_data = ab->fw.amss_data;
+		mhi_ctrl->fw_sz = ab->fw.amss_len;
 	}
 
 	ret = ath12k_mhi_get_msi(ab_pci);
@@ -253,7 +250,7 @@ int ath12k_mhi_register(struct ath12k_pci *ab_pci)
 
 	mhi_ctrl->iova_start = 0;
 	mhi_ctrl->iova_stop = ab_pci->dma_mask;
-	mhi_ctrl->sbl_size = SZ_512K;
+	mhi_ctrl->sbl_size = min_t(size_t, SZ_512K, mhi_ctrl->fw_sz);
 	mhi_ctrl->seg_len = SZ_512K;
 	mhi_ctrl->fbc_download = true;
 	mhi_ctrl->runtime_get = ath12k_mhi_op_runtime_get;

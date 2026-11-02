@@ -115,7 +115,6 @@ struct ath12k_pci {
 	struct pci_dev *pdev;
 	struct ath12k_base *ab;
 	u16 dev_id;
-	char amss_path[100];
 	u32 msi_ep_base_data;
 	struct mhi_controller *mhi_ctrl;
 	const struct ath12k_msi_config *msi_config;

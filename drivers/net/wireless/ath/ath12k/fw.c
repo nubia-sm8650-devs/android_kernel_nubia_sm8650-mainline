@@ -174,8 +174,27 @@ void ath12k_fw_map(struct ath12k_base *ab)
 		   ab->fw.api_version);
 }
 
+int ath12k_fw_map_amss(struct ath12k_base *ab)
+{
+	const struct firmware *fw;
+
+	if (ab->fw.amss_data && ab->fw.amss_len)
+		return 0;
+
+	fw = ath12k_core_firmware_request(ab, ATH12K_AMSS_FILE);
+	if (IS_ERR(fw))
+		return PTR_ERR(fw);
+
+	ab->fw.amss = fw;
+	ab->fw.amss_data = fw->data;
+	ab->fw.amss_len = fw->size;
+
+	return 0;
+}
+
 void ath12k_fw_unmap(struct ath12k_base *ab)
 {
+	release_firmware(ab->fw.amss);
 	release_firmware(ab->fw.fw);
 	memset(&ab->fw, 0, sizeof(ab->fw));
 }

@@ -1099,6 +1099,7 @@ struct ath12k_base {
 		u32 api_version;
 
 		const struct firmware *fw;
+		const struct firmware *amss;
 		const u8 *amss_data;
 		size_t amss_len;
 		const u8 *amss_dualmac_data;

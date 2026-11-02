@@ -32,6 +32,7 @@ enum ath12k_fw_features {
 };
 
 void ath12k_fw_map(struct ath12k_base *ab);
+int ath12k_fw_map_amss(struct ath12k_base *ab);
 void ath12k_fw_unmap(struct ath12k_base *ab);
 bool ath12k_fw_feature_supported(struct ath12k_base *ab, enum ath12k_fw_features feat);
 
