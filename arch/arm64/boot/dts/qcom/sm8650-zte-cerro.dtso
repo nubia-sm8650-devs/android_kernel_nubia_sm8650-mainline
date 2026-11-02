@@ -1188,6 +1188,12 @@
 	status = "okay";
 };
 
+&iris {
+	firmware-name = "vpu33_4v.mbn";
+
+	status = "okay";
+};
+
 &lpass_wsa2macro {
 	status = "disabled";
 };
