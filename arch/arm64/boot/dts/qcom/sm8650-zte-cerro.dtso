@@ -209,7 +209,7 @@
 			};
 
 			codec {
-				sound-dai = <&wcd939x 1>, <&swr2 0>, <&lpass_txmacro 0>;
+				sound-dai = <&wcd939x 1>, <&swr2 1>, <&lpass_txmacro 0>;
 			};
 
 			platform {
@@ -257,7 +257,7 @@
 			};
 
 			codec {
-				sound-dai = <&wcd939x 1>, <&swr2 0>, <&lpass_vamacro 0>;
+				sound-dai = <&wcd939x 1>, <&swr2 1>, <&lpass_vamacro 0>;
 			};
 
 			platform {
