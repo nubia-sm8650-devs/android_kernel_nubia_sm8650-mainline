@@ -2531,7 +2531,7 @@ static int clk_collect_rate_notifications(struct clk_resource_transaction *tx,
 			return 0;
 
 	if (core->rate != core->new_rate && core->notifier_count) {
-		notification = kzalloc_obj(*notification);
+		notification = kzalloc_obj(*notification, GFP_NOIO);
 		if (!notification)
 			return -ENOMEM;
 
@@ -2627,7 +2627,7 @@ static int clk_resource_acquire_one(struct clk_resource_transaction *tx,
 		return 0;
 
 	new_parent = core->new_parent ?: core->parent;
-	acquisition = kzalloc_obj(*acquisition);
+	acquisition = kzalloc_obj(*acquisition, GFP_NOIO);
 	if (!acquisition)
 		return -ENOMEM;
 
