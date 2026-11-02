@@ -1708,8 +1708,8 @@ static void ath12k_pci_remove(struct pci_dev *pdev)
 
 qmi_fail:
 	ath12k_core_deinit(ab);
-	ath12k_fw_unmap(ab);
 	ath12k_mhi_unregister(ab_pci);
+	ath12k_fw_unmap(ab);
 
 	ath12k_pci_free_irq(ab);
 	ath12k_pci_msi_free(ab_pci);
