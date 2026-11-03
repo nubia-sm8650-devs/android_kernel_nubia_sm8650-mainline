@@ -5,6 +5,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #include <linux/tee.h>
 #include <linux/platform_device.h>
@@ -704,6 +705,10 @@ static int qcomtee_probe(struct platform_device *pdev)
 	struct tee_context *ctx;
 	struct qcomtee *qcomtee;
 	int err;
+
+	err = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+	if (err)
+		return err;
 
 	qcomtee = kzalloc_obj(*qcomtee);
 	if (!qcomtee)
