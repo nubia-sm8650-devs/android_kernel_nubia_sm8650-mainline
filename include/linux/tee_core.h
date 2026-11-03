@@ -92,6 +92,20 @@ struct tee_device {
  * @supp_send:		called for supplicant to send a response
  * @shm_register:	register shared memory buffer in TEE
  * @shm_unregister:	unregister shared memory buffer in TEE
+ * @shm_register_dmabuf: register an imported dma-buf in TEE; optional, paired
+ *			with @shm_unregister_dmabuf. The core attaches and maps
+ *			the buffer to the TEE device's parent before this call.
+ *			The callback receives its mapped scatterlist and logical
+ *			size in shm->size, and initializes the backend's SHM
+ *			representation. Only DMA addresses and lengths may be
+ *			read from the scatterlist. On failure the callback must
+ *			undo any backend registration it performed.
+ * @shm_unregister_dmabuf: undo a successful @shm_register_dmabuf before the
+ *			core unmaps and detaches the buffer. Both callbacks run
+ *			in sleepable context with the dma-buf reservation lock
+ *			held. The mapping remains valid until this returns.
+ *			The core sets attachment->importer_priv to shm after
+ *			registration and clears it before unregistration.
  *
  * The context given to @open might last longer than the device file if it is
  * tied to other resources in the TEE driver. @close_context is called when the
@@ -127,6 +141,10 @@ struct tee_driver_ops {
 			    struct page **pages, size_t num_pages,
 			    unsigned long start);
 	int (*shm_unregister)(struct tee_context *ctx, struct tee_shm *shm);
+	int (*shm_register_dmabuf)(struct dma_buf_attachment *attach,
+				   struct tee_shm *shm, struct sg_table *sgt);
+	void (*shm_unregister_dmabuf)(struct dma_buf_attachment *attach,
+				      struct tee_shm *shm);
 };
 
 /* Size for TEE revision string buffer used by get_tee_revision(). */
