@@ -337,6 +337,11 @@ void tee_device_put_all_dma_heaps(struct tee_device *teedev)
 }
 EXPORT_SYMBOL_GPL(tee_device_put_all_dma_heaps);
 
+bool tee_heap_is_dma_buf(struct dma_buf *dmabuf)
+{
+	return dmabuf->ops == &tee_heap_buf_ops;
+}
+
 int tee_heap_update_from_dma_buf(struct tee_device *teedev,
 				 struct dma_buf *dmabuf, size_t *offset,
 				 struct tee_shm *shm,
@@ -346,7 +351,7 @@ int tee_heap_update_from_dma_buf(struct tee_device *teedev,
 	int rc;
 
 	/* The DMA-buf must be from our heap */
-	if (dmabuf->ops != &tee_heap_buf_ops)
+	if (!tee_heap_is_dma_buf(dmabuf))
 		return -EINVAL;
 
 	buf = dmabuf->priv;
@@ -377,6 +382,11 @@ tee_device_put_all_dma_heaps(struct tee_device *teedev __always_unused)
 {
 }
 EXPORT_SYMBOL_GPL(tee_device_put_all_dma_heaps);
+
+bool tee_heap_is_dma_buf(struct dma_buf *dmabuf __always_unused)
+{
+	return false;
+}
 
 int tee_heap_update_from_dma_buf(struct tee_device *teedev __always_unused,
 				 struct dma_buf *dmabuf __always_unused,
