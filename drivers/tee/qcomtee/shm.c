@@ -5,8 +5,14 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/dma-direct.h>
+#include <linux/dma-resv.h>
 #include <linux/firmware/qcom/qcom_tzmem.h>
+#include <linux/list.h>
 #include <linux/mm.h>
+#include <linux/scatterlist.h>
+#include <linux/slab.h>
+#include <linux/swiotlb.h>
 
 #include "qcomtee.h"
 
@@ -112,6 +118,57 @@ static int qcomtee_shm_unregister(struct tee_context *ctx, struct tee_shm *shm)
 	qcom_tzmem_shm_bridge_delete(shm->sec_world_id);
 
 	return 0;
+}
+
+static struct tee_shm *qcomtee_dmabuf_find(struct dma_buf_attachment *attach)
+{
+	struct dma_buf_attachment *other;
+
+	dma_resv_assert_held(attach->dmabuf->resv);
+
+	list_for_each_entry(other, &attach->dmabuf->attachments, node)
+		if (other->dev == attach->dev && other->importer_priv)
+			return other->importer_priv;
+
+	return NULL;
+}
+
+int qcomtee_shm_register_dmabuf(struct dma_buf_attachment *attach, struct tee_shm *shm,
+				struct sg_table *sgt)
+{
+	struct device *dev = attach->dev;
+	struct tee_shm *other;
+	phys_addr_t paddr;
+
+	if (sgt->nents != 1)
+		return -EINVAL;
+
+	/* SCM creates the QTEE device without a firmware node, using direct DMA. */
+	paddr = dma_to_phys(dev, sg_dma_address(sgt->sgl));
+	if (swiotlb_find_pool(dev, paddr))
+		return -EOPNOTSUPP;
+
+	if (!PAGE_ALIGNED(paddr) || !shm->size || !PAGE_ALIGNED(shm->size) ||
+	    sg_dma_len(sgt->sgl) < shm->size)
+		return -EINVAL;
+
+	shm->paddr = paddr;
+
+	other = qcomtee_dmabuf_find(attach);
+	if (other) {
+		shm->sec_world_id = other->sec_world_id;
+		return 0;
+	}
+
+	return qcom_tzmem_shm_bridge_create(shm->paddr, shm->size,
+					    &shm->sec_world_id);
+}
+
+void qcomtee_shm_unregister_dmabuf(struct dma_buf_attachment *attach,
+				   struct tee_shm *shm)
+{
+	if (!qcomtee_dmabuf_find(attach))
+		qcom_tzmem_shm_bridge_delete(shm->sec_world_id);
 }
 
 static int pool_op_alloc(struct tee_shm_pool *pool, struct tee_shm *shm,
