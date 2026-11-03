@@ -19,6 +19,8 @@ struct tee_shm_dmabuf_ref {
 	size_t offset;
 	struct dma_buf *dmabuf;
 	struct tee_shm *parent_shm;
+	struct dma_buf_attachment *attach;
+	struct sg_table *sgt;
 };
 
 int tee_shm_get_fd(struct tee_shm *shm);
