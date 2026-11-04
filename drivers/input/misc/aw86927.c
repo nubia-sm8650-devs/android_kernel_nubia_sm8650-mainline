@@ -44,12 +44,14 @@
 #define AW86927_PLAYCFG1_REG			0x06
 #define AW86927_PLAYCFG1_BST_MODE_MASK		GENMASK(7, 7)
 #define AW86927_PLAYCFG1_BST_MODE_BYPASS	0
+#define AW86927_PLAYCFG1_BST_MODE_BOOST		1
 #define AW86927_PLAYCFG1_BST_VOUT_VREFSET_MASK	GENMASK(6, 0)
 #define AW86927_PLAYCFG1_BST_8500MV		0x50
 
 #define AW86938_PLAYCFG1_REG			0x06
 #define AW86938_PLAYCFG1_BST_MODE_MASK		GENMASK(5, 5)
 #define AW86938_PLAYCFG1_BST_MODE_BYPASS	0
+#define AW86938_PLAYCFG1_BST_MODE_BOOST		1
 #define AW86938_PLAYCFG1_BST_VOUT_VREFSET_MASK	GENMASK(4, 0)
 #define AW86938_PLAYCFG1_BST_7000MV		0x11
 
@@ -264,18 +266,20 @@ static int aw86927_wait_enter_standby(struct aw86927_data *haptics)
 	return 0;
 }
 
-static int aw86927_bypass_boost(struct aw86927_data *haptics)
+static int aw86927_set_boost(struct aw86927_data *haptics, bool boost)
 {
 	switch (haptics->model) {
 	case AW86938:
 		return regmap_update_bits(haptics->regmap, AW86938_PLAYCFG1_REG,
 					  AW86938_PLAYCFG1_BST_MODE_MASK,
 					  FIELD_PREP(AW86938_PLAYCFG1_BST_MODE_MASK,
+						     boost ? AW86938_PLAYCFG1_BST_MODE_BOOST :
 						     AW86938_PLAYCFG1_BST_MODE_BYPASS));
 	default:
 		return regmap_update_bits(haptics->regmap, AW86927_PLAYCFG1_REG,
 					  AW86927_PLAYCFG1_BST_MODE_MASK,
 					  FIELD_PREP(AW86927_PLAYCFG1_BST_MODE_MASK,
+						     boost ? AW86927_PLAYCFG1_BST_MODE_BOOST :
 						     AW86927_PLAYCFG1_BST_MODE_BYPASS));
 	}
 }
@@ -314,7 +318,7 @@ static int aw86927_play_mode(struct aw86927_data *haptics, u8 play_mode)
 		if (err)
 			return err;
 
-		err = aw86927_bypass_boost(haptics);
+		err = aw86927_set_boost(haptics, false);
 		if (err)
 			return err;
 
