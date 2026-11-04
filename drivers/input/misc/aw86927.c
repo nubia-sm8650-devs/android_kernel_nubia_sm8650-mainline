@@ -195,6 +195,7 @@ struct aw86927_data {
 	enum aw86927_model model;
 	spinlock_t lock;
 	struct delayed_work play_work;
+	bool enabled;
 	struct device *dev;
 	struct input_dev *input_dev;
 	struct i2c_client *client;
@@ -358,6 +359,8 @@ static int aw86927_haptics_play(struct input_dev *dev, void *data, struct ff_eff
 		level = effect->u.rumble.weak_magnitude;
 
 	guard(spinlock_irqsave)(&haptics->lock);
+	if (!haptics->enabled)
+		return 0;
 
 	/* If level does not change, don't restart playback */
 	if (haptics->level == level)
@@ -423,11 +426,27 @@ static int aw86927_play_sine(struct aw86927_data *haptics, u16 level)
 	return 0;
 }
 
+static int aw86927_open(struct input_dev *input)
+{
+	struct aw86927_data *haptics = input_get_drvdata(input);
+
+	guard(spinlock_irqsave)(&haptics->lock);
+
+	haptics->enabled = true;
+
+	return 0;
+}
+
 static void aw86927_close(struct input_dev *input)
 {
 	struct aw86927_data *haptics = input_get_drvdata(input);
 	struct device *dev = &haptics->client->dev;
 	int err;
+
+	scoped_guard(spinlock_irqsave, &haptics->lock) {
+		haptics->enabled = false;
+		haptics->level = 0;
+	}
 
 	cancel_delayed_work_sync(&haptics->play_work);
 
@@ -444,8 +463,12 @@ static void aw86927_haptics_play_work(struct work_struct *work)
 	u16 level;
 	int err;
 
-	scoped_guard(spinlock_irqsave, &haptics->lock)
+	scoped_guard(spinlock_irqsave, &haptics->lock) {
+		if (!haptics->enabled)
+			return;
+
 		level = haptics->level;
+	}
 
 	if (level)
 		err = aw86927_play_sine(haptics, level);
@@ -864,6 +887,7 @@ static int aw86927_probe(struct i2c_client *client)
 	INIT_DELAYED_WORK(&haptics->play_work, aw86927_haptics_play_work);
 
 	haptics->input_dev->name = "aw86927-haptics";
+	haptics->input_dev->open = aw86927_open;
 	haptics->input_dev->close = aw86927_close;
 
 	input_set_drvdata(haptics->input_dev, haptics);
