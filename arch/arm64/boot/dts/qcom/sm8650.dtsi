@@ -4734,6 +4734,13 @@
 							iommus = <&apps_smmu 0x1001 0x80>,
 								 <&apps_smmu 0x1061 0x0>;
 						};
+
+						q6usbdai: usbd {
+							compatible = "qcom,q6usb";
+							iommus = <&apps_smmu 0x100b 0x0>;
+							#sound-dai-cells = <1>;
+							qcom,usb-audio-intr-idx = /bits/ 16 <2>;
+						};
 					};
 
 					q6prm: service@2 {
@@ -5328,6 +5335,7 @@
 			snps,usb3_lpm_capable;
 			snps,usb2-lpm-disable;
 			snps,has-lpm-erratum;
+			num-hc-interrupters = /bits/ 16 <3>;
 			tx-fifo-resize;
 
 			dma-coherent;
