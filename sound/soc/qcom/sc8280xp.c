@@ -92,6 +92,39 @@ struct sc8280xp_snd_data {
 	struct sc8280xp_be_config be_config[AFE_PORT_MAX];
 };
 
+enum {
+	SC8280XP_BE_RATE,
+	SC8280XP_BE_CHANNELS,
+	SC8280XP_BE_FORMAT,
+};
+
+#define SC8280XP_BE_CONTROL(id, kind)	(((id) << 2) | (kind))
+#define SC8280XP_BE_CONTROL_ID(value)	((value) >> 2)
+#define SC8280XP_BE_CONTROL_KIND(value)	((value) & 0x3)
+
+static const char * const sc8280xp_be_rate_text[] = {
+	"8000", "11025", "12000", "16000", "22050", "24000", "32000", "44100",
+	"48000", "88200", "96000", "176400", "192000", "352800", "384000",
+};
+
+static const unsigned int sc8280xp_be_rates[] = {
+	8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100,
+	48000, 88200, 96000, 176400, 192000, 352800, 384000,
+};
+
+static const char * const sc8280xp_be_channels_text[] = {
+	"1", "2", "3", "4", "5", "6", "7", "8",
+};
+
+static const char * const sc8280xp_be_format_text[] = {
+	"S16_LE", "S24_LE", "S24_3LE", "S32_LE",
+};
+
+static const snd_pcm_format_t sc8280xp_be_formats[] = {
+	SNDRV_PCM_FORMAT_S16_LE, SNDRV_PCM_FORMAT_S24_LE,
+	SNDRV_PCM_FORMAT_S24_3LE, SNDRV_PCM_FORMAT_S32_LE,
+};
+
 static inline int sc8280xp_get_mclk_freq(struct snd_pcm_hw_params *params)
 {
 	int rate = params_rate(params);
@@ -201,6 +234,145 @@ static void sc8280xp_init_be_config(struct snd_soc_pcm_runtime *rtd)
 	}
 }
 
+static int sc8280xp_be_config_info(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_info *uinfo)
+{
+	switch (SC8280XP_BE_CONTROL_KIND(kcontrol->private_value)) {
+	case SC8280XP_BE_RATE:
+		return snd_ctl_enum_info(uinfo, 1, ARRAY_SIZE(sc8280xp_be_rate_text),
+					 sc8280xp_be_rate_text);
+	case SC8280XP_BE_CHANNELS:
+		return snd_ctl_enum_info(uinfo, 1, ARRAY_SIZE(sc8280xp_be_channels_text),
+					 sc8280xp_be_channels_text);
+	default:
+		return snd_ctl_enum_info(uinfo, 1, ARRAY_SIZE(sc8280xp_be_format_text),
+					 sc8280xp_be_format_text);
+	}
+}
+
+static struct sc8280xp_be_config *
+sc8280xp_be_config_of(struct snd_kcontrol *kcontrol)
+{
+	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
+	struct sc8280xp_snd_data *data = snd_soc_card_get_drvdata(card);
+
+	return &data->be_config[SC8280XP_BE_CONTROL_ID(kcontrol->private_value)];
+}
+
+static int sc8280xp_be_config_get(struct snd_kcontrol *kcontrol,
+				  struct snd_ctl_elem_value *ucontrol)
+{
+	struct sc8280xp_be_config *cfg = sc8280xp_be_config_of(kcontrol);
+	unsigned int *item = &ucontrol->value.enumerated.item[0];
+	int i;
+
+	switch (SC8280XP_BE_CONTROL_KIND(kcontrol->private_value)) {
+	case SC8280XP_BE_RATE:
+		for (i = 0; i < ARRAY_SIZE(sc8280xp_be_rates); i++) {
+			if (sc8280xp_be_rates[i] == READ_ONCE(cfg->rate))
+				*item = i;
+		}
+
+		break;
+	case SC8280XP_BE_CHANNELS:
+		*item = READ_ONCE(cfg->channels_max) - 1;
+		break;
+	default:
+		for (i = 0; i < ARRAY_SIZE(sc8280xp_be_formats); i++) {
+			if (sc8280xp_be_formats[i] == READ_ONCE(cfg->format))
+				*item = i;
+		}
+
+		break;
+	}
+
+	return 0;
+}
+
+static int sc8280xp_be_config_put(struct snd_kcontrol *kcontrol,
+				  struct snd_ctl_elem_value *ucontrol)
+{
+	struct sc8280xp_be_config *cfg = sc8280xp_be_config_of(kcontrol);
+	unsigned int item = ucontrol->value.enumerated.item[0];
+
+	switch (SC8280XP_BE_CONTROL_KIND(kcontrol->private_value)) {
+	case SC8280XP_BE_RATE:
+		if (item >= ARRAY_SIZE(sc8280xp_be_rates))
+			return -EINVAL;
+
+		if (READ_ONCE(cfg->rate) == sc8280xp_be_rates[item])
+			return 0;
+
+		WRITE_ONCE(cfg->rate, sc8280xp_be_rates[item]);
+		break;
+	case SC8280XP_BE_CHANNELS:
+		if (item >= ARRAY_SIZE(sc8280xp_be_channels_text))
+			return -EINVAL;
+
+		if (READ_ONCE(cfg->channels_min) == item + 1 &&
+		    READ_ONCE(cfg->channels_max) == item + 1)
+			return 0;
+
+		WRITE_ONCE(cfg->channels_min, item + 1);
+		WRITE_ONCE(cfg->channels_max, item + 1);
+		break;
+	default:
+		if (item >= ARRAY_SIZE(sc8280xp_be_formats))
+			return -EINVAL;
+
+		if (READ_ONCE(cfg->format) == sc8280xp_be_formats[item])
+			return 0;
+
+		WRITE_ONCE(cfg->format, sc8280xp_be_formats[item]);
+		break;
+	}
+
+	return 1;
+}
+
+static int sc8280xp_add_be_config_control(struct snd_soc_pcm_runtime *rtd,
+					  unsigned int kind, const char *suffix)
+{
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	struct snd_soc_card *card = rtd->card;
+	struct snd_kcontrol_new control = {
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.info = sc8280xp_be_config_info,
+		.get = sc8280xp_be_config_get,
+		.put = sc8280xp_be_config_put,
+		.private_value = SC8280XP_BE_CONTROL(cpu_dai->id, kind),
+	};
+
+	control.name = devm_kasprintf(card->dev, GFP_KERNEL, "%s %s",
+				      rtd->dai_link->name, suffix);
+	if (!control.name)
+		return -ENOMEM;
+
+	return snd_soc_add_card_controls(card, &control, 1);
+}
+
+static int sc8280xp_add_be_config(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	int ret;
+
+	ret = sc8280xp_add_be_config_control(rtd, SC8280XP_BE_RATE, "Rate");
+	if (ret)
+		return ret;
+
+	ret = sc8280xp_add_be_config_control(rtd, SC8280XP_BE_FORMAT, "Format");
+	if (ret)
+		return ret;
+
+	switch (cpu_dai->id) {
+	case SLIMBUS_0_RX ... SLIMBUS_6_TX:
+		return 0;
+	default:
+		return sc8280xp_add_be_config_control(rtd, SC8280XP_BE_CHANNELS,
+						      "Channels");
+	}
+}
+
 static int sc8280xp_snd_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct sc8280xp_snd_data *data = snd_soc_card_get_drvdata(rtd->card);
@@ -208,8 +380,13 @@ static int sc8280xp_snd_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_card *card = rtd->card;
 	struct snd_soc_jack *dp_jack  = NULL;
 	int dp_pcm_id = 0;
+	int ret;
 
 	sc8280xp_init_be_config(rtd);
+
+	ret = sc8280xp_add_be_config(rtd);
+	if (ret)
+		return ret;
 
 	switch (cpu_dai->id) {
 	case WSA_CODEC_DMA_RX_0:
@@ -312,11 +489,11 @@ static int sc8280xp_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
 	struct sc8280xp_be_config *cfg = &data->be_config[cpu_dai->id];
 
-	rate->min = rate->max = cfg->rate;
+	rate->min = rate->max = READ_ONCE(cfg->rate);
 	snd_mask_none(fmt);
-	snd_mask_set_format(fmt, cfg->format);
-	channels->min = cfg->channels_min;
-	channels->max = cfg->channels_max;
+	snd_mask_set_format(fmt, READ_ONCE(cfg->format));
+	channels->min = READ_ONCE(cfg->channels_min);
+	channels->max = READ_ONCE(cfg->channels_max);
 
 	switch (cpu_dai->id) {
 	case SLIMBUS_0_RX ... SLIMBUS_6_TX: {
