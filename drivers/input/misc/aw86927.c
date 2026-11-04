@@ -378,6 +378,17 @@ static int aw86927_haptics_play(struct input_dev *dev, void *data, struct ff_eff
 	return 0;
 }
 
+static int aw86927_start(struct aw86927_data *haptics, u8 strength)
+{
+	int err;
+
+	err = regmap_write(haptics->regmap, AW86927_PLAYCFG2_REG, strength);
+	if (err)
+		return err;
+
+	return regmap_write(haptics->regmap, AW86927_PLAYCFG4_REG, AW86927_PLAYCFG4_GO);
+}
+
 static int aw86927_play_sine(struct aw86927_data *haptics, u16 level)
 {
 	int err;
@@ -419,16 +430,7 @@ static int aw86927_play_sine(struct aw86927_data *haptics, u16 level)
 	if (err)
 		return err;
 
-	err = regmap_write(haptics->regmap, AW86927_PLAYCFG2_REG, level * 0x80 / 0xffff);
-	if (err)
-		return err;
-
-	/* Start playback */
-	err = regmap_write(haptics->regmap, AW86927_PLAYCFG4_REG, AW86927_PLAYCFG4_GO);
-	if (err)
-		return err;
-
-	return 0;
+	return aw86927_start(haptics, level * 0x80 / 0xffff);
 }
 
 static int aw86927_open(struct input_dev *input)
