@@ -44,10 +44,12 @@ struct q6usb_port_data {
 
 static const struct snd_soc_dapm_widget q6usb_dai_widgets[] = {
 	SND_SOC_DAPM_HP("USB_RX_BE", NULL),
+	SND_SOC_DAPM_MIC("USB_TX_BE", NULL),
 };
 
 static const struct snd_soc_dapm_route q6usb_dapm_routes[] = {
 	{"USB Playback", NULL, "USB_RX_BE"},
+	{"USB Capture", NULL, "USB_TX_BE"},
 };
 
 static int q6usb_hw_params(struct snd_pcm_substream *substream,
@@ -73,6 +75,11 @@ static int q6usb_hw_params(struct snd_pcm_substream *substream,
 	ret = snd_soc_usb_find_supported_format(sdev->chip_idx, params, direction);
 	if (ret < 0 || !data->afe)
 		goto out;
+
+	if (direction == SNDRV_PCM_STREAM_CAPTURE) {
+		ret = -EOPNOTSUPP;
+		goto out;
+	}
 
 	q6usb_afe = q6afe_port_get_from_id(cpu_dai->dev, USB_RX);
 	if (IS_ERR(q6usb_afe)) {
@@ -114,6 +121,27 @@ static struct snd_soc_dai_driver q6usb_be_dais[] = {
 		},
 		.id = USB_RX,
 		.name = "USB_RX_BE",
+		.ops = &q6usb_ops,
+	},
+	{
+		.capture = {
+			.stream_name = "USB BE TX",
+			.rates = SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_11025 |
+				SNDRV_PCM_RATE_16000 | SNDRV_PCM_RATE_22050 |
+				SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 |
+				SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_96000 |
+				SNDRV_PCM_RATE_192000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S16_BE |
+				SNDRV_PCM_FMTBIT_U16_LE | SNDRV_PCM_FMTBIT_U16_BE |
+				SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S24_BE |
+				SNDRV_PCM_FMTBIT_U24_LE | SNDRV_PCM_FMTBIT_U24_BE,
+			.channels_min = 1,
+			.channels_max = 2,
+			.rate_min = 8000,
+			.rate_max = 192000,
+		},
+		.id = USB_TX,
+		.name = "USB_TX_BE",
 		.ops = &q6usb_ops,
 	},
 };
