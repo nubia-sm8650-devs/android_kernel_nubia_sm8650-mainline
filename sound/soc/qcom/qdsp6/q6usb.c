@@ -35,6 +35,7 @@ struct q6usb_port_data {
 	struct snd_soc_usb *usb;
 	struct snd_soc_jack *hs_jack;
 	struct q6usb_offload priv;
+	bool afe;
 
 	/* Protects against operations between SOC USB and ASoC */
 	struct mutex mutex;
@@ -70,7 +71,7 @@ static int q6usb_hw_params(struct snd_pcm_substream *substream,
 	sdev = list_last_entry(&data->devices, struct snd_soc_usb_device, list);
 
 	ret = snd_soc_usb_find_supported_format(sdev->chip_idx, params, direction);
-	if (ret < 0)
+	if (ret < 0 || !data->afe)
 		goto out;
 
 	q6usb_afe = q6afe_port_get_from_id(cpu_dai->dev, USB_RX);
@@ -366,6 +367,58 @@ static const struct snd_soc_component_driver q6usb_dai_component = {
 	.of_xlate_dai_name = q6usb_audio_ports_of_xlate_dai_name,
 };
 
+/**
+ * q6usb_get_offload_token() - Get the token of the offloaded USB device
+ * @rtd: runtime of a DAI link with a q6usb codec DAI
+ * @direction: stream direction
+ * @token: USB card index, PCM index and direction in the layout the DSP
+ *	   passes back in QMI stream requests
+ *
+ * Return: 0 on success, -ENODEV without a q6usb codec DAI or an offload
+ * capable USB PCM for @direction.
+ */
+int q6usb_get_offload_token(struct snd_soc_pcm_runtime *rtd, int direction,
+			    u32 *token)
+{
+	struct snd_soc_usb_device *sdev;
+	struct q6usb_port_data *data;
+	struct snd_soc_dai *dai;
+	unsigned int pcm;
+	int i;
+
+	for_each_rtd_codec_dais(rtd, i, dai) {
+		if (dai->component->driver != &q6usb_dai_component)
+			continue;
+
+		data = dev_get_drvdata(dai->dev);
+		guard(mutex)(&data->mutex);
+
+		if (list_empty(&data->devices))
+			return -ENODEV;
+
+		sdev = list_last_entry(&data->devices, struct snd_soc_usb_device, list);
+
+		if (direction == SNDRV_PCM_STREAM_PLAYBACK) {
+			if (!sdev->num_playback)
+				return -ENODEV;
+
+			pcm = sdev->ppcm_idx[sdev->num_playback - 1];
+		} else {
+			if (!sdev->num_capture)
+				return -ENODEV;
+
+			pcm = sdev->cpcm_idx[sdev->num_capture - 1];
+		}
+
+		*token = (sdev->card_idx << 16) | (pcm << 8) | direction;
+
+		return 0;
+	}
+
+	return -ENODEV;
+}
+EXPORT_SYMBOL_GPL(q6usb_get_offload_token);
+
 static int q6usb_dai_dev_probe(struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node;
@@ -394,6 +447,7 @@ static int q6usb_dai_dev_probe(struct platform_device *pdev)
 		return ret;
 
 	data->priv.domain = iommu_get_domain_for_dev(&pdev->dev);
+	data->afe = of_device_is_compatible(dev->parent->of_node, "qcom,q6afe");
 
 	data->priv.dev = dev;
 	INIT_LIST_HEAD(&data->devices);
