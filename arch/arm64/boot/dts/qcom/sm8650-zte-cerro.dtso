@@ -264,6 +264,38 @@
 				sound-dai = <&q6apm>;
 			};
 		};
+
+		usb-playback-dai-link {
+			link-name = "USB Playback";
+
+			cpu {
+				sound-dai = <&q6apmbedai USB_RX>;
+			};
+
+			codec {
+				sound-dai = <&q6usbdai USB_RX>;
+			};
+
+			platform {
+				sound-dai = <&q6apm>;
+			};
+		};
+
+		usb-capture-dai-link {
+			link-name = "USB Capture";
+
+			cpu {
+				sound-dai = <&q6apmbedai USB_TX>;
+			};
+
+			codec {
+				sound-dai = <&q6usbdai USB_TX>;
+			};
+
+			platform {
+				sound-dai = <&q6apm>;
+			};
+		};
 	};
 
 	wcn7850-pmu {
