@@ -29,6 +29,8 @@ struct q6apm_graph;
 #define MODULE_ID_AAC_DEC		0x0700101F
 #define MODULE_ID_CODEC_DMA_SINK	0x07001023
 #define MODULE_ID_CODEC_DMA_SOURCE	0x07001024
+#define MODULE_ID_SLIMBUS_SINK		0x07001029
+#define MODULE_ID_SLIMBUS_SOURCE	0x0700102A
 #define MODULE_ID_FLAC_DEC		0x0700102F
 #define MODULE_ID_SMECNS_V2		0x07001031
 #define MODULE_ID_MP3_DECODE		0x0700103B
@@ -623,6 +625,14 @@ struct param_id_display_port_intf_cfg {
 	uint32_t dptx_idx;
 } __packed;
 
+#define PARAM_ID_SLIMBUS_CONFIG			0x08001068
+#define AR_SLIMBUS_MAX_CHANNELS			8
+
+struct param_id_slimbus_cfg {
+	uint32_t slimbus_dev_id;
+	uint8_t shared_channel_mapping[AR_SLIMBUS_MAX_CHANNELS];
+} __packed;
+
 #define PARAM_ID_HW_EP_MF_CFG			0x08001017
 struct param_id_hw_ep_mf {
 	uint32_t sample_rate;
@@ -998,6 +1008,7 @@ struct audioreach_module_config {
 	u16	slot_width;
 	struct snd_codec codec;
 	u8 channel_map[PCM_MAX_NUM_CHANNEL];
+	u8 slim_channels[AR_SLIMBUS_MAX_CHANNELS];
 };
 
 /* Packet Allocation routines */

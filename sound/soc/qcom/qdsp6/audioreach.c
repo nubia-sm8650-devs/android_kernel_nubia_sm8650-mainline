@@ -682,6 +682,58 @@ static int audioreach_display_port_set_media_format(struct q6apm_graph *graph,
 	return q6apm_send_cmd_sync(graph->apm, pkt, 0);
 }
 
+static void *audioreach_alloc_hw_ep_pkt(struct gpr_pkt **pkt,
+					const struct audioreach_module *module,
+					const struct audioreach_module_config *cfg,
+					u32 param_id, size_t param_size)
+{
+	int ic_sz = ALIGN(APM_MODULE_PARAM_DATA_SIZE + param_size, 8);
+	struct apm_module_param_data *param_data;
+	struct apm_module_hw_ep_mf_cfg *hw_cfg;
+	int ep_sz = APM_HW_EP_CFG_PSIZE;
+
+	*pkt = audioreach_alloc_apm_cmd_pkt(ep_sz + ic_sz, APM_CMD_SET_CFG, 0);
+	if (IS_ERR(*pkt))
+		return *pkt;
+
+	hw_cfg = (void *)*pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE;
+	hw_cfg->param_data.module_instance_id = module->instance_id;
+	hw_cfg->param_data.param_id = PARAM_ID_HW_EP_MF_CFG;
+	hw_cfg->param_data.param_size = ep_sz - APM_MODULE_PARAM_DATA_SIZE;
+	hw_cfg->mf.sample_rate = cfg->sample_rate;
+	hw_cfg->mf.bit_width = cfg->bit_width;
+	hw_cfg->mf.num_channels = cfg->num_channels;
+	hw_cfg->mf.data_format = module->data_format;
+
+	param_data = (void *)hw_cfg + ep_sz;
+	param_data->module_instance_id = module->instance_id;
+	param_data->param_id = param_id;
+	param_data->param_size = ic_sz - APM_MODULE_PARAM_DATA_SIZE;
+
+	return (void *)param_data + APM_MODULE_PARAM_DATA_SIZE;
+}
+
+static int audioreach_slimbus_set_media_format(struct q6apm_graph *graph,
+					       const struct audioreach_module *module,
+					       const struct audioreach_module_config *cfg)
+{
+	struct gpr_pkt *pkt __free(kfree) = NULL;
+	struct param_id_slimbus_cfg *slim_cfg;
+
+	if (cfg->num_channels > AR_SLIMBUS_MAX_CHANNELS)
+		return -EINVAL;
+
+	slim_cfg = audioreach_alloc_hw_ep_pkt(&pkt, module, cfg, PARAM_ID_SLIMBUS_CONFIG,
+					      sizeof(*slim_cfg));
+	if (IS_ERR(slim_cfg))
+		return PTR_ERR(slim_cfg);
+
+	slim_cfg->slimbus_dev_id = module->hw_interface_idx;
+	memcpy(slim_cfg->shared_channel_mapping, cfg->slim_channels, cfg->num_channels);
+
+	return q6apm_send_cmd_sync(graph->apm, pkt, 0);
+}
+
 /* LPASS Codec DMA port Module Media Format Setup */
 static int audioreach_codec_dma_set_media_format(struct q6apm_graph *graph,
 						 const struct audioreach_module *module,
@@ -1491,6 +1543,10 @@ int audioreach_set_media_format(struct q6apm_graph *graph,
 	case MODULE_ID_CODEC_DMA_SINK:
 	case MODULE_ID_CODEC_DMA_SOURCE:
 		rc = audioreach_codec_dma_set_media_format(graph, module, cfg);
+		break;
+	case MODULE_ID_SLIMBUS_SINK:
+	case MODULE_ID_SLIMBUS_SOURCE:
+		rc = audioreach_slimbus_set_media_format(graph, module, cfg);
 		break;
 	case MODULE_ID_SAL:
 		rc = audioreach_sal_set_media_format(graph, module, cfg);

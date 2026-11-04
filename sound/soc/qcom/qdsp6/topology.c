@@ -909,6 +909,8 @@ static int audioreach_widget_load_buffer(struct snd_soc_component *component,
 	switch (mod->module_id) {
 	case MODULE_ID_CODEC_DMA_SINK:
 	case MODULE_ID_CODEC_DMA_SOURCE:
+	case MODULE_ID_SLIMBUS_SINK:
+	case MODULE_ID_SLIMBUS_SOURCE:
 		audioreach_widget_dma_module_load(mod, mod_array);
 		break;
 	case MODULE_ID_DATA_LOGGING:
