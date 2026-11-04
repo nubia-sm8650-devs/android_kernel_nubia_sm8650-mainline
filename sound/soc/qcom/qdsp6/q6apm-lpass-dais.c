@@ -187,6 +187,37 @@ static int q6dma_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+static int q6slim_set_channel_map(struct snd_soc_dai *dai,
+				  unsigned int tx_num, const unsigned int *tx_slot,
+				  unsigned int rx_num, const unsigned int *rx_slot)
+{
+	struct q6apm_lpass_dai_data *dai_data = dev_get_drvdata(dai->dev);
+	struct audioreach_module_config *cfg = &dai_data->module_config[dai->id];
+	const unsigned int *slot = rx_slot;
+	unsigned int num = rx_num;
+	int i;
+
+	if (dai->id & 0x1) {
+		slot = tx_slot;
+		num = tx_num;
+	}
+
+	if (!slot || num > AR_SLIMBUS_MAX_CHANNELS)
+		return -EINVAL;
+
+	for (i = 0; i < num; i++) {
+		if (slot[i] > U8_MAX)
+			return -EINVAL;
+	}
+
+	memset(cfg->slim_channels, 0, sizeof(cfg->slim_channels));
+
+	for (i = 0; i < num; i++)
+		cfg->slim_channels[i] = slot[i];
+
+	return 0;
+}
+
 static void q6apm_lpass_dai_shutdown(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 {
 	struct q6apm_lpass_dai_data *dai_data = dev_get_drvdata(dai->dev);
@@ -450,6 +481,15 @@ static const struct snd_soc_dai_ops q6tdm_ops = {
 	.trigger	= q6apm_lpass_dai_trigger,
 };
 
+static const struct snd_soc_dai_ops q6slim_ops = {
+	.prepare	= q6apm_lpass_dai_prepare,
+	.startup	= q6apm_lpass_dai_startup,
+	.shutdown	= q6apm_lpass_dai_shutdown,
+	.set_channel_map  = q6slim_set_channel_map,
+	.hw_params	= q6dma_hw_params,
+	.trigger	= q6apm_lpass_dai_trigger,
+};
+
 static const struct snd_soc_component_driver q6apm_lpass_dai_component = {
 	.name = "q6apm-be-dai-component",
 	.of_xlate_dai_name = q6dsp_audio_ports_of_xlate_dai_name,
@@ -544,6 +584,7 @@ static int q6apm_lpass_dai_dev_probe(struct platform_device *pdev)
 	cfg.q6i2s_ops = &q6i2s_ops;
 	cfg.q6dma_ops = &q6dma_ops;
 	cfg.q6hdmi_ops = &q6hdmi_ops;
+	cfg.q6slim_ops = &q6slim_ops;
 	cfg.q6tdm_ops = &q6tdm_ops;
 	dais = q6dsp_audio_ports_set_config(dev, &cfg, &num_dais);
 
