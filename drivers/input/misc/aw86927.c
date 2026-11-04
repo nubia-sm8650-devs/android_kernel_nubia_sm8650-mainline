@@ -437,11 +437,9 @@ static int aw86927_open(struct input_dev *input)
 	return 0;
 }
 
-static void aw86927_close(struct input_dev *input)
+static void aw86927_disable_playback(void *data)
 {
-	struct aw86927_data *haptics = input_get_drvdata(input);
-	struct device *dev = &haptics->client->dev;
-	int err;
+	struct aw86927_data *haptics = data;
 
 	scoped_guard(spinlock_irqsave, &haptics->lock) {
 		haptics->enabled = false;
@@ -449,6 +447,15 @@ static void aw86927_close(struct input_dev *input)
 	}
 
 	cancel_delayed_work_sync(&haptics->play_work);
+}
+
+static void aw86927_close(struct input_dev *input)
+{
+	struct aw86927_data *haptics = input_get_drvdata(input);
+	struct device *dev = &haptics->client->dev;
+	int err;
+
+	aw86927_disable_playback(haptics);
 
 	err = aw86927_stop(haptics);
 	if (err)
@@ -885,6 +892,10 @@ static int aw86927_probe(struct i2c_client *client)
 		return dev_err_probe(haptics->dev, err, "Failed to request threaded irq\n");
 
 	INIT_DELAYED_WORK(&haptics->play_work, aw86927_haptics_play_work);
+
+	err = devm_add_action_or_reset(haptics->dev, aw86927_disable_playback, haptics);
+	if (err)
+		return err;
 
 	haptics->input_dev->name = "aw86927-haptics";
 	haptics->input_dev->open = aw86927_open;
