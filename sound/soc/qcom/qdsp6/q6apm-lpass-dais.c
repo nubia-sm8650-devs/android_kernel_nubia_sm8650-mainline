@@ -540,6 +540,7 @@ static int q6apm_lpass_dai_dev_probe(struct platform_device *pdev)
 		return ret;
 
 	memset(&cfg, 0, sizeof(cfg));
+	cfg.usb_capture = true;
 	cfg.q6i2s_ops = &q6i2s_ops;
 	cfg.q6dma_ops = &q6dma_ops;
 	cfg.q6hdmi_ops = &q6hdmi_ops;

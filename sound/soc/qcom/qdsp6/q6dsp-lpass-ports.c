@@ -672,6 +672,27 @@ static struct snd_soc_dai_driver q6dsp_audio_fe_dais[] = {
 	Q6AFE_CDC_DMA_TX_DAI(TX_CODEC_DMA_TX_5),
 	Q6AFE_CDC_DMA_RX_DAI(RX_CODEC_DMA_RX_6),
 	Q6AFE_CDC_DMA_RX_DAI(RX_CODEC_DMA_RX_7),
+	/* Last, so that AFE can leave it out */
+	{
+		.capture = {
+			.stream_name = "USB Capture",
+			.rates = SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_11025 |
+					SNDRV_PCM_RATE_16000 | SNDRV_PCM_RATE_22050 |
+					SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 |
+					SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_96000 |
+					SNDRV_PCM_RATE_192000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S16_BE |
+					SNDRV_PCM_FMTBIT_U16_LE | SNDRV_PCM_FMTBIT_U16_BE |
+					SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S24_BE |
+					SNDRV_PCM_FMTBIT_U24_LE | SNDRV_PCM_FMTBIT_U24_BE,
+			.channels_min = 1,
+			.channels_max = 2,
+			.rate_min = 8000,
+			.rate_max = 192000,
+		},
+		.id = USB_TX,
+		.name = "USB_TX",
+	},
 };
 
 int q6dsp_audio_ports_of_xlate_dai_name(struct snd_soc_component *component,
@@ -726,6 +747,7 @@ struct snd_soc_dai_driver *q6dsp_audio_ports_set_config(struct device *dev,
 			q6dsp_audio_fe_dais[i].ops = cfg->q6dma_ops;
 			break;
 		case USB_RX:
+		case USB_TX:
 			q6dsp_audio_fe_dais[i].ops = cfg->q6usb_ops;
 			break;
 		default:
@@ -733,7 +755,7 @@ struct snd_soc_dai_driver *q6dsp_audio_ports_set_config(struct device *dev,
 		}
 	}
 
-	*num_dais = ARRAY_SIZE(q6dsp_audio_fe_dais);
+	*num_dais = ARRAY_SIZE(q6dsp_audio_fe_dais) - !cfg->usb_capture;
 	return q6dsp_audio_fe_dais;
 }
 EXPORT_SYMBOL_GPL(q6dsp_audio_ports_set_config);
