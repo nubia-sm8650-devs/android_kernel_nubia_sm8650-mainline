@@ -196,6 +196,7 @@ struct aw86927_data {
 	spinlock_t lock;
 	struct delayed_work play_work;
 	bool enabled;
+	bool running;
 	struct device *dev;
 	struct input_dev *input_dev;
 	struct i2c_client *client;
@@ -447,6 +448,7 @@ static void aw86927_disable_playback(void *data)
 	}
 
 	cancel_delayed_work_sync(&haptics->play_work);
+	haptics->running = false;
 }
 
 static void aw86927_close(struct input_dev *input)
@@ -477,13 +479,23 @@ static void aw86927_haptics_play_work(struct work_struct *work)
 		level = haptics->level;
 	}
 
-	if (level)
+	if (level && haptics->running) {
+		err = regmap_write(haptics->regmap, AW86927_PLAYCFG2_REG,
+				   level * 0x80 / 0xffff);
+	} else if (level) {
 		err = aw86927_play_sine(haptics, level);
-	else
+		if (!err)
+			haptics->running = true;
+	} else {
 		err = aw86927_stop(haptics);
+		haptics->running = false;
+	}
 
-	if (err)
+	if (err) {
 		dev_err(dev, "Failed to execute work command: %d\n", err);
+		aw86927_stop(haptics);
+		haptics->running = false;
+	}
 }
 
 static void aw86927_hw_reset(struct aw86927_data *haptics)
