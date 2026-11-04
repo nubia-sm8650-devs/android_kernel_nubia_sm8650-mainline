@@ -16,6 +16,7 @@
 #include <linux/module.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
+#include <linux/spinlock.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
 
@@ -192,6 +193,7 @@ enum aw86927_model {
 
 struct aw86927_data {
 	enum aw86927_model model;
+	spinlock_t lock;
 	struct delayed_work play_work;
 	struct device *dev;
 	struct input_dev *input_dev;
@@ -355,6 +357,8 @@ static int aw86927_haptics_play(struct input_dev *dev, void *data, struct ff_eff
 	if (!level)
 		level = effect->u.rumble.weak_magnitude;
 
+	guard(spinlock_irqsave)(&haptics->lock);
+
 	/* If level does not change, don't restart playback */
 	if (haptics->level == level)
 		return 0;
@@ -366,7 +370,7 @@ static int aw86927_haptics_play(struct input_dev *dev, void *data, struct ff_eff
 	return 0;
 }
 
-static int aw86927_play_sine(struct aw86927_data *haptics)
+static int aw86927_play_sine(struct aw86927_data *haptics, u16 level)
 {
 	int err;
 
@@ -407,7 +411,7 @@ static int aw86927_play_sine(struct aw86927_data *haptics)
 	if (err)
 		return err;
 
-	err = regmap_write(haptics->regmap, AW86927_PLAYCFG2_REG, haptics->level * 0x80 / 0xffff);
+	err = regmap_write(haptics->regmap, AW86927_PLAYCFG2_REG, level * 0x80 / 0xffff);
 	if (err)
 		return err;
 
@@ -437,10 +441,14 @@ static void aw86927_haptics_play_work(struct work_struct *work)
 	struct aw86927_data *haptics =
 		container_of(to_delayed_work(work), struct aw86927_data, play_work);
 	struct device *dev = &haptics->client->dev;
+	u16 level;
 	int err;
 
-	if (haptics->level)
-		err = aw86927_play_sine(haptics);
+	scoped_guard(spinlock_irqsave, &haptics->lock)
+		level = haptics->level;
+
+	if (level)
+		err = aw86927_play_sine(haptics, level);
 	else
 		err = aw86927_stop(haptics);
 
@@ -804,6 +812,8 @@ static int aw86927_probe(struct i2c_client *client)
 	if (IS_ERR(haptics->regmap))
 		return dev_err_probe(haptics->dev, PTR_ERR(haptics->regmap),
 					"Failed to allocate register map\n");
+
+	spin_lock_init(&haptics->lock);
 
 	haptics->input_dev = devm_input_allocate_device(haptics->dev);
 	if (!haptics->input_dev)
