@@ -106,7 +106,9 @@
 #define AW86927_BASEADDRL_REG			0x2e
 
 #define AW86927_RTPCFG3_REG			0x2f
+#define AW86927_RTPCFG3_FIFO_AEH_MASK		GENMASK(7, 4)
 #define AW86927_RTPCFG3_FIFO_AFH_MASK		GENMASK(3, 0)
+#define AW86927_RTPCFG4_REG			0x30
 #define AW86927_RTPCFG5_REG			0x31
 #define AW86927_RTPDATA_REG			0x32
 
@@ -370,6 +372,13 @@ static int aw86927_play_mode(struct aw86927_data *haptics, u8 play_mode)
 	return 0;
 }
 
+static int aw86927_mask_fifo(struct aw86927_data *haptics, bool mask)
+{
+	return regmap_update_bits(haptics->regmap, AW86927_SYSINTM_REG,
+				  AW86927_SYSINTM_FF_AEM,
+				  mask ? AW86927_SYSINTM_FF_AEM : 0);
+}
+
 static int aw86927_stop(struct aw86927_data *haptics)
 {
 	int err;
@@ -387,6 +396,10 @@ static int aw86927_stop(struct aw86927_data *haptics)
 		if (err)
 			return err;
 	}
+
+	err = aw86927_mask_fifo(haptics, true);
+	if (err)
+		return err;
 
 	return 0;
 }
@@ -655,6 +668,10 @@ static int aw86927_refill(struct aw86927_data *haptics, struct aw86927_waveform 
 
 		haptics->position += chunk;
 	}
+
+	err = aw86927_mask_fifo(haptics, haptics->position == waveform->length);
+	if (err)
+		return err;
 
 	return 0;
 }
@@ -998,8 +1015,19 @@ static int aw86927_haptic_init(struct aw86927_data *haptics)
 
 static int aw86927_fifo_init(struct aw86927_data *haptics)
 {
+	u16 ae = AW86927_RAM_BASE_ADDR / 2;
 	u16 af = AW86927_RAM_BASE_ADDR * 3 / 4;
 	int err;
+
+	err = regmap_update_bits(haptics->regmap, AW86927_RTPCFG3_REG,
+				 AW86927_RTPCFG3_FIFO_AEH_MASK,
+				 FIELD_PREP(AW86927_RTPCFG3_FIFO_AEH_MASK, ae >> 8));
+	if (err)
+		return err;
+
+	err = regmap_write(haptics->regmap, AW86927_RTPCFG4_REG, ae & 0xff);
+	if (err)
+		return err;
 
 	err = regmap_update_bits(haptics->regmap, AW86927_RTPCFG3_REG,
 				 AW86927_RTPCFG3_FIFO_AFH_MASK,
@@ -1128,8 +1156,14 @@ static irqreturn_t aw86927_irq(int irq, void *data)
 		dev_dbg(dev, "Chip playback done!\n");
 	if (reg_val & AW86927_SYSINT_FF_AFI)
 		dev_dbg(dev, "The RTP mode FIFO is almost full!\n");
-	if (reg_val & AW86927_SYSINT_FF_AEI)
+	if (reg_val & AW86927_SYSINT_FF_AEI) {
 		dev_dbg(dev, "The RTP mode FIFO is almost empty!\n");
+
+		guard(spinlock_irqsave)(&haptics->lock);
+
+		if (haptics->enabled && !haptics->suspended && haptics->requested)
+			mod_delayed_work(system_dfl_wq, &haptics->play_work, 0);
+	}
 
 	return IRQ_HANDLED;
 }
