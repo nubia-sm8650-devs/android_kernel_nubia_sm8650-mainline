@@ -35,6 +35,8 @@ struct q6apm_graph;
 #define MODULE_ID_SMECNS_V2		0x07001031
 #define MODULE_ID_MP3_DECODE		0x0700103B
 #define MODULE_ID_GAPLESS		0x0700104D
+#define MODULE_ID_USB_AUDIO_SINK	0x0700104F
+#define MODULE_ID_USB_AUDIO_SOURCE	0x07001050
 #define MODULE_ID_DISPLAY_PORT_SINK	0x07001069
 #define MODULE_ID_SPEAKER_PROTECTION	0x070010E2
 #define MODULE_ID_SPEAKER_PROTECTION_VI	0x070010E3
@@ -633,6 +635,13 @@ struct param_id_slimbus_cfg {
 	uint8_t shared_channel_mapping[AR_SLIMBUS_MAX_CHANNELS];
 } __packed;
 
+#define PARAM_ID_USB_AUDIO_INTF_CFG		0x080010D6
+
+struct param_id_usb_audio_intf_cfg {
+	uint32_t usb_token;
+	uint32_t svc_interval;
+} __packed;
+
 #define PARAM_ID_HW_EP_MF_CFG			0x08001017
 struct param_id_hw_ep_mf {
 	uint32_t sample_rate;
@@ -1009,6 +1018,7 @@ struct audioreach_module_config {
 	struct snd_codec codec;
 	u8 channel_map[PCM_MAX_NUM_CHANNEL];
 	u8 slim_channels[AR_SLIMBUS_MAX_CHANNELS];
+	u32 usb_token;
 };
 
 /* Packet Allocation routines */

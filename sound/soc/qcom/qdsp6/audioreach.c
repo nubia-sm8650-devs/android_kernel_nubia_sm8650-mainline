@@ -734,6 +734,23 @@ static int audioreach_slimbus_set_media_format(struct q6apm_graph *graph,
 	return q6apm_send_cmd_sync(graph->apm, pkt, 0);
 }
 
+static int audioreach_usb_set_media_format(struct q6apm_graph *graph,
+					   const struct audioreach_module *module,
+					   const struct audioreach_module_config *cfg)
+{
+	struct gpr_pkt *pkt __free(kfree) = NULL;
+	struct param_id_usb_audio_intf_cfg *usb_cfg;
+
+	usb_cfg = audioreach_alloc_hw_ep_pkt(&pkt, module, cfg, PARAM_ID_USB_AUDIO_INTF_CFG,
+					     sizeof(*usb_cfg));
+	if (IS_ERR(usb_cfg))
+		return PTR_ERR(usb_cfg);
+
+	usb_cfg->usb_token = cfg->usb_token;
+
+	return q6apm_send_cmd_sync(graph->apm, pkt, 0);
+}
+
 /* LPASS Codec DMA port Module Media Format Setup */
 static int audioreach_codec_dma_set_media_format(struct q6apm_graph *graph,
 						 const struct audioreach_module *module,
@@ -1547,6 +1564,10 @@ int audioreach_set_media_format(struct q6apm_graph *graph,
 	case MODULE_ID_SLIMBUS_SINK:
 	case MODULE_ID_SLIMBUS_SOURCE:
 		rc = audioreach_slimbus_set_media_format(graph, module, cfg);
+		break;
+	case MODULE_ID_USB_AUDIO_SINK:
+	case MODULE_ID_USB_AUDIO_SOURCE:
+		rc = audioreach_usb_set_media_format(graph, module, cfg);
 		break;
 	case MODULE_ID_SAL:
 		rc = audioreach_sal_set_media_format(graph, module, cfg);
