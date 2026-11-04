@@ -55,6 +55,7 @@
 #define AW86927_PLAYCFG3_AUTO_BST_MASK		GENMASK(4, 4)
 #define AW86927_PLAYCFG3_AUTO_BST_ENABLE	1
 #define AW86927_PLAYCFG3_AUTO_BST_DISABLE	0
+#define AW86927_PLAYCFG3_BRK_EN			BIT(2)
 #define AW86927_PLAYCFG3_PLAY_MODE_MASK		GENMASK(1, 0)
 #define AW86927_PLAYCFG3_PLAY_MODE_RAM		0
 
@@ -461,6 +462,11 @@ static void aw86927_hw_reset(struct aw86927_data *haptics)
 static int aw86927_haptic_init(struct aw86927_data *haptics)
 {
 	int err;
+
+	err = regmap_clear_bits(haptics->regmap, AW86927_PLAYCFG3_REG,
+				AW86927_PLAYCFG3_BRK_EN);
+	if (err)
+		return err;
 
 	err = regmap_update_bits(haptics->regmap,
 				 AW86927_SYSCTRL4_REG,
