@@ -17,6 +17,7 @@
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/types.h>
+#include <linux/workqueue.h>
 
 #define AW86927_RSTCFG_REG			0x00
 #define AW86927_RSTCFG_SOFTRST			0xaa
@@ -191,7 +192,7 @@ enum aw86927_model {
 
 struct aw86927_data {
 	enum aw86927_model model;
-	struct work_struct play_work;
+	struct delayed_work play_work;
 	struct device *dev;
 	struct input_dev *input_dev;
 	struct i2c_client *client;
@@ -360,7 +361,7 @@ static int aw86927_haptics_play(struct input_dev *dev, void *data, struct ff_eff
 
 	haptics->level = level;
 
-	schedule_work(&haptics->play_work);
+	mod_delayed_work(system_dfl_wq, &haptics->play_work, 0);
 
 	return 0;
 }
@@ -424,7 +425,7 @@ static void aw86927_close(struct input_dev *input)
 	struct device *dev = &haptics->client->dev;
 	int err;
 
-	cancel_work_sync(&haptics->play_work);
+	cancel_delayed_work_sync(&haptics->play_work);
 
 	err = aw86927_stop(haptics);
 	if (err)
@@ -434,7 +435,7 @@ static void aw86927_close(struct input_dev *input)
 static void aw86927_haptics_play_work(struct work_struct *work)
 {
 	struct aw86927_data *haptics =
-		container_of(work, struct aw86927_data, play_work);
+		container_of(to_delayed_work(work), struct aw86927_data, play_work);
 	struct device *dev = &haptics->client->dev;
 	int err;
 
@@ -850,7 +851,7 @@ static int aw86927_probe(struct i2c_client *client)
 	if (err)
 		return dev_err_probe(haptics->dev, err, "Failed to request threaded irq\n");
 
-	INIT_WORK(&haptics->play_work, aw86927_haptics_play_work);
+	INIT_DELAYED_WORK(&haptics->play_work, aw86927_haptics_play_work);
 
 	haptics->input_dev->name = "aw86927-haptics";
 	haptics->input_dev->close = aw86927_close;
