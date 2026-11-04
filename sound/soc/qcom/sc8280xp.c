@@ -19,6 +19,7 @@
 #include "sdw.h"
 
 #define I2S_MCLKFS 256
+#define SLIM_MAX_PORTS 16
 
 #define I2S_MCLK_RATE(rate) \
 	((rate) * (I2S_MCLKFS))
@@ -215,6 +216,60 @@ static int sc8280xp_snd_init(struct snd_soc_pcm_runtime *rtd)
 	return 0;
 }
 
+static int sc8280xp_get_slim_channels(struct snd_soc_pcm_runtime *rtd,
+				      unsigned int *ch, unsigned int *num)
+{
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	unsigned int rx_ch[SLIM_MAX_PORTS], tx_ch[SLIM_MAX_PORTS];
+	unsigned int rx_num = 0, tx_num = 0;
+	struct snd_soc_dai *codec_dai;
+	int i, ret;
+
+	for_each_rtd_codec_dais(rtd, i, codec_dai) {
+		ret = snd_soc_dai_get_channel_map(codec_dai, &tx_num, tx_ch,
+						  &rx_num, rx_ch);
+		if (ret == -ENOTSUPP)
+			continue;
+
+		if (ret)
+			return ret;
+
+		if (cpu_dai->id & 0x1) {
+			*num = tx_num;
+			memcpy(ch, tx_ch, tx_num * sizeof(*ch));
+		} else {
+			*num = rx_num;
+			memcpy(ch, rx_ch, rx_num * sizeof(*ch));
+		}
+
+		return 0;
+	}
+
+	return -ENOTSUPP;
+}
+
+static int sc8280xp_slim_hw_params(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	unsigned int ch[SLIM_MAX_PORTS];
+	unsigned int num;
+	int ret;
+
+	ret = sc8280xp_get_slim_channels(rtd, ch, &num);
+	if (ret == -ENOTSUPP)
+		return 0;
+
+	if (ret)
+		return ret;
+
+	if (cpu_dai->id & 0x1)
+		ret = snd_soc_dai_set_channel_map(cpu_dai, num, ch, 0, NULL);
+	else
+		ret = snd_soc_dai_set_channel_map(cpu_dai, 0, NULL, num, ch);
+
+	return ret == -ENOTSUPP ? 0 : ret;
+}
+
 static int sc8280xp_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 				     struct snd_pcm_hw_params *params)
 {
@@ -237,6 +292,15 @@ static int sc8280xp_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	case TX_CODEC_DMA_TX_3:
 		channels->min = 1;
 		break;
+	case SLIMBUS_0_RX ... SLIMBUS_6_TX: {
+		unsigned int ch[SLIM_MAX_PORTS];
+		unsigned int num;
+
+		if (!sc8280xp_get_slim_channels(rtd, ch, &num) && num)
+			channels->min = channels->max = num;
+
+		break;
+	}
 	default:
 		break;
 	}
@@ -298,6 +362,8 @@ static int sc8280xp_snd_hw_params(struct snd_pcm_substream *substream,
 		break;
 	case PRIMARY_TDM_RX_0 ... QUINARY_TDM_TX_7:
 		return sc8280xp_tdm_hw_params(substream, params);
+	case SLIMBUS_0_RX ... SLIMBUS_6_TX:
+		return sc8280xp_slim_hw_params(rtd);
 	default:
 		break;
 	}
