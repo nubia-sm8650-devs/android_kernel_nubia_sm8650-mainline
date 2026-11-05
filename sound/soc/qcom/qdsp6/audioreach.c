@@ -1328,6 +1328,22 @@ static int audioreach_mfc_set_media_format(struct q6apm_graph *graph,
 	return q6apm_send_cmd_sync(graph->apm, pkt, 0);
 }
 
+static int audioreach_compr_media_format_size(const struct audioreach_module_config *mcfg)
+{
+	switch (mcfg->fmt) {
+	case SND_AUDIOCODEC_MP3:
+		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_pcm);
+	case SND_AUDIOCODEC_AAC:
+		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_aac_t);
+	case SND_AUDIOCODEC_FLAC:
+		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_flac_t);
+	case SND_AUDIOCODEC_OPUS_RAW:
+		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_opus_t);
+	default:
+		return -EINVAL;
+	}
+}
+
 static int audioreach_set_compr_media_format(struct media_format *media_fmt_hdr,
 					     void *p,
 					     const struct audioreach_module_config *mcfg)
@@ -1418,7 +1434,10 @@ int audioreach_compr_set_param(struct q6apm_graph *graph,
 	int rc;
 	void *p;
 	int iid = graph->shm_iid;
-	int payload_size = sizeof(struct apm_sh_module_media_fmt_cmd);
+	int payload_size = audioreach_compr_media_format_size(mcfg);
+
+	if (payload_size < 0)
+		return payload_size;
 
 	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_cmd_pkt(payload_size,
 					DATA_CMD_WR_SH_MEM_EP_MEDIA_FORMAT,
@@ -1714,7 +1733,17 @@ static int audioreach_shmem_set_media_format(struct q6apm_graph *graph,
 	int i, j;
 	void *p;
 
-	payload_size = APM_SHMEM_FMT_CFG_PSIZE(num_channels) + APM_MODULE_PARAM_DATA_SIZE;
+	if (mcfg->fmt == SND_AUDIOCODEC_PCM) {
+		payload_size = APM_SHMEM_FMT_CFG_PSIZE(num_channels);
+	} else {
+		payload_size = audioreach_compr_media_format_size(mcfg);
+		if (payload_size < 0)
+			return payload_size;
+
+		payload_size = ALIGN(payload_size, 8);
+	}
+
+	payload_size += APM_MODULE_PARAM_DATA_SIZE;
 
 	struct gpr_pkt *pkt __free(kfree) =
 		audioreach_alloc_cmd_pkt(payload_size, APM_CMD_SET_CFG, 0,
