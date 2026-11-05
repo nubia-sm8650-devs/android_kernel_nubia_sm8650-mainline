@@ -16,10 +16,14 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/pm.h>
+#include <linux/refcount.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
+#include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
+#include <linux/uaccess.h>
+#include <linux/units.h>
 #include <linux/workqueue.h>
 
 #define AW86927_RSTCFG_REG			0x00
@@ -186,6 +190,9 @@
 #define AW86927_BASEADDRH_VAL			0x08
 #define AW86927_BASEADDRL_VAL			0x00
 
+#define AW86927_SAMPLE_RATE			24000
+#define AW86927_MAX_SAMPLES			AW86927_RAM_BASE_ADDR
+
 enum aw86927_work_mode {
 	AW86927_STANDBY_MODE,
 	AW86927_RAM_MODE,
@@ -197,6 +204,12 @@ enum aw86927_model {
 	AW86938,
 };
 
+struct aw86927_waveform {
+	refcount_t refs;
+	u32 length;
+	u8 samples[];
+};
+
 struct aw86927_data {
 	enum aw86927_model model;
 	spinlock_t lock;
@@ -204,6 +217,7 @@ struct aw86927_data {
 	bool enabled;
 	bool suspended;
 	bool running;
+	struct aw86927_waveform *waveforms[FF_MEMLESS_EFFECTS];
 	struct device *dev;
 	struct input_dev *input_dev;
 	struct i2c_client *client;
@@ -362,6 +376,78 @@ static int aw86927_stop(struct aw86927_data *haptics)
 	return 0;
 }
 
+static void aw86927_waveform_put(struct aw86927_waveform *waveform)
+{
+	if (waveform && refcount_dec_and_test(&waveform->refs))
+		kvfree_atomic(waveform);
+}
+
+static int aw86927_upload(struct input_dev *dev, struct ff_effect *effect,
+			  struct ff_effect *old)
+{
+	struct aw86927_data *haptics = input_get_drvdata(dev);
+	struct ff_periodic_effect *periodic = &effect->u.periodic;
+	struct aw86927_waveform *waveform;
+	unsigned int duration, i;
+	s16 *samples;
+
+	if (!periodic->custom_len || periodic->custom_len > AW86927_MAX_SAMPLES ||
+	    periodic->period || periodic->phase || periodic->offset || periodic->magnitude < 0)
+		return -EINVAL;
+
+	duration = DIV_ROUND_UP(periodic->custom_len * MSEC_PER_SEC, AW86927_SAMPLE_RATE);
+	if (effect->replay.length && effect->replay.length != duration)
+		return -EINVAL;
+
+	samples = vmemdup_array_user(periodic->custom_data, periodic->custom_len, sizeof(*samples));
+	if (IS_ERR(samples))
+		return PTR_ERR(samples);
+
+	waveform = kvmalloc(struct_size(waveform, samples, periodic->custom_len), GFP_KERNEL);
+	if (!waveform) {
+		kvfree(samples);
+		return -ENOMEM;
+	}
+
+	refcount_set(&waveform->refs, 1);
+	waveform->length = periodic->custom_len;
+
+	for (i = 0; i < waveform->length; i++)
+		waveform->samples[i] = (u16)samples[i] >> 8;
+
+	kvfree(samples);
+	effect->replay.length = duration;
+
+	scoped_guard(spinlock_irqsave, &haptics->lock)
+		swap(haptics->waveforms[effect->id], waveform);
+
+	aw86927_waveform_put(waveform);
+
+	return 0;
+}
+
+static int aw86927_erase(struct input_dev *dev, int effect_id)
+{
+	struct aw86927_data *haptics = input_get_drvdata(dev);
+	struct aw86927_waveform *waveform = NULL;
+
+	scoped_guard(spinlock_irqsave, &haptics->lock)
+		swap(haptics->waveforms[effect_id], waveform);
+
+	aw86927_waveform_put(waveform);
+
+	return 0;
+}
+
+static void aw86927_free_waveforms(void *data)
+{
+	struct aw86927_data *haptics = data;
+	int i;
+
+	for (i = 0; i < FF_MEMLESS_EFFECTS; i++)
+		aw86927_waveform_put(haptics->waveforms[i]);
+}
+
 static int aw86927_haptics_play(struct input_dev *dev, void *data, struct ff_effect *effect)
 {
 	struct aw86927_data *haptics = input_get_drvdata(dev);
@@ -373,6 +459,9 @@ static int aw86927_haptics_play(struct input_dev *dev, void *data, struct ff_eff
 
 	guard(spinlock_irqsave)(&haptics->lock);
 	if (!haptics->enabled)
+		return 0;
+
+	if (effect->type == FF_PERIODIC && effect->u.periodic.waveform == FF_CUSTOM)
 		return 0;
 
 	/* If level does not change, don't restart playback */
@@ -954,6 +1043,10 @@ static int aw86927_probe(struct i2c_client *client)
 	if (err)
 		return dev_err_probe(haptics->dev, err, "Failed to request threaded irq\n");
 
+	err = devm_add_action_or_reset(haptics->dev, aw86927_free_waveforms, haptics);
+	if (err)
+		return err;
+
 	INIT_DELAYED_WORK(&haptics->play_work, aw86927_haptics_play_work);
 
 	err = devm_add_action_or_reset(haptics->dev, aw86927_disable_playback, haptics);
@@ -967,7 +1060,8 @@ static int aw86927_probe(struct i2c_client *client)
 	input_set_drvdata(haptics->input_dev, haptics);
 	input_set_capability(haptics->input_dev, EV_FF, FF_RUMBLE);
 
-	err = input_ff_create_memless(haptics->input_dev, NULL, aw86927_haptics_play);
+	err = input_ff_create_memless_custom(haptics->input_dev, NULL, aw86927_haptics_play,
+					     aw86927_upload, aw86927_erase);
 	if (err)
 		return dev_err_probe(haptics->dev, err, "Failed to create FF dev\n");
 
