@@ -330,6 +330,14 @@ struct payload_media_fmt_flac_t {
 } __packed;
 
 #define MEDIA_FMT_ID_AAC	0x09001001
+#define AAC_FORMAT_FLAG_ADTS	0
+#define AAC_FORMAT_FLAG_LOAS	1
+#define AAC_FORMAT_FLAG_ADIF	2
+#define AAC_FORMAT_FLAG_RAW	3
+#define AAC_FORMAT_FLAG_LATM	4
+#define AAC_AOT_LC		2
+#define AAC_AOT_SBR		5
+#define AAC_AOT_PS		29
 
 struct payload_media_fmt_aac_t {
 	uint16_t aac_fmt_flag;

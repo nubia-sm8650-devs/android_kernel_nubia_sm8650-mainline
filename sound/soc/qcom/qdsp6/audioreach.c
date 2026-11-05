@@ -1348,6 +1348,40 @@ static int audioreach_compr_media_format_size(const struct audioreach_module_con
 	}
 }
 
+static u32 audioreach_compr_channels(const struct audioreach_module_config *mcfg)
+{
+	return mcfg->codec.ch_in ? mcfg->codec.ch_in : mcfg->num_channels;
+}
+
+static u16 audioreach_aac_format_flag(const struct snd_codec *codec)
+{
+	switch (codec->format) {
+	case SND_AUDIOSTREAMFORMAT_MP4LOAS:
+		return AAC_FORMAT_FLAG_LOAS;
+	case SND_AUDIOSTREAMFORMAT_MP4LATM:
+		return AAC_FORMAT_FLAG_LATM;
+	case SND_AUDIOSTREAMFORMAT_ADIF:
+		return AAC_FORMAT_FLAG_ADIF;
+	case SND_AUDIOSTREAMFORMAT_MP4FF:
+	case SND_AUDIOSTREAMFORMAT_RAW:
+		return AAC_FORMAT_FLAG_RAW;
+	default:
+		return AAC_FORMAT_FLAG_ADTS;
+	}
+}
+
+static u16 audioreach_aac_object_type(const struct snd_codec *codec)
+{
+	switch (codec->profile) {
+	case SND_AUDIOMODE_AAC_LC:
+		return AAC_AOT_LC;
+	case SND_AUDIOMODE_AAC_HE_PS:
+		return AAC_AOT_PS;
+	default:
+		return AAC_AOT_SBR;
+	}
+}
+
 static u32 audioreach_compr_bit_width(const struct audioreach_module_config *mcfg)
 {
 	int width = 0;
@@ -1383,7 +1417,7 @@ static int audioreach_set_compr_media_format(struct media_format *media_fmt_hdr,
 		mp3_cfg->bits_per_sample = mcfg->bit_width;
 		mp3_cfg->q_factor = mcfg->bit_width - 1;
 		mp3_cfg->endianness = PCM_LITTLE_ENDIAN;
-		mp3_cfg->num_channels = mcfg->num_channels;
+		mp3_cfg->num_channels = audioreach_compr_channels(mcfg);
 		break;
 	case SND_AUDIOCODEC_AAC:
 		media_fmt_hdr->data_format = DATA_FORMAT_RAW_COMPRESSED;
@@ -1391,9 +1425,9 @@ static int audioreach_set_compr_media_format(struct media_format *media_fmt_hdr,
 		media_fmt_hdr->payload_size = sizeof(struct payload_media_fmt_aac_t);
 		p = p + sizeof(*media_fmt_hdr);
 		aac_cfg = p;
-		aac_cfg->aac_fmt_flag = 0;
-		aac_cfg->audio_obj_type = 5;
-		aac_cfg->num_channels = mcfg->num_channels;
+		aac_cfg->aac_fmt_flag = audioreach_aac_format_flag(codec);
+		aac_cfg->audio_obj_type = audioreach_aac_object_type(codec);
+		aac_cfg->num_channels = audioreach_compr_channels(mcfg);
 		aac_cfg->total_size_of_PCE_bits = 0;
 		aac_cfg->sample_rate = mcfg->sample_rate;
 		break;
@@ -1404,7 +1438,7 @@ static int audioreach_set_compr_media_format(struct media_format *media_fmt_hdr,
 		p = p + sizeof(*media_fmt_hdr);
 		flac_cfg = p;
 		flac_cfg->sample_size = mcfg->codec.options.flac_d.sample_size;
-		flac_cfg->num_channels = mcfg->num_channels;
+		flac_cfg->num_channels = audioreach_compr_channels(mcfg);
 		flac_cfg->min_blk_size = mcfg->codec.options.flac_d.min_blk_size;
 		flac_cfg->max_blk_size = mcfg->codec.options.flac_d.max_blk_size;
 		flac_cfg->sample_rate = mcfg->sample_rate;
@@ -1423,14 +1457,14 @@ static int audioreach_set_compr_media_format(struct media_format *media_fmt_hdr,
 		alac_cfg->pb = codec->options.alac_d.pb;
 		alac_cfg->mb = codec->options.alac_d.mb;
 		alac_cfg->kb = codec->options.alac_d.kb;
-		alac_cfg->num_channels = codec->ch_in;
+		alac_cfg->num_channels = audioreach_compr_channels(mcfg);
 		alac_cfg->max_run = codec->options.alac_d.max_run;
 		alac_cfg->max_frame_bytes = codec->options.alac_d.max_frame_bytes;
 		alac_cfg->avg_bit_rate = codec->bit_rate;
 		alac_cfg->sample_rate = mcfg->sample_rate;
-		if (codec->ch_in == 1)
+		if (alac_cfg->num_channels == 1)
 			alac_cfg->channel_layout_tag = ALAC_CHANNEL_LAYOUT_MONO;
-		else if (codec->ch_in == 2)
+		else if (alac_cfg->num_channels == 2)
 			alac_cfg->channel_layout_tag = ALAC_CHANNEL_LAYOUT_STEREO;
 		else
 			alac_cfg->channel_layout_tag = 0;
@@ -1448,7 +1482,7 @@ static int audioreach_set_compr_media_format(struct media_format *media_fmt_hdr,
 		ape_cfg->final_frame_blocks = codec->options.ape_d.final_frame_blocks;
 		ape_cfg->total_frames = codec->options.ape_d.total_frames;
 		ape_cfg->bit_width = audioreach_compr_bit_width(mcfg);
-		ape_cfg->num_channels = codec->ch_in;
+		ape_cfg->num_channels = audioreach_compr_channels(mcfg);
 		ape_cfg->sample_rate = mcfg->sample_rate;
 		ape_cfg->is_seek_table_present = codec->options.ape_d.seek_table_present;
 		break;
