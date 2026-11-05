@@ -601,7 +601,17 @@ int input_ff_upload(struct input_dev *dev, struct ff_effect *effect, struct file
 int input_ff_erase(struct input_dev *dev, int effect_id, struct file *file);
 int input_ff_flush(struct input_dev *dev, struct file *file);
 
+/* Number of effects handled with memoryless devices */
+#define FF_MEMLESS_EFFECTS	16
+
 int input_ff_create_memless(struct input_dev *dev, void *data,
 		int (*play_effect)(struct input_dev *, void *, struct ff_effect *));
+
+int input_ff_create_memless_custom(struct input_dev *dev, void *data,
+				   int (*play_effect)(struct input_dev *, void *,
+						      struct ff_effect *),
+				   int (*upload)(struct input_dev *, struct ff_effect *,
+						 struct ff_effect *),
+				   int (*erase)(struct input_dev *, int));
 
 #endif

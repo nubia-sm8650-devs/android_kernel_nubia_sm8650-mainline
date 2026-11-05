@@ -23,9 +23,6 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Anssi Hannula <anssi.hannula@gmail.com>");
 MODULE_DESCRIPTION("Force feedback support for memoryless devices");
 
-/* Number of effects handled with memoryless devices */
-#define FF_MEMLESS_EFFECTS	16
-
 /* Envelope update interval in ms */
 #define FF_ENVELOPE_INTERVAL	50
 
@@ -51,7 +48,14 @@ struct ml_device {
 
 	int (*play_effect)(struct input_dev *dev, void *data,
 			   struct ff_effect *effect);
+	int (*upload)(struct input_dev *dev, struct ff_effect *effect,
+		      struct ff_effect *old);
 };
+
+static bool ml_is_custom(const struct ff_effect *effect)
+{
+	return effect->type == FF_PERIODIC && effect->u.periodic.waveform == FF_CUSTOM;
+}
 
 static const struct ff_envelope *get_envelope(const struct ff_effect *effect)
 {
@@ -470,6 +474,13 @@ static int ml_ff_upload(struct input_dev *dev,
 {
 	struct ml_device *ml = dev->ff->private;
 	struct ml_effect_state *state = &ml->states[effect->id];
+	int error;
+
+	if (ml_is_custom(effect)) {
+		error = ml->upload(dev, effect, old);
+		if (error)
+			return error;
+	}
 
 	guard(spinlock_irq)(&dev->event_lock);
 
@@ -568,3 +579,41 @@ int input_ff_create_memless(struct input_dev *dev, void *data,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(input_ff_create_memless);
+
+/**
+ * input_ff_create_memless_custom() - create memoryless device with custom effects
+ * @dev: input device supporting force-feedback
+ * @data: driver-specific data to be passed into @play_effect
+ * @play_effect: driver-specific method for playing FF effect
+ * @upload: driver-specific method for uploading FF_CUSTOM effects
+ * @erase: driver-specific method for erasing effects
+ *
+ * The device keeps the samples of FF_CUSTOM effects, which @upload copies
+ * from userspace and @erase releases, while the helper plays them on the
+ * replay timeline of their effect slots. @upload may sleep and may adjust
+ * replay.length to the time the device needs to play the effect.
+ */
+int input_ff_create_memless_custom(struct input_dev *dev, void *data,
+				   int (*play_effect)(struct input_dev *, void *,
+						      struct ff_effect *),
+				   int (*upload)(struct input_dev *, struct ff_effect *,
+						 struct ff_effect *),
+				   int (*erase)(struct input_dev *, int))
+{
+	struct ml_device *ml;
+	int error;
+
+	error = input_ff_create_memless(dev, data, play_effect);
+	if (error)
+		return error;
+
+	ml = dev->ff->private;
+	ml->upload = upload;
+	dev->ff->erase = erase;
+
+	set_bit(FF_PERIODIC, dev->ffbit);
+	set_bit(FF_CUSTOM, dev->ffbit);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(input_ff_create_memless_custom);
