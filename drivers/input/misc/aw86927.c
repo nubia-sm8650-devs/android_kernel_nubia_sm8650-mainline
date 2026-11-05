@@ -29,6 +29,9 @@
 #define AW86927_RSTCFG_REG			0x00
 #define AW86927_RSTCFG_SOFTRST			0xaa
 
+#define AW86927_SYSST_REG			0x01
+#define AW86927_SYSST_FF_AFS			BIT(3)
+
 #define AW86927_SYSINT_REG			0x02
 #define AW86927_SYSINT_BST_SCPI			BIT(7)
 #define AW86927_SYSINT_BST_OVPI			BIT(6)
@@ -102,6 +105,9 @@
 #define AW86927_BASEADDRH_REG			0x2d
 #define AW86927_BASEADDRL_REG			0x2e
 
+#define AW86927_RTPCFG3_REG			0x2f
+#define AW86927_RTPCFG3_FIFO_AFH_MASK		GENMASK(3, 0)
+#define AW86927_RTPCFG5_REG			0x31
 #define AW86927_RTPDATA_REG			0x32
 
 #define AW86927_GLBRD5_REG			0x3f
@@ -194,7 +200,7 @@
 #define AW86927_BASEADDRL_VAL			0x00
 
 #define AW86927_SAMPLE_RATE			24000
-#define AW86927_MAX_SAMPLES			AW86927_RAM_BASE_ADDR
+#define AW86927_MAX_SAMPLES			(AW86927_SAMPLE_RATE * 10)
 
 enum aw86927_work_mode {
 	AW86927_STANDBY_MODE,
@@ -485,6 +491,15 @@ static void aw86927_play_custom(struct aw86927_data *haptics, struct ff_effect *
 		mod_delayed_work(system_dfl_wq, &haptics->play_work, 0);
 }
 
+static bool aw86927_request_current(struct aw86927_data *haptics,
+				    struct aw86927_waveform *waveform)
+{
+	guard(spinlock_irqsave)(&haptics->lock);
+
+	return haptics->enabled && !haptics->suspended && !haptics->playback_pending &&
+	       haptics->requested == waveform;
+}
+
 static int aw86927_haptics_play(struct input_dev *dev, void *data, struct ff_effect *effect)
 {
 	struct aw86927_data *haptics = input_get_drvdata(dev);
@@ -610,9 +625,27 @@ static int aw86927_start_rtp(struct aw86927_data *haptics, u8 strength)
 static int aw86927_refill(struct aw86927_data *haptics, struct aw86927_waveform *waveform)
 {
 	size_t chunk;
+	unsigned int state;
 	int err;
 
+	err = regmap_read(haptics->regmap, AW86927_GLBRD5_REG, &state);
+	if (err)
+		return err;
+
+	if (FIELD_GET(AW86927_GLBRD5_STATE_MASK, state) != AW86927_GLBRD5_STATE_RTP_GO)
+		return haptics->position == waveform->length ? 1 : -EPIPE;
+
 	while (haptics->position < waveform->length) {
+		if (!aw86927_request_current(haptics, waveform))
+			return 0;
+
+		err = regmap_read(haptics->regmap, AW86927_SYSST_REG, &state);
+		if (err)
+			return err;
+
+		if (state & AW86927_SYSST_FF_AFS)
+			break;
+
 		chunk = min_t(size_t, AW86927_RAM_BASE_ADDR / 4,
 			      waveform->length - haptics->position);
 		err = regmap_noinc_write(haptics->regmap, AW86927_RTPDATA_REG,
@@ -748,6 +781,11 @@ static void aw86927_haptics_play_work(struct work_struct *work)
 
 		if (!err && haptics->running)
 			err = aw86927_refill(haptics, waveform);
+
+		if (err > 0) {
+			haptics->running = false;
+			err = 0;
+		}
 	} else if (level && haptics->running) {
 		err = regmap_write(haptics->regmap, AW86927_PLAYCFG2_REG,
 				   level * 0x80 / 0xffff);
@@ -764,6 +802,11 @@ static void aw86927_haptics_play_work(struct work_struct *work)
 		dev_err(dev, "Failed to execute work command: %d\n", err);
 		aw86927_stop(haptics);
 		haptics->running = false;
+	}
+
+	scoped_guard(spinlock_irqsave, &haptics->lock) {
+		if (haptics->enabled && !haptics->suspended && waveform && haptics->running)
+			queue_delayed_work(system_dfl_wq, &haptics->play_work, msecs_to_jiffies(5));
 	}
 out:
 	aw86927_waveform_put(waveform);
@@ -951,6 +994,20 @@ static int aw86927_haptic_init(struct aw86927_data *haptics)
 		return err;
 
 	return 0;
+}
+
+static int aw86927_fifo_init(struct aw86927_data *haptics)
+{
+	u16 af = AW86927_RAM_BASE_ADDR * 3 / 4;
+	int err;
+
+	err = regmap_update_bits(haptics->regmap, AW86927_RTPCFG3_REG,
+				 AW86927_RTPCFG3_FIFO_AFH_MASK,
+				 FIELD_PREP(AW86927_RTPCFG3_FIFO_AFH_MASK, af >> 8));
+	if (err)
+		return err;
+
+	return regmap_write(haptics->regmap, AW86927_RTPCFG5_REG, af & 0xff);
 }
 
 static int aw86927_ram_init(struct aw86927_data *haptics)
@@ -1210,6 +1267,10 @@ static int aw86927_probe(struct i2c_client *client)
 	err = aw86927_ram_init(haptics);
 	if (err)
 		return dev_err_probe(haptics->dev, err, "Failed to init aw86927 sram\n");
+
+	err = aw86927_fifo_init(haptics);
+	if (err)
+		return dev_err_probe(haptics->dev, err, "Failed to initialize FIFO thresholds\n");
 
 	err = input_register_device(haptics->input_dev);
 	if (err)
