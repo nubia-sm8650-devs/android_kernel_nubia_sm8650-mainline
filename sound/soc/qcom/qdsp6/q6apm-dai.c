@@ -1147,11 +1147,13 @@ static int q6apm_dai_compr_get_caps(struct snd_soc_component *component,
 	caps->max_fragment_size = COMPR_PLAYBACK_MAX_FRAGMENT_SIZE;
 	caps->min_fragments = COMPR_PLAYBACK_MIN_NUM_FRAGMENTS;
 	caps->max_fragments = COMPR_PLAYBACK_MAX_NUM_FRAGMENTS;
-	caps->num_codecs = 4;
+	caps->num_codecs = 6;
 	caps->codecs[0] = SND_AUDIOCODEC_MP3;
 	caps->codecs[1] = SND_AUDIOCODEC_AAC;
 	caps->codecs[2] = SND_AUDIOCODEC_FLAC;
 	caps->codecs[3] = SND_AUDIOCODEC_OPUS_RAW;
+	caps->codecs[4] = SND_AUDIOCODEC_ALAC;
+	caps->codecs[5] = SND_AUDIOCODEC_APE;
 
 	return 0;
 }

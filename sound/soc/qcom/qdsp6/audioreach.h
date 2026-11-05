@@ -31,6 +31,8 @@ struct q6apm_graph;
 #define MODULE_ID_CODEC_DMA_SOURCE	0x07001024
 #define MODULE_ID_SLIMBUS_SINK		0x07001029
 #define MODULE_ID_SLIMBUS_SOURCE	0x0700102A
+#define MODULE_ID_ALAC_DEC		0x0700102B
+#define MODULE_ID_APE_DEC		0x0700102C
 #define MODULE_ID_FLAC_DEC		0x0700102F
 #define MODULE_ID_SMECNS_V2		0x07001031
 #define MODULE_ID_MP3_DECODE		0x0700103B
@@ -335,6 +337,40 @@ struct payload_media_fmt_aac_t {
 	uint16_t num_channels;
 	uint16_t total_size_of_PCE_bits;
 	uint32_t sample_rate;
+} __packed;
+
+#define MEDIA_FMT_ID_ALAC	0x09001002
+#define ALAC_CHANNEL_LAYOUT_MONO	((100 << 16) | 1)
+#define ALAC_CHANNEL_LAYOUT_STEREO	((101 << 16) | 2)
+
+struct payload_media_fmt_alac_t {
+	uint32_t frame_length;
+	uint8_t compatible_version;
+	uint8_t bit_depth;
+	uint8_t pb;
+	uint8_t mb;
+	uint8_t kb;
+	uint8_t num_channels;
+	uint16_t max_run;
+	uint32_t max_frame_bytes;
+	uint32_t avg_bit_rate;
+	uint32_t sample_rate;
+	uint32_t channel_layout_tag;
+} __packed;
+
+#define MEDIA_FMT_ID_APE	0x09001003
+
+struct payload_media_fmt_ape_t {
+	uint16_t version;
+	uint16_t compression_level;
+	uint32_t format_flags;
+	uint32_t blocks_per_frame;
+	uint32_t final_frame_blocks;
+	uint32_t total_frames;
+	uint16_t bit_width;
+	uint16_t num_channels;
+	uint32_t sample_rate;
+	uint32_t is_seek_table_present;
 } __packed;
 
 #define MEDIA_FMT_ID_OPUS	0x09001039

@@ -1337,6 +1337,10 @@ static int audioreach_compr_media_format_size(const struct audioreach_module_con
 		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_aac_t);
 	case SND_AUDIOCODEC_FLAC:
 		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_flac_t);
+	case SND_AUDIOCODEC_ALAC:
+		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_alac_t);
+	case SND_AUDIOCODEC_APE:
+		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_ape_t);
 	case SND_AUDIOCODEC_OPUS_RAW:
 		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_opus_t);
 	default:
@@ -1344,10 +1348,23 @@ static int audioreach_compr_media_format_size(const struct audioreach_module_con
 	}
 }
 
+static u32 audioreach_compr_bit_width(const struct audioreach_module_config *mcfg)
+{
+	int width = 0;
+
+	if (mcfg->codec.pcm_format)
+		width = snd_pcm_format_width((__force snd_pcm_format_t)mcfg->codec.pcm_format);
+
+	return width > 0 ? width : mcfg->bit_width;
+}
+
 static int audioreach_set_compr_media_format(struct media_format *media_fmt_hdr,
 					     void *p,
 					     const struct audioreach_module_config *mcfg)
 {
+	const struct snd_codec *codec = &mcfg->codec;
+	struct payload_media_fmt_alac_t *alac_cfg;
+	struct payload_media_fmt_ape_t *ape_cfg;
 	struct payload_media_fmt_aac_t *aac_cfg;
 	struct payload_media_fmt_pcm *mp3_cfg;
 	struct payload_media_fmt_flac_t *flac_cfg;
@@ -1393,6 +1410,47 @@ static int audioreach_set_compr_media_format(struct media_format *media_fmt_hdr,
 		flac_cfg->sample_rate = mcfg->sample_rate;
 		flac_cfg->min_frame_size = mcfg->codec.options.flac_d.min_frame_size;
 		flac_cfg->max_frame_size = mcfg->codec.options.flac_d.max_frame_size;
+		break;
+	case SND_AUDIOCODEC_ALAC:
+		media_fmt_hdr->data_format = DATA_FORMAT_RAW_COMPRESSED;
+		media_fmt_hdr->fmt_id = MEDIA_FMT_ID_ALAC;
+		media_fmt_hdr->payload_size = sizeof(*alac_cfg);
+		p = p + sizeof(*media_fmt_hdr);
+		alac_cfg = p;
+		alac_cfg->frame_length = codec->options.alac_d.frame_length;
+		alac_cfg->compatible_version = codec->options.alac_d.compatible_version;
+		alac_cfg->bit_depth = audioreach_compr_bit_width(mcfg);
+		alac_cfg->pb = codec->options.alac_d.pb;
+		alac_cfg->mb = codec->options.alac_d.mb;
+		alac_cfg->kb = codec->options.alac_d.kb;
+		alac_cfg->num_channels = codec->ch_in;
+		alac_cfg->max_run = codec->options.alac_d.max_run;
+		alac_cfg->max_frame_bytes = codec->options.alac_d.max_frame_bytes;
+		alac_cfg->avg_bit_rate = codec->bit_rate;
+		alac_cfg->sample_rate = mcfg->sample_rate;
+		if (codec->ch_in == 1)
+			alac_cfg->channel_layout_tag = ALAC_CHANNEL_LAYOUT_MONO;
+		else if (codec->ch_in == 2)
+			alac_cfg->channel_layout_tag = ALAC_CHANNEL_LAYOUT_STEREO;
+		else
+			alac_cfg->channel_layout_tag = 0;
+		break;
+	case SND_AUDIOCODEC_APE:
+		media_fmt_hdr->data_format = DATA_FORMAT_RAW_COMPRESSED;
+		media_fmt_hdr->fmt_id = MEDIA_FMT_ID_APE;
+		media_fmt_hdr->payload_size = sizeof(*ape_cfg);
+		p = p + sizeof(*media_fmt_hdr);
+		ape_cfg = p;
+		ape_cfg->version = codec->options.ape_d.compatible_version;
+		ape_cfg->compression_level = codec->options.ape_d.compression_level;
+		ape_cfg->format_flags = codec->options.ape_d.format_flags;
+		ape_cfg->blocks_per_frame = codec->options.ape_d.blocks_per_frame;
+		ape_cfg->final_frame_blocks = codec->options.ape_d.final_frame_blocks;
+		ape_cfg->total_frames = codec->options.ape_d.total_frames;
+		ape_cfg->bit_width = audioreach_compr_bit_width(mcfg);
+		ape_cfg->num_channels = codec->ch_in;
+		ape_cfg->sample_rate = mcfg->sample_rate;
+		ape_cfg->is_seek_table_present = codec->options.ape_d.seek_table_present;
 		break;
 	case SND_AUDIOCODEC_OPUS_RAW:
 		media_fmt_hdr->data_format = DATA_FORMAT_RAW_COMPRESSED;
