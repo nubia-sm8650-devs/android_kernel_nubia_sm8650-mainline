@@ -102,9 +102,12 @@
 #define AW86927_BASEADDRH_REG			0x2d
 #define AW86927_BASEADDRL_REG			0x2e
 
+#define AW86927_RTPDATA_REG			0x32
+
 #define AW86927_GLBRD5_REG			0x3f
 #define AW86927_GLBRD5_STATE_MASK		GENMASK(3, 0)
 #define AW86927_GLBRD5_STATE_STANDBY		0
+#define AW86927_GLBRD5_STATE_RTP_GO		8
 
 #define AW86927_RAMADDRH_REG			0x40
 
@@ -217,7 +220,12 @@ struct aw86927_data {
 	bool enabled;
 	bool suspended;
 	bool running;
+	bool playback_pending;
 	struct aw86927_waveform *waveforms[FF_MEMLESS_EFFECTS];
+	struct aw86927_waveform *requested;
+	int requested_id;
+	u16 magnitude;
+	size_t position;
 	struct device *dev;
 	struct input_dev *input_dev;
 	struct i2c_client *client;
@@ -376,6 +384,14 @@ static int aw86927_stop(struct aw86927_data *haptics)
 	return 0;
 }
 
+static struct aw86927_waveform *aw86927_waveform_get(struct aw86927_waveform *waveform)
+{
+	if (waveform)
+		refcount_inc(&waveform->refs);
+
+	return waveform;
+}
+
 static void aw86927_waveform_put(struct aw86927_waveform *waveform)
 {
 	if (waveform && refcount_dec_and_test(&waveform->refs))
@@ -448,6 +464,24 @@ static void aw86927_free_waveforms(void *data)
 		aw86927_waveform_put(haptics->waveforms[i]);
 }
 
+static void aw86927_play_custom(struct aw86927_data *haptics, struct ff_effect *effect)
+{
+	u16 magnitude = effect->u.periodic.magnitude;
+
+	if (!haptics->requested || haptics->requested_id != effect->id) {
+		aw86927_waveform_put(haptics->requested);
+		haptics->requested = aw86927_waveform_get(haptics->waveforms[effect->id]);
+		haptics->requested_id = effect->id;
+		haptics->playback_pending = true;
+	}
+
+	haptics->magnitude = magnitude;
+	haptics->level = 0;
+
+	if (!haptics->suspended)
+		mod_delayed_work(system_dfl_wq, &haptics->play_work, 0);
+}
+
 static int aw86927_haptics_play(struct input_dev *dev, void *data, struct ff_effect *effect)
 {
 	struct aw86927_data *haptics = input_get_drvdata(dev);
@@ -461,13 +495,20 @@ static int aw86927_haptics_play(struct input_dev *dev, void *data, struct ff_eff
 	if (!haptics->enabled)
 		return 0;
 
-	if (effect->type == FF_PERIODIC && effect->u.periodic.waveform == FF_CUSTOM)
+	if (effect->type == FF_PERIODIC && effect->u.periodic.waveform == FF_CUSTOM) {
+		aw86927_play_custom(haptics, effect);
 		return 0;
+	}
 
 	/* If level does not change, don't restart playback */
-	if (haptics->level == level)
+	if (haptics->level == level && !haptics->requested)
 		return 0;
 
+	if (haptics->requested)
+		haptics->playback_pending = true;
+
+	aw86927_waveform_put(haptics->requested);
+	haptics->requested = NULL;
 	haptics->level = level;
 
 	if (!haptics->suspended)
@@ -531,6 +572,57 @@ static int aw86927_play_sine(struct aw86927_data *haptics, u16 level)
 	return aw86927_start(haptics, level * 0x80 / 0xffff);
 }
 
+static int aw86927_start_rtp(struct aw86927_data *haptics, u8 strength)
+{
+	unsigned int state;
+	int err;
+
+	err = aw86927_stop(haptics);
+	if (err)
+		return err;
+
+	err = aw86927_play_mode(haptics, AW86927_RTP_MODE);
+	if (err)
+		return err;
+
+	err = regmap_update_bits(haptics->regmap, AW86927_PLAYCFG3_REG,
+				 AW86927_PLAYCFG3_AUTO_BST_MASK, 0);
+	if (err)
+		return err;
+
+	/* SYSINT is read-to-clear, drop flags latched before this start */
+	err = regmap_read(haptics->regmap, AW86927_SYSINT_REG, &state);
+	if (err)
+		return err;
+
+	err = aw86927_start(haptics, strength);
+	if (err)
+		return err;
+
+	return regmap_read_poll_timeout(haptics->regmap, AW86927_GLBRD5_REG, state,
+				       FIELD_GET(AW86927_GLBRD5_STATE_MASK, state) ==
+				       AW86927_GLBRD5_STATE_RTP_GO, 2000, 400000);
+}
+
+static int aw86927_refill(struct aw86927_data *haptics, struct aw86927_waveform *waveform)
+{
+	size_t chunk;
+	int err;
+
+	while (haptics->position < waveform->length) {
+		chunk = min_t(size_t, AW86927_RAM_BASE_ADDR / 4,
+			      waveform->length - haptics->position);
+		err = regmap_noinc_write(haptics->regmap, AW86927_RTPDATA_REG,
+					 waveform->samples + haptics->position, chunk);
+		if (err)
+			return err;
+
+		haptics->position += chunk;
+	}
+
+	return 0;
+}
+
 static int aw86927_open(struct input_dev *input)
 {
 	struct aw86927_data *haptics = input_get_drvdata(input);
@@ -549,6 +641,9 @@ static void aw86927_disable_playback(void *data)
 	scoped_guard(spinlock_irqsave, &haptics->lock) {
 		haptics->enabled = false;
 		haptics->level = 0;
+		haptics->playback_pending = false;
+		aw86927_waveform_put(haptics->requested);
+		haptics->requested = NULL;
 	}
 
 	cancel_delayed_work_sync(&haptics->play_work);
@@ -575,6 +670,7 @@ static int aw86927_resume(struct device *dev)
 	guard(spinlock_irqsave)(&haptics->lock);
 
 	haptics->suspended = false;
+	haptics->playback_pending = false;
 
 	if (haptics->enabled && haptics->level)
 		mod_delayed_work(system_dfl_wq, &haptics->play_work, 0);
@@ -609,17 +705,42 @@ static void aw86927_haptics_play_work(struct work_struct *work)
 	struct aw86927_data *haptics =
 		container_of(to_delayed_work(work), struct aw86927_data, play_work);
 	struct device *dev = &haptics->client->dev;
-	u16 level;
+	struct aw86927_waveform *waveform;
+	u16 level, magnitude;
+	u8 strength;
+	bool enabled, playback_pending;
 	int err;
 
 	scoped_guard(spinlock_irqsave, &haptics->lock) {
-		if (!haptics->enabled || haptics->suspended)
-			return;
-
+		enabled = haptics->enabled && !haptics->suspended;
 		level = haptics->level;
+		waveform = aw86927_waveform_get(haptics->requested);
+		magnitude = haptics->magnitude;
+		playback_pending = haptics->playback_pending;
+		haptics->playback_pending = false;
 	}
 
-	if (level && haptics->running) {
+	if (!enabled)
+		goto out;
+
+	if (playback_pending) {
+		haptics->running = false;
+		haptics->position = 0;
+	}
+
+	if (waveform) {
+		strength = DIV_ROUND_CLOSEST(magnitude * 0x80, 0x7fff);
+		if (playback_pending) {
+			err = aw86927_start_rtp(haptics, strength);
+			if (!err)
+				haptics->running = true;
+		} else {
+			err = 0;
+		}
+
+		if (!err && haptics->running)
+			err = aw86927_refill(haptics, waveform);
+	} else if (level && haptics->running) {
 		err = regmap_write(haptics->regmap, AW86927_PLAYCFG2_REG,
 				   level * 0x80 / 0xffff);
 	} else if (level) {
@@ -636,6 +757,8 @@ static void aw86927_haptics_play_work(struct work_struct *work)
 		aw86927_stop(haptics);
 		haptics->running = false;
 	}
+out:
+	aw86927_waveform_put(waveform);
 }
 
 static void aw86927_hw_reset(struct aw86927_data *haptics)
