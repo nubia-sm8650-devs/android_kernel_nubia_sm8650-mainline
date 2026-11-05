@@ -702,12 +702,18 @@ static int q6apm_dai_compr_open(struct snd_soc_component *component,
 	else
 		prtd->phys = prtd->dma_buffer.addr | (pdata->sid << 32);
 
+	ret = q6apm_map_memory_fixed_region(dev, graph_id, prtd->phys, size);
+	if (ret)
+		goto err_free_pages;
+
 	snd_compr_set_runtime_buffer(stream, &prtd->dma_buffer);
 	spin_lock_init(&prtd->lock);
 
 	q6apm_enable_compress_module(dev, prtd->graph, true);
 	return 0;
 
+err_free_pages:
+	snd_dma_free_pages(&prtd->dma_buffer);
 err_close_graph:
 	runtime->private_data = NULL;
 	q6apm_graph_close(prtd->graph);
