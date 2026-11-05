@@ -50,6 +50,8 @@ struct ml_device {
 			   struct ff_effect *effect);
 	int (*upload)(struct input_dev *dev, struct ff_effect *effect,
 		      struct ff_effect *old);
+	bool custom_playing;
+	bool custom_ended;
 };
 
 static bool ml_is_custom(const struct ff_effect *effect)
@@ -396,15 +398,75 @@ static int ml_get_combo_effect(struct ml_device *ml,
 	return combo_effect->type != 0;
 }
 
+static bool ml_get_custom_effect(struct ml_device *ml,
+				 unsigned long *effect_handled,
+				 struct ff_effect *custom_effect)
+{
+	struct ff_periodic_effect *periodic = &custom_effect->u.periodic;
+	struct ml_effect_state *state;
+	bool playing = false;
+	int i, level;
+
+	for (i = 0; i < FF_MEMLESS_EFFECTS; i++) {
+		state = &ml->states[i];
+
+		if (!ml_is_custom(state->effect))
+			continue;
+
+		__set_bit(i, effect_handled);
+
+		if (!test_bit(FF_EFFECT_STARTED, &state->flags) ||
+		    time_before(jiffies, state->play_at) ||
+		    !ml_update_effect(state))
+			continue;
+
+		*custom_effect = *state->effect;
+		level = apply_envelope(state, abs(periodic->magnitude),
+				       &periodic->envelope);
+		periodic->magnitude = level * ml->gain / 0xffff;
+		periodic->custom_data = NULL;
+		playing = true;
+	}
+
+	return playing;
+}
+
+static void ml_stop_custom(struct ml_device *ml)
+{
+	struct ff_effect effect = { .type = FF_RUMBLE };
+
+	ml->custom_playing = false;
+	ml->custom_ended = false;
+	ml->play_effect(ml->dev, ml->private, &effect);
+}
+
 static void ml_play_effects(struct ml_device *ml)
 {
-	struct ff_effect effect;
+	struct ff_effect effect, custom_effect;
 	DECLARE_BITMAP(handled_bm, FF_MEMLESS_EFFECTS);
+	bool custom;
 
 	memset(handled_bm, 0, sizeof(handled_bm));
 
-	while (ml_get_combo_effect(ml, handled_bm, &effect))
+	custom = ml_get_custom_effect(ml, handled_bm, &custom_effect);
+
+	while (ml_get_combo_effect(ml, handled_bm, &effect)) {
+		if (custom)
+			continue;
+
 		ml->play_effect(ml->dev, ml->private, &effect);
+		ml->custom_playing = false;
+	}
+
+	if (custom) {
+		if (ml->custom_ended)
+			ml_stop_custom(ml);
+
+		ml->play_effect(ml->dev, ml->private, &custom_effect);
+		ml->custom_playing = true;
+	}
+
+	ml->custom_ended = ml->custom_playing && !custom;
 
 	ml_schedule_timer(ml);
 }
@@ -443,8 +505,18 @@ static int ml_ff_playback(struct input_dev *dev, int effect_id, int value)
 {
 	struct ml_device *ml = dev->ff->private;
 	struct ml_effect_state *state = &ml->states[effect_id];
+	int i;
 
 	if (value > 0) {
+		if (ml_is_custom(state->effect)) {
+			for (i = 0; i < FF_MEMLESS_EFFECTS; i++)
+				if (ml_is_custom(ml->states[i].effect))
+					ml->states[i].flags = 0;
+
+			if (ml->custom_playing)
+				ml_stop_custom(ml);
+		}
+
 		pr_debug("initiated play\n");
 
 		__set_bit(FF_EFFECT_STARTED, &state->flags);
@@ -457,6 +529,9 @@ static int ml_ff_playback(struct input_dev *dev, int effect_id, int value)
 
 	} else {
 		pr_debug("initiated stop\n");
+
+		if (ml_is_custom(state->effect) && test_bit(FF_EFFECT_PLAYING, &state->flags))
+			ml_stop_custom(ml);
 
 		if (test_bit(FF_EFFECT_PLAYING, &state->flags))
 			__set_bit(FF_EFFECT_ABORTING, &state->flags);
@@ -485,6 +560,9 @@ static int ml_ff_upload(struct input_dev *dev,
 	guard(spinlock_irq)(&dev->event_lock);
 
 	if (test_bit(FF_EFFECT_STARTED, &state->flags)) {
+		if (ml_is_custom(effect) && ml->custom_playing)
+			ml_stop_custom(ml);
+
 		__clear_bit(FF_EFFECT_PLAYING, &state->flags);
 		state->play_at = jiffies +
 				 msecs_to_jiffies(effect->replay.delay);
@@ -592,6 +670,16 @@ EXPORT_SYMBOL_GPL(input_ff_create_memless);
  * from userspace and @erase releases, while the helper plays them on the
  * replay timeline of their effect slots. @upload may sleep and may adjust
  * replay.length to the time the device needs to play the effect.
+ *
+ * While a custom effect plays, @play_effect receives a copy of it instead of
+ * the combined effect, with the envelope and gain applied to its magnitude
+ * and custom_data cleared. Other effects keep their timing but are not
+ * played. When the replay of a custom effect ends, the device plays its
+ * remaining samples, and @play_effect receives the combined effect once
+ * another effect plays. Stopping, replacing or restarting a custom effect
+ * passes a zeroed FF_RUMBLE effect first. A custom effect passed after any
+ * other effect starts from its beginning, and passing the same effect again
+ * only changes its magnitude.
  */
 int input_ff_create_memless_custom(struct input_dev *dev, void *data,
 				   int (*play_effect)(struct input_dev *, void *,
