@@ -14,6 +14,8 @@
 #include <linux/i2c.h>
 #include <linux/input.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
+#include <linux/pm.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/spinlock.h>
@@ -196,6 +198,7 @@ struct aw86927_data {
 	spinlock_t lock;
 	struct delayed_work play_work;
 	bool enabled;
+	bool suspended;
 	bool running;
 	struct device *dev;
 	struct input_dev *input_dev;
@@ -369,7 +372,8 @@ static int aw86927_haptics_play(struct input_dev *dev, void *data, struct ff_eff
 
 	haptics->level = level;
 
-	mod_delayed_work(system_dfl_wq, &haptics->play_work, 0);
+	if (!haptics->suspended)
+		mod_delayed_work(system_dfl_wq, &haptics->play_work, 0);
 
 	return 0;
 }
@@ -464,6 +468,42 @@ static void aw86927_close(struct input_dev *input)
 		dev_err(dev, "Failed to close the Driver: %d\n", err);
 }
 
+static int aw86927_resume(struct device *dev)
+{
+	struct aw86927_data *haptics = dev_get_drvdata(dev);
+
+	guard(spinlock_irqsave)(&haptics->lock);
+
+	haptics->suspended = false;
+
+	if (haptics->enabled && haptics->level)
+		mod_delayed_work(system_dfl_wq, &haptics->play_work, 0);
+
+	return 0;
+}
+
+static int aw86927_suspend(struct device *dev)
+{
+	struct aw86927_data *haptics = dev_get_drvdata(dev);
+	int err;
+
+	guard(mutex)(&haptics->input_dev->mutex);
+
+	scoped_guard(spinlock_irqsave, &haptics->lock)
+		haptics->suspended = true;
+
+	cancel_delayed_work_sync(&haptics->play_work);
+	haptics->running = false;
+
+	err = aw86927_stop(haptics);
+	if (err)
+		aw86927_resume(dev);
+
+	return err;
+}
+
+static DEFINE_SIMPLE_DEV_PM_OPS(aw86927_pm_ops, aw86927_suspend, aw86927_resume);
+
 static void aw86927_haptics_play_work(struct work_struct *work)
 {
 	struct aw86927_data *haptics =
@@ -473,7 +513,7 @@ static void aw86927_haptics_play_work(struct work_struct *work)
 	int err;
 
 	scoped_guard(spinlock_irqsave, &haptics->lock) {
-		if (!haptics->enabled)
+		if (!haptics->enabled || haptics->suspended)
 			return;
 
 		level = haptics->level;
@@ -952,6 +992,7 @@ MODULE_DEVICE_TABLE(of, aw86927_of_id);
 static struct i2c_driver aw86927_driver = {
 	.driver = {
 		.name = "aw86927-haptics",
+		.pm = pm_sleep_ptr(&aw86927_pm_ops),
 		.of_match_table = aw86927_of_id,
 	},
 	.probe = aw86927_probe,
