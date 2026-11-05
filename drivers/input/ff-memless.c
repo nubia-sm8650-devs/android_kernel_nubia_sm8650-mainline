@@ -469,9 +469,9 @@ static int ml_ff_upload(struct input_dev *dev,
 	if (test_bit(FF_EFFECT_STARTED, &state->flags)) {
 		__clear_bit(FF_EFFECT_PLAYING, &state->flags);
 		state->play_at = jiffies +
-				 msecs_to_jiffies(state->effect->replay.delay);
+				 msecs_to_jiffies(effect->replay.delay);
 		state->stop_at = state->play_at +
-				 msecs_to_jiffies(state->effect->replay.length);
+				 msecs_to_jiffies(effect->replay.length);
 		state->adj_at = state->play_at;
 		ml_schedule_timer(ml);
 	}
