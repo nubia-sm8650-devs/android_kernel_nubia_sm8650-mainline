@@ -226,6 +226,7 @@ struct aw86927_data {
 	int requested_id;
 	u16 magnitude;
 	size_t position;
+	u8 strength;
 	struct device *dev;
 	struct input_dev *input_dev;
 	struct i2c_client *client;
@@ -473,6 +474,8 @@ static void aw86927_play_custom(struct aw86927_data *haptics, struct ff_effect *
 		haptics->requested = aw86927_waveform_get(haptics->waveforms[effect->id]);
 		haptics->requested_id = effect->id;
 		haptics->playback_pending = true;
+	} else if (haptics->magnitude == magnitude) {
+		return;
 	}
 
 	haptics->magnitude = magnitude;
@@ -734,9 +737,14 @@ static void aw86927_haptics_play_work(struct work_struct *work)
 			err = aw86927_start_rtp(haptics, strength);
 			if (!err)
 				haptics->running = true;
+		} else if (haptics->running && strength != haptics->strength) {
+			err = regmap_write(haptics->regmap, AW86927_PLAYCFG2_REG, strength);
 		} else {
 			err = 0;
 		}
+
+		if (!err)
+			haptics->strength = strength;
 
 		if (!err && haptics->running)
 			err = aw86927_refill(haptics, waveform);
