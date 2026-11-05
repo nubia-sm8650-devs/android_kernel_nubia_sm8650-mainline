@@ -64,6 +64,7 @@
 #define AW86927_PLAYCFG3_BRK_EN			BIT(2)
 #define AW86927_PLAYCFG3_PLAY_MODE_MASK		GENMASK(1, 0)
 #define AW86927_PLAYCFG3_PLAY_MODE_RAM		0
+#define AW86927_PLAYCFG3_PLAY_MODE_RTP		1
 
 #define AW86927_PLAYCFG4_REG			0x09
 #define AW86927_PLAYCFG4_STOP			BIT(1)
@@ -188,6 +189,7 @@
 enum aw86927_work_mode {
 	AW86927_STANDBY_MODE,
 	AW86927_RAM_MODE,
+	AW86927_RTP_MODE,
 };
 
 enum aw86927_model {
@@ -310,15 +312,18 @@ static int aw86927_play_mode(struct aw86927_data *haptics, u8 play_mode)
 		break;
 
 	case AW86927_RAM_MODE:
+	case AW86927_RTP_MODE:
 		err = regmap_update_bits(haptics->regmap,
 					 AW86927_PLAYCFG3_REG,
 					 AW86927_PLAYCFG3_PLAY_MODE_MASK,
 					 FIELD_PREP(AW86927_PLAYCFG3_PLAY_MODE_MASK,
+						    play_mode == AW86927_RTP_MODE ?
+						    AW86927_PLAYCFG3_PLAY_MODE_RTP :
 						    AW86927_PLAYCFG3_PLAY_MODE_RAM));
 		if (err)
 			return err;
 
-		err = aw86927_set_boost(haptics, false);
+		err = aw86927_set_boost(haptics, play_mode == AW86927_RTP_MODE);
 		if (err)
 			return err;
 
