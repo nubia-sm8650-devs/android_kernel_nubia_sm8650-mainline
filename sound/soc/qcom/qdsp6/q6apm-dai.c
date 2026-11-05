@@ -1196,14 +1196,26 @@ static int q6apm_dai_compr_trigger(struct snd_soc_component *component,
 {
 	struct snd_compr_runtime *runtime = stream->runtime;
 	struct q6apm_dai_rtd *prtd = runtime->private_data;
+	uint32_t bytes_to_write;
 	int ret = 0;
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
-	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		ret = q6apm_write_async(prtd->graph, prtd->pcm_count, 0, 0, NO_TIMESTAMP);
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE: {
+		guard(mutex)(&prtd->lock);
+
+		if (prtd->copied_total != prtd->bytes_sent ||
+		    prtd->bytes_received == prtd->bytes_sent)
+			break;
+
+		bytes_to_write = min_t(uint64_t, prtd->bytes_received - prtd->bytes_sent,
+				       prtd->pcm_count);
+		ret = q6apm_write_async(prtd->graph, bytes_to_write, 0, 0, NO_TIMESTAMP);
+		if (!ret)
+			prtd->bytes_sent += bytes_to_write;
 		break;
+	}
 	case SNDRV_PCM_TRIGGER_STOP:
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
