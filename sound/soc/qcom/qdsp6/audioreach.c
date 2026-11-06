@@ -587,7 +587,7 @@ int audioreach_send_cmd_sync(struct device *dev, gpr_device_t *gdev,
 	if (port)
 		rc = gpr_send_port_pkt(port, pkt);
 	else if (gdev)
-		rc = gpr_send_pkt(gdev, pkt);
+		rc = gpr_send_pkt_blocking(gdev, pkt);
 	else
 		rc = -EINVAL;
 

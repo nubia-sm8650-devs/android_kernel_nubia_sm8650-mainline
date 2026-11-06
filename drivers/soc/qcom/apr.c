@@ -145,6 +145,17 @@ int gpr_send_pkt(struct apr_device *gdev, const struct gpr_pkt *pkt)
 }
 EXPORT_SYMBOL_GPL(gpr_send_pkt);
 
+int gpr_send_pkt_blocking(struct apr_device *gdev, const struct gpr_pkt *pkt)
+{
+	struct packet_router *pr = gdev->svc.pr;
+	int ret;
+
+	ret = rpmsg_send(pr->ch, pkt, pkt->hdr.pkt_size);
+
+	return ret ? ret : pkt->hdr.pkt_size;
+}
+EXPORT_SYMBOL_GPL(gpr_send_pkt_blocking);
+
 int gpr_send_port_pkt(gpr_port_t *port, const struct gpr_pkt *pkt)
 {
 	return pkt_router_send_svc_pkt(port, pkt);

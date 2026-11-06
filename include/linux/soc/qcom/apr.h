@@ -193,5 +193,6 @@ gpr_port_t *gpr_alloc_port(gpr_device_t *gdev, struct device *dev,
 void gpr_free_port(gpr_port_t *port);
 int gpr_send_port_pkt(gpr_port_t *port, const struct gpr_pkt *pkt);
 int gpr_send_pkt(gpr_device_t *gdev, const struct gpr_pkt *pkt);
+int gpr_send_pkt_blocking(gpr_device_t *gdev, const struct gpr_pkt *pkt);
 
 #endif /* __QCOM_APR_H_ */
