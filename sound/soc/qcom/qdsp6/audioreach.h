@@ -902,7 +902,11 @@ struct audioreach_connection {
 	uint32_t src_mod_op_port_id;
 	uint32_t dst_mod_inst_id;
 	uint32_t dst_mod_ip_port_id;
-	struct list_head node;
+};
+
+struct audioreach_route {
+	struct audioreach_connection *links;
+	unsigned int num_links;
 };
 
 struct audioreach_graph_info {

@@ -21,6 +21,7 @@ struct snd_ar_control {
 	u32 graph_id; /* Graph ID */
 	u32 sgid; /* Sub Graph ID */
 	u32 module_instance_id; /* Connected Module Instance ID */
+	struct audioreach_route route;
 	struct snd_soc_dapm_widget *w;
 	struct list_head node;
 	struct snd_soc_component *scomp;
@@ -1349,6 +1350,81 @@ out:
 	return ret;
 }
 
+static int audioreach_control_load_links(struct audioreach_route *route,
+					 const struct snd_soc_tplg_private *priv)
+{
+	const u8 *data = (const u8 *)priv->data;
+	u32 remaining = le32_to_cpu(priv->size);
+	struct audioreach_connection *links;
+	int ret = -EINVAL;
+	u32 i;
+
+	while (remaining) {
+		const struct snd_soc_tplg_vendor_array *array = (const void *)data;
+		struct audioreach_connection link = {};
+		u32 size;
+
+		if (remaining < sizeof(*array))
+			goto err;
+
+		size = le32_to_cpu(array->size);
+		if (size < struct_size(array, value, le32_to_cpu(array->num_elems)) ||
+		    size > remaining)
+			goto err;
+
+		data += size;
+		remaining -= size;
+
+		if (le32_to_cpu(array->type) != SND_SOC_TPLG_TUPLE_TYPE_WORD)
+			continue;
+
+		for (i = 0; i < le32_to_cpu(array->num_elems); i++) {
+			u32 value = le32_to_cpu(array->value[i].value);
+
+			switch (le32_to_cpu(array->value[i].token)) {
+			case AR_TKN_U32_MODULE_SRC_INSTANCE_ID:
+				link.src_mod_inst_id = value;
+				break;
+			case AR_TKN_U32_MODULE_SRC_OP_PORT_ID:
+				link.src_mod_op_port_id = value;
+				break;
+			case AR_TKN_U32_MODULE_DST_INSTANCE_ID:
+				link.dst_mod_inst_id = value;
+				break;
+			case AR_TKN_U32_MODULE_DST_IN_PORT_ID:
+				link.dst_mod_ip_port_id = value;
+				break;
+			}
+		}
+
+		if (!link.src_mod_inst_id)
+			continue;
+
+		if (!link.src_mod_op_port_id || !link.dst_mod_inst_id ||
+		    !link.dst_mod_ip_port_id)
+			goto err;
+
+		links = krealloc_array(route->links, route->num_links + 1,
+				       sizeof(*links), GFP_KERNEL);
+		if (!links) {
+			ret = -ENOMEM;
+			goto err;
+		}
+
+		links[route->num_links++] = link;
+		route->links = links;
+	}
+
+	return 0;
+
+err:
+	kfree(route->links);
+	route->links = NULL;
+	route->num_links = 0;
+
+	return ret;
+}
+
 static int audioreach_control_load_mix(struct snd_soc_component *scomp,
 				       struct snd_ar_control *scontrol,
 				       struct snd_kcontrol_new *kc,
@@ -1380,7 +1456,7 @@ static int audioreach_control_load_mix(struct snd_soc_component *scomp,
 		tkn_count++;
 	}
 
-	return 0;
+	return audioreach_control_load_links(&scontrol->route, &mc->priv);
 }
 
 static void *audioreach_copy_params(const unsigned int __user *bytes,
@@ -1546,6 +1622,7 @@ static int audioreach_control_unload(struct snd_soc_component *scomp,
 {
 	struct snd_ar_control *scontrol = dobj->private;
 
+	kfree(scontrol->route.links);
 	kvfree(scontrol->query);
 	kfree(scontrol);
 
