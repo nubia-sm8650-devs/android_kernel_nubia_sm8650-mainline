@@ -160,12 +160,38 @@ static void q6apm_put_audioreach_graph(struct kref *ref)
 }
 
 
+static bool q6apm_vcpm_param_allowed(const struct audioreach_graph_info *info,
+				     u32 param_id)
+{
+	struct audioreach_sub_graph *sg;
+
+	switch (param_id) {
+	case VCPM_PARAM_ID_CAL_KEYS:
+	case VCPM_PARAM_ID_VSID:
+	case VCPM_PARAM_ID_TTY_MODE:
+	case VCPM_PARAM_ID_TX_DEV_PP_CHANNEL_INFO:
+		break;
+	default:
+		return false;
+	}
+
+	list_for_each_entry(sg, &info->sg_list, node) {
+		if (sg->scenario_id == APM_SUB_GRAPH_SID_AUDIO_VOICE_CALL)
+			return true;
+	}
+
+	return false;
+}
+
 static bool q6apm_param_target_allowed(const struct audioreach_graph_info *info,
-				       u32 instance_id)
+				       u32 instance_id, u32 param_id)
 {
 	struct audioreach_container *container;
 	struct audioreach_sub_graph *sg;
 	struct audioreach_module *module;
+
+	if (instance_id == VCPM_MODULE_INSTANCE_ID)
+		return q6apm_vcpm_param_allowed(info, param_id);
 
 	list_for_each_entry(sg, &info->sg_list, node) {
 		list_for_each_entry(container, &sg->container_list, node) {
@@ -201,7 +227,8 @@ static int q6apm_validate_params(const struct audioreach_graph_info *info,
 		if (record_size > size)
 			return -EINVAL;
 
-		if (!q6apm_param_target_allowed(info, param->module_instance_id))
+		if (!q6apm_param_target_allowed(info, param->module_instance_id,
+						param->param_id))
 			return -EPERM;
 
 		*destination = count++ ? APM_MODULE_INSTANCE_ID : param->module_instance_id;
