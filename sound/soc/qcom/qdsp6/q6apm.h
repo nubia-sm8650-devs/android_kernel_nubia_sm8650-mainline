@@ -76,6 +76,7 @@ struct q6apm {
 	uint32_t state;
 
 	struct list_head widget_list;
+	struct list_head route_list;
 	struct idr graph_idr;
 	struct idr graph_info_idr;
 	struct idr sub_graphs_idr;

@@ -1225,15 +1225,32 @@ static int audioreach_link_load(struct snd_soc_component *component, int index,
 }
 
 static void audioreach_connect_sub_graphs(struct q6apm *apm,
-					  const struct snd_ar_control *m1,
+					  struct snd_ar_control *m1,
 					  const struct snd_ar_control *m2,
 					  bool connect)
 {
+	struct audioreach_route *route = &m1->route;
 	struct audioreach_graph_info *info;
 
 	mutex_lock(&apm->lock);
 	info = idr_find(&apm->graph_info_idr, m2->graph_id);
 	mutex_unlock(&apm->lock);
+
+	if (route->num_links) {
+		guard(mutex)(&apm->graph_lock);
+
+		if (connect == !list_empty(&route->node))
+			return;
+
+		route->graph_id = m2->graph_id;
+
+		if (connect)
+			list_add_tail(&route->node, &apm->route_list);
+		else
+			list_del_init(&route->node);
+
+		return;
+	}
 
 	if (connect) {
 		info->src_mod_inst_id = m1->module_instance_id;
@@ -1258,6 +1275,9 @@ static bool audioreach_is_vmixer_connected(struct q6apm *apm,
 	mutex_lock(&apm->lock);
 	info = idr_find(&apm->graph_info_idr, m2->graph_id);
 	mutex_unlock(&apm->lock);
+
+	if (m1->route.num_links)
+		return !list_empty(&m1->route.node);
 
 	if (info->dst_mod_inst_id == m2->module_instance_id &&
 	    info->src_mod_inst_id == m1->module_instance_id)
@@ -1295,7 +1315,7 @@ static int audioreach_put_audio_mixer(struct snd_kcontrol *kcontrol,
 	struct snd_soc_dapm_widget *dw = snd_soc_dapm_kcontrol_to_widget(kcontrol);
 	struct snd_soc_component *c = snd_soc_dapm_to_component(dapm);
 	const struct snd_ar_control *dapm_scontrol = dw->dobj.private;
-	const struct snd_ar_control *scontrol = mc->dobj.private;
+	struct snd_ar_control *scontrol = mc->dobj.private;
 	struct q6apm *data = dev_get_drvdata(c->dev);
 
 	if (ucontrol->value.integer.value[0]) {
@@ -1595,6 +1615,7 @@ static int audioreach_control_load(struct snd_soc_component *scomp, int index,
 		return -ENOMEM;
 
 	scontrol->scomp = scomp;
+	INIT_LIST_HEAD(&scontrol->route.node);
 
 	switch (le32_to_cpu(hdr->ops.get)) {
 	case SND_SOC_AR_TPLG_FE_BE_GRAPH_CTL_MIX:
@@ -1621,8 +1642,14 @@ static int audioreach_control_unload(struct snd_soc_component *scomp,
 				     struct snd_soc_dobj *dobj)
 {
 	struct snd_ar_control *scontrol = dobj->private;
+	struct q6apm *apm = dev_get_drvdata(scomp->dev);
 
-	kfree(scontrol->route.links);
+	if (scontrol->route.num_links) {
+		scoped_guard(mutex, &apm->graph_lock)
+			list_del(&scontrol->route.node);
+		kfree(scontrol->route.links);
+	}
+
 	kvfree(scontrol->query);
 	kfree(scontrol);
 

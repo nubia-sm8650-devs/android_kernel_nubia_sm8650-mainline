@@ -1182,6 +1182,7 @@ static int apm_probe(gpr_device_t *gdev)
 	init_waitqueue_head(&apm->wait);
 
 	INIT_LIST_HEAD(&apm->widget_list);
+	INIT_LIST_HEAD(&apm->route_list);
 	idr_init(&apm->graph_idr);
 	idr_init(&apm->graph_info_idr);
 	idr_init(&apm->sub_graphs_idr);

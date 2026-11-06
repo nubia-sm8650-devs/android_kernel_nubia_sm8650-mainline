@@ -907,6 +907,8 @@ struct audioreach_connection {
 struct audioreach_route {
 	struct audioreach_connection *links;
 	unsigned int num_links;
+	u32 graph_id;
+	struct list_head node;
 };
 
 struct audioreach_graph_info {

@@ -388,6 +388,21 @@ static void apm_populate_module_list_obj(struct apm_mod_list_obj *obj,
 	}
 }
 
+static unsigned int audioreach_copy_route_links(struct apm_module_conn_obj *conn_obj,
+						const struct audioreach_route *route)
+{
+	unsigned int n;
+
+	for (n = 0; n < route->num_links; n++) {
+		conn_obj[n].src_mod_inst_id = route->links[n].src_mod_inst_id;
+		conn_obj[n].src_mod_op_port_id = route->links[n].src_mod_op_port_id;
+		conn_obj[n].dst_mod_inst_id = route->links[n].dst_mod_inst_id;
+		conn_obj[n].dst_mod_ip_port_id = route->links[n].dst_mod_ip_port_id;
+	}
+
+	return n;
+}
+
 static void audioreach_populate_graph(struct q6apm *apm,
 				      const struct audioreach_graph_info *info,
 				      struct apm_graph_open_params *open,
@@ -407,6 +422,7 @@ static void audioreach_populate_graph(struct q6apm *apm,
 	struct audioreach_sub_graph *sg;
 	struct apm_container_obj *cobj;
 	struct apm_mod_list_obj *mlobj;
+	struct audioreach_route *route;
 	int i = 0;
 
 	mlobj = &ml_data->mod_list_obj[0];
@@ -419,6 +435,11 @@ static void audioreach_populate_graph(struct q6apm *apm,
 		conn_obj->dst_mod_inst_id = info->dst_mod_inst_id;
 		conn_obj->dst_mod_ip_port_id = info->dst_mod_ip_port_id;
 		nconn++;
+	}
+
+	list_for_each_entry(route, &apm->route_list, node) {
+		if (route->graph_id == info->id)
+			nconn += audioreach_copy_route_links(&mc_data->conn_obj[nconn], route);
 	}
 
 	list_for_each_entry(sg, sg_list, node) {
@@ -471,6 +492,7 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	struct apm_mod_conn_list_params *mcon;
 	struct apm_graph_open_params params;
 	struct apm_prop_list_params *mprop;
+	struct audioreach_route *route;
 	struct audioreach_module *module;
 	struct audioreach_sub_graph *sgs;
 	struct apm_mod_list_obj *mlobj;
@@ -489,6 +511,11 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	/* add FE-BE connections */
 	if (info->dst_mod_inst_id && info->src_mod_inst_id)
 		num_connections++;
+
+	list_for_each_entry(route, &apm->route_list, node) {
+		if (route->graph_id == info->id)
+			num_connections += route->num_links;
+	}
 
 	list_for_each_entry(sgs, sg_list, node) {
 		num_sub_graphs++;
