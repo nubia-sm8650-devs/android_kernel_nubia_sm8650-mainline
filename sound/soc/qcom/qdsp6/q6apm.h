@@ -68,6 +68,7 @@ struct q6apm {
 	u32 cmd_opcode;
 	u32 cmd_token;
 	u32 param_token;
+	struct q6apm_param_response *param_response;
 	uint32_t state;
 
 	struct list_head widget_list;
@@ -129,6 +130,8 @@ int q6apm_graph_stop(struct q6apm_graph *graph);
 int q6apm_graph_flush(struct q6apm_graph *graph);
 int q6apm_set_params(struct q6apm *apm, u32 graph_id,
 		     const void *data, size_t size);
+int q6apm_get_params(struct q6apm *apm, u32 graph_id, const void *query,
+		     size_t query_size, void *data, size_t *size);
 
 /* Media Format */
 int q6apm_graph_media_format_pcm(struct q6apm_graph *graph,

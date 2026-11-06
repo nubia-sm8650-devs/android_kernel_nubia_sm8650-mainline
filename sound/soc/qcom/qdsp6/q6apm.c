@@ -27,6 +27,13 @@ struct apm_graph_mgmt_cmd {
 
 #define APM_GRAPH_MGMT_PSIZE(p, n) ALIGN(struct_size(p, sub_graph_id_list, n), 8)
 
+struct q6apm_param_response {
+	void *data;
+	size_t size;
+	u32 status;
+	int error;
+};
+
 static struct q6apm *g_apm;
 
 int q6apm_send_cmd_sync(struct q6apm *apm, const struct gpr_pkt *pkt,
@@ -184,14 +191,14 @@ static bool q6apm_vcpm_param_allowed(const struct audioreach_graph_info *info,
 }
 
 static bool q6apm_param_target_allowed(const struct audioreach_graph_info *info,
-				       u32 instance_id, u32 param_id)
+				       u32 instance_id, u32 param_id, bool get)
 {
 	struct audioreach_container *container;
 	struct audioreach_sub_graph *sg;
 	struct audioreach_module *module;
 
 	if (instance_id == VCPM_MODULE_INSTANCE_ID)
-		return q6apm_vcpm_param_allowed(info, param_id);
+		return !get && q6apm_vcpm_param_allowed(info, param_id);
 
 	list_for_each_entry(sg, &info->sg_list, node) {
 		list_for_each_entry(container, &sg->container_list, node) {
@@ -206,7 +213,8 @@ static bool q6apm_param_target_allowed(const struct audioreach_graph_info *info,
 }
 
 static int q6apm_validate_params(const struct audioreach_graph_info *info,
-				 const void *data, size_t size, u32 *destination)
+				 const void *data, size_t size, u32 *destination,
+				 bool get)
 {
 	const struct apm_module_param_data *param;
 	unsigned int count = 0;
@@ -228,7 +236,7 @@ static int q6apm_validate_params(const struct audioreach_graph_info *info,
 			return -EINVAL;
 
 		if (!q6apm_param_target_allowed(info, param->module_instance_id,
-						param->param_id))
+						param->param_id, get))
 			return -EPERM;
 
 		*destination = count++ ? APM_MODULE_INSTANCE_ID : param->module_instance_id;
@@ -255,7 +263,8 @@ static struct gpr_pkt *q6apm_alloc_params_pkt(struct q6apm *apm, u32 graph_id,
 	if (!graph)
 		return ERR_PTR(-ENODEV);
 
-	ret = q6apm_validate_params(graph->info, data, size, &destination);
+	ret = q6apm_validate_params(graph->info, data, size, &destination,
+				    opcode == APM_CMD_GET_CFG);
 	if (ret)
 		return ERR_PTR(ret);
 
@@ -281,6 +290,45 @@ int q6apm_set_params(struct q6apm *apm, u32 graph_id,
 		return PTR_ERR(pkt);
 
 	return q6apm_send_cmd_sync(apm, pkt, 0);
+}
+
+int q6apm_get_params(struct q6apm *apm, u32 graph_id, const void *query,
+		     size_t query_size, void *data, size_t *size)
+{
+	struct q6apm_param_response response = {
+		.data = data,
+		.size = *size,
+		.error = -EPROTO,
+	};
+	int ret;
+
+	guard(mutex)(&apm->graph_lock);
+
+	struct gpr_pkt *pkt __free(kfree) =
+		q6apm_alloc_params_pkt(apm, graph_id, query, query_size, APM_CMD_GET_CFG);
+	if (IS_ERR(pkt))
+		return PTR_ERR(pkt);
+
+	scoped_guard(mutex, &apm->response_lock)
+		apm->param_response = &response;
+
+	ret = q6apm_send_cmd_sync(apm, pkt, APM_CMD_RSP_GET_CFG);
+
+	scoped_guard(mutex, &apm->response_lock)
+		apm->param_response = NULL;
+
+	if (ret)
+		return ret;
+
+	if (response.error)
+		return response.error;
+
+	if (response.status && pkt->hdr.dest_port != APM_MODULE_INSTANCE_ID)
+		return -EINVAL;
+
+	*size = response.size;
+
+	return 0;
 }
 
 static int q6apm_get_apm_state(struct q6apm *apm)
@@ -1077,6 +1125,28 @@ struct audioreach_module *q6apm_find_module_by_mid(struct q6apm_graph *graph, ui
 
 }
 
+static int q6apm_copy_param_response(struct q6apm_param_response *response,
+				     const struct gpr_resp_pkt *data)
+{
+	size_t size;
+
+	if (data->payload_size < sizeof(response->status))
+		return -EPROTO;
+
+	memcpy(&response->status, data->payload, sizeof(response->status));
+	size = data->payload_size - sizeof(response->status);
+	if (size > response->size)
+		return -EMSGSIZE;
+
+	if (size < sizeof(struct apm_module_param_data))
+		return response->status ? -EINVAL : -EPROTO;
+
+	memcpy(response->data, data->payload + sizeof(response->status), size);
+	response->size = size;
+
+	return 0;
+}
+
 static int apm_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 {
 	gpr_device_t *gdev = priv;
@@ -1099,6 +1169,17 @@ static int apm_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 		return 0;
 
 	switch (hdr->opcode) {
+	case APM_CMD_RSP_GET_CFG:
+		if (apm->cmd_opcode != APM_CMD_GET_CFG || !apm->param_response)
+			return 0;
+
+		apm->param_response->error =
+			q6apm_copy_param_response(apm->param_response, data);
+
+		apm->result.opcode = hdr->opcode;
+		apm->result.status = 0;
+		wake_up(&apm->wait);
+		break;
 	case APM_CMD_RSP_GET_SPF_STATE:
 		if (apm->cmd_opcode != APM_CMD_GET_SPF_STATE)
 			return 0;
@@ -1128,6 +1209,7 @@ static int apm_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 		case APM_CMD_GRAPH_FLUSH:
 		case APM_CMD_GRAPH_STOP:
 		case APM_CMD_SET_CFG:
+		case APM_CMD_GET_CFG:
 			apm->result.opcode = result->opcode;
 			apm->result.status = result->status;
 			if (result->status)
