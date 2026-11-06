@@ -438,10 +438,7 @@ static void audioreach_populate_graph(struct q6apm *apm,
 				module_prop_obj = &mp_data->mod_prop_obj[nmodule++];
 				apm_populate_module_prop_obj(module_prop_obj, module);
 
-				if (!module->max_op_port)
-					continue;
-
-				for (pn = 0; pn < module->max_op_port; pn++) {
+				for (pn = 0; pn < module->num_connections; pn++) {
 					if (module->dst_mod_inst_id[pn]) {
 						conn_obj = &mc_data->conn_obj[nconn];
 						conn_obj->src_mod_inst_id = module->instance_id;
