@@ -308,26 +308,36 @@ audioreach_get_module_array(const struct snd_soc_tplg_private *private)
 static struct audioreach_module_priv_data *
 audioreach_get_module_priv_data(const struct snd_soc_tplg_private *private)
 {
-	int sz;
+	const char *data = private->data;
+	u32 remaining = le32_to_cpu(private->size);
 
-	for (sz = 0; sz < le32_to_cpu(private->size); ) {
+	while (remaining) {
 		const struct snd_soc_tplg_vendor_array *mod_array;
+		u32 size;
 
-		mod_array = (struct snd_soc_tplg_vendor_array *)((u8 *)private->array + sz);
+		if (remaining < sizeof(*mod_array))
+			return ERR_PTR(-EINVAL);
+
+		mod_array = (const void *)data;
+		size = le32_to_cpu(mod_array->size);
+		if (size < sizeof(*mod_array) || size > remaining)
+			return ERR_PTR(-EINVAL);
+
 		if (le32_to_cpu(mod_array->type) == SND_SOC_AR_TPLG_MODULE_CFG_TYPE) {
 			struct audioreach_module_priv_data *pdata;
 
-			pdata = kzalloc_flex(*pdata, data,
-					     le32_to_cpu(mod_array->size));
+			if (size < sizeof(*pdata))
+				return ERR_PTR(-EINVAL);
+
+			pdata = kmemdup(mod_array, size, GFP_KERNEL);
 			if (!pdata)
 				return ERR_PTR(-ENOMEM);
 
-			memcpy(pdata, ((u8 *)private->data + sz), struct_size(pdata, data,
-						le32_to_cpu(mod_array->size)));
 			return pdata;
 		}
 
-		sz = sz + le32_to_cpu(mod_array->size);
+		data += size;
+		remaining -= size;
 	}
 
 	return NULL;
@@ -597,6 +607,11 @@ static int audioreach_widget_load_module_common(struct snd_soc_component *compon
 	struct audioreach_sub_graph *sg;
 	struct audioreach_module *mod;
 	struct snd_soc_dobj *dobj;
+	struct audioreach_module_priv_data *data __free(kfree) =
+		audioreach_get_module_priv_data(&tplg_w->priv);
+
+	if (IS_ERR(data))
+		return PTR_ERR(data);
 
 	sg = audioreach_parse_sg_tokens(apm, &tplg_w->priv);
 	if (IS_ERR(sg))
@@ -610,7 +625,7 @@ static int audioreach_widget_load_module_common(struct snd_soc_component *compon
 	if (IS_ERR_OR_NULL(mod))
 		return mod ? PTR_ERR(mod) : -ENODEV;
 
-	mod->data = audioreach_get_module_priv_data(&tplg_w->priv);
+	mod->data = no_free_ptr(data);
 
 	dobj = &w->dobj;
 	dobj->private = mod;

@@ -818,8 +818,15 @@ static int audioreach_set_module_config(struct q6apm_graph *graph,
 					const struct audioreach_module *module,
 					const struct audioreach_module_config *cfg)
 {
-	int size = le32_to_cpu(module->data->size);
+	int size;
 	void *p;
+
+	if (!module->data)
+		return 0;
+
+	size = le32_to_cpu(module->data->size) - sizeof(*module->data);
+	if (!size)
+		return 0;
 
 	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_apm_cmd_pkt(size, APM_CMD_SET_CFG, 0);
 	if (IS_ERR(pkt))
