@@ -382,7 +382,6 @@ struct data_cmd_rsp_rd_sh_mem_ep_data_buffer_done_v2 {
 	uint32_t buf_addr_msw;
 	uint32_t mem_map_handle;
 	uint32_t data_size;
-	uint32_t offset;
 	uint32_t timestamp_lsw;
 	uint32_t timestamp_msw;
 	uint32_t flags;
