@@ -197,6 +197,9 @@ static bool q6apm_param_target_allowed(const struct audioreach_graph_info *info,
 	struct audioreach_sub_graph *sg;
 	struct audioreach_module *module;
 
+	if (instance_id == AMDB_MODULE_INSTANCE_ID)
+		return get && param_id == AMDB_PARAM_ID_MODULE_VERSION_INFO;
+
 	if (instance_id == VCPM_MODULE_INSTANCE_ID)
 		return !get && q6apm_vcpm_param_allowed(info, param_id);
 
