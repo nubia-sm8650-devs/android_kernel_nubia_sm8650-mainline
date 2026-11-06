@@ -60,6 +60,9 @@ struct q6apm {
 
 	struct mutex cmd_lock;
 	struct mutex lock;
+	struct mutex response_lock;
+	u32 cmd_opcode;
+	u32 cmd_token;
 	uint32_t state;
 
 	struct list_head widget_list;

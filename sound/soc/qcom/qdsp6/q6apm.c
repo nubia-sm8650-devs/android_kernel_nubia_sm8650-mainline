@@ -34,6 +34,13 @@ int q6apm_send_cmd_sync(struct q6apm *apm, const struct gpr_pkt *pkt,
 {
 	gpr_device_t *gdev = apm->gdev;
 
+	guard(mutex)(&apm->cmd_lock);
+
+	scoped_guard(mutex, &apm->response_lock) {
+		apm->cmd_opcode = pkt->hdr.opcode;
+		apm->cmd_token = pkt->hdr.token;
+	}
+
 	return audioreach_send_cmd_sync(&gdev->dev, gdev, &apm->result, &apm->lock,
 					NULL, &apm->wait, pkt, rsp_opcode);
 }
@@ -893,6 +900,8 @@ static int apm_probe(gpr_device_t *gdev)
 		return -ENOMEM;
 
 	mutex_init(&apm->lock);
+	mutex_init(&apm->cmd_lock);
+	mutex_init(&apm->response_lock);
 	apm->dev = dev;
 	apm->gdev = gdev;
 	init_waitqueue_head(&apm->wait);
@@ -955,8 +964,19 @@ static int apm_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 
 	result = data->payload;
 
+	guard(mutex)(&apm->response_lock);
+
+	if (hdr->token != apm->cmd_token)
+		return 0;
+
 	switch (hdr->opcode) {
 	case APM_CMD_RSP_GET_SPF_STATE:
+		if (apm->cmd_opcode != APM_CMD_GET_SPF_STATE)
+			return 0;
+
+		if (data->payload_size < sizeof(apm->state))
+			return -EINVAL;
+
 		apm->result.opcode = hdr->opcode;
 		apm->result.status = 0;
 		/* First word of result it state */
@@ -964,6 +984,12 @@ static int apm_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 		wake_up(&apm->wait);
 		break;
 	case GPR_BASIC_RSP_RESULT:
+		if (data->payload_size < sizeof(*result))
+			return -EINVAL;
+
+		if (result->opcode != apm->cmd_opcode)
+			return 0;
+
 		switch (result->opcode) {
 		case APM_CMD_SHARED_MEM_MAP_REGIONS:
 		case APM_CMD_GRAPH_START:
@@ -1005,6 +1031,12 @@ static int apm_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 		}
 		break;
 	case APM_CMD_RSP_SHARED_MEM_MAP_REGIONS:
+		if (apm->cmd_opcode != APM_CMD_SHARED_MEM_MAP_REGIONS)
+			return 0;
+
+		if (data->payload_size < sizeof(*rsp))
+			return -EINVAL;
+
 		apm->result.opcode = hdr->opcode;
 		apm->result.status = 0;
 		rsp = data->payload;
