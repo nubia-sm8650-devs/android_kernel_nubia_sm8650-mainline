@@ -338,9 +338,10 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 				return ret;
 			}
 
-			ret = q6apm_register_watermark_event(prtd->graph,
-							     prtd->pcm_size / prtd->periods,
-							     prtd->periods);
+			if (!runtime->no_period_wakeup)
+				ret = q6apm_register_watermark_event(prtd->graph,
+								     prtd->pcm_size / prtd->periods,
+								     prtd->periods);
 			if (ret < 0) {
 				dev_err(dev, "WaterMark event config failed rc = %d\n", ret);
 				return ret;
@@ -531,6 +532,7 @@ static int q6apm_dai_open(struct snd_soc_component *component,
 	if (q6apm_is_graph_in_push_pull_mode(prtd->graph)) {
 		void *pos_buffer;
 
+		runtime->hw.info |= SNDRV_PCM_INFO_NO_PERIOD_WAKEUP;
 		prtd->pos_phys = prtd->phys + BUFFER_BYTES_MAX;
 		pos_buffer = (void *)(substream->dma_buffer.area + BUFFER_BYTES_MAX);
 		prtd->pos_buffer = (struct sh_mem_pull_push_mode_position_buffer *)(pos_buffer);
