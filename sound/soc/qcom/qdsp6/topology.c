@@ -13,6 +13,7 @@
 #include <uapi/sound/snd_ar_tokens.h>
 #include <linux/kernel.h>
 #include <linux/wait.h>
+#include <linux/uaccess.h>
 #include "q6apm.h"
 #include "audioreach.h"
 
@@ -1380,6 +1381,69 @@ static int audioreach_control_load_mix(struct snd_soc_component *scomp,
 	return 0;
 }
 
+static void *audioreach_copy_params(const unsigned int __user *bytes,
+				    unsigned int size, u32 type, size_t *length)
+{
+	u32 tlv[2];
+
+	if (size < sizeof(tlv))
+		return ERR_PTR(-EINVAL);
+
+	if (copy_from_user(tlv, bytes, sizeof(tlv)))
+		return ERR_PTR(-EFAULT);
+
+	if (tlv[0] != type || tlv[1] > size - sizeof(tlv))
+		return ERR_PTR(-EINVAL);
+
+	*length = tlv[1];
+
+	return vmemdup_user(bytes + ARRAY_SIZE(tlv), tlv[1]);
+}
+
+static int audioreach_put_params(struct snd_kcontrol *kcontrol,
+				 const unsigned int __user *bytes, unsigned int size)
+{
+	struct soc_bytes_ext *sbe = (void *)kcontrol->private_value;
+	struct snd_ar_control *scontrol = sbe->dobj.private;
+	struct q6apm *apm = dev_get_drvdata(scontrol->scomp->dev);
+	size_t length;
+
+	void *data __free(kvfree) =
+		audioreach_copy_params(bytes, size, SND_SOC_AR_TLV_SET_PARAMS, &length);
+	if (IS_ERR(data))
+		return PTR_ERR(data);
+
+	return q6apm_set_params(apm, scontrol->graph_id, data, length);
+}
+
+static int audioreach_control_load_params(struct snd_soc_component *scomp,
+					  struct snd_kcontrol_new *kc,
+					  struct snd_soc_tplg_ctl_hdr *hdr)
+{
+	struct snd_soc_tplg_bytes_control *be =
+		container_of(hdr, struct snd_soc_tplg_bytes_control, hdr);
+	const struct snd_soc_tplg_vendor_array *array = (const void *)be->priv.data;
+	struct soc_bytes_ext *sbe = (void *)kc->private_value;
+	struct snd_ar_control *scontrol;
+
+	if (le32_to_cpu(be->ext_ops.put) != SND_SOC_AR_TPLG_SET_PARAMS ||
+	    le32_to_cpu(be->priv.size) < struct_size(array, value, 1) ||
+	    le32_to_cpu(array->type) != SND_SOC_TPLG_TUPLE_TYPE_WORD ||
+	    le32_to_cpu(array->num_elems) != 1 ||
+	    le32_to_cpu(array->value[0].token) != AR_TKN_DAI_INDEX)
+		return -EINVAL;
+
+	scontrol = kzalloc_obj(*scontrol);
+	if (!scontrol)
+		return -ENOMEM;
+
+	scontrol->scomp = scomp;
+	scontrol->graph_id = le32_to_cpu(array->value[0].value);
+	sbe->dobj.private = scontrol;
+
+	return 0;
+}
+
 static int audioreach_control_load(struct snd_soc_component *scomp, int index,
 				   struct snd_kcontrol_new *kc,
 				   struct snd_soc_tplg_ctl_hdr *hdr)
@@ -1388,6 +1452,9 @@ static int audioreach_control_load(struct snd_soc_component *scomp, int index,
 	struct soc_mixer_control *sm;
 	struct snd_soc_dobj *dobj;
 	int ret = 0;
+
+	if (le32_to_cpu(hdr->type) == SND_SOC_TPLG_TYPE_BYTES)
+		return audioreach_control_load_params(scomp, kc, hdr);
 
 	scontrol = kzalloc_obj(*scontrol);
 	if (!scontrol)
@@ -1433,9 +1500,15 @@ static const struct snd_soc_tplg_kcontrol_ops audioreach_io_ops[] = {
 		audioreach_put_vol_ctrl_audio_mixer, snd_soc_info_volsw},
 };
 
+static const struct snd_soc_tplg_bytes_ext_ops audioreach_bytes_ext_ops[] = {
+	{ SND_SOC_AR_TPLG_SET_PARAMS, NULL, audioreach_put_params },
+};
+
 static const struct snd_soc_tplg_ops audioreach_tplg_ops = {
 	.io_ops = audioreach_io_ops,
 	.io_ops_count = ARRAY_SIZE(audioreach_io_ops),
+	.bytes_ext_ops = audioreach_bytes_ext_ops,
+	.bytes_ext_ops_count = ARRAY_SIZE(audioreach_bytes_ext_ops),
 
 	.control_load	= audioreach_control_load,
 	.control_unload	= audioreach_control_unload,
