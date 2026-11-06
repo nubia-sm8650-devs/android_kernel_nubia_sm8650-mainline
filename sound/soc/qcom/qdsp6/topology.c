@@ -974,8 +974,7 @@ static int audioreach_pga_event(struct snd_soc_dapm_widget *w,
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
 		/* apply gain after power up of widget */
-		audioreach_gain_set_vol_ctrl(apm, mod, mod->gain);
-		break;
+		return audioreach_gain_set_vol_ctrl(apm, mod, mod->gain);
 	default:
 		break;
 	}
@@ -1300,12 +1299,32 @@ static int audioreach_get_vol_ctrl_audio_mixer(struct snd_kcontrol *kcontrol,
 static int audioreach_put_vol_ctrl_audio_mixer(struct snd_kcontrol *kcontrol,
 					       struct snd_ctl_elem_value *ucontrol)
 {
+	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kcontrol);
 	struct snd_soc_dapm_widget *dw = snd_soc_dapm_kcontrol_to_widget(kcontrol);
+	struct snd_soc_component *c = snd_soc_dapm_to_component(dapm);
 	struct audioreach_module *mod = dw->dobj.private;
+	struct q6apm *apm = dev_get_drvdata(c->dev);
+	int gain = ucontrol->value.integer.value[0];
+	int ret = 0;
 
-	mod->gain = ucontrol->value.integer.value[0];
+	snd_soc_dapm_mutex_lock(dapm);
 
-	return 1;
+	if (mod->gain == gain)
+		goto out;
+
+	if (dw->power) {
+		ret = audioreach_gain_set_vol_ctrl(apm, mod, gain);
+		if (ret)
+			goto out;
+	}
+
+	mod->gain = gain;
+	ret = 1;
+
+out:
+	snd_soc_dapm_mutex_unlock(dapm);
+
+	return ret;
 }
 
 static int audioreach_control_load_mix(struct snd_soc_component *scomp,
