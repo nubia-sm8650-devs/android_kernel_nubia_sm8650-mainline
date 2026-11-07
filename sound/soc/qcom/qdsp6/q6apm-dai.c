@@ -9,6 +9,7 @@
 #include <linux/slab.h>
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
+#include <sound/soc-dpcm.h>
 #include <linux/spinlock.h>
 #include <sound/pcm.h>
 #include <asm/div64.h>
@@ -216,6 +217,77 @@ static void event_handler_compr(uint32_t opcode, uint32_t token,
 	}
 }
 
+static void q6apm_dai_free_graphs(struct q6apm_dai_rtd *prtd)
+{
+	struct q6apm_graph *root = prtd->graph;
+
+	audioreach_stop_graphs(root);
+
+	while (root->num_connected)
+		q6apm_graph_close(root->connected[--root->num_connected]);
+
+	kfree(root->connected);
+	root->connected = NULL;
+}
+
+static int q6apm_dai_prepare_graphs(struct q6apm_dai_rtd *prtd)
+{
+	struct snd_pcm_substream *substream = prtd->substream;
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *dai = snd_soc_rtd_to_cpu(rtd, 0);
+	struct q6apm_graph *root = prtd->graph;
+	struct snd_soc_dapm_widget_list *list;
+	int ret;
+
+	if (root->num_started == root->num_connected)
+		return 0;
+
+	ret = snd_soc_dapm_dai_get_connected_widgets(dai, substream->stream, &list,
+						     dpcm_end_walk_at_be);
+	if (ret < 0)
+		return ret;
+
+	ret = audioreach_prepare_graphs(root, list, substream->stream);
+	snd_soc_dapm_dai_free_widgets(&list);
+
+	return ret;
+}
+
+static int q6apm_dai_open_graphs(struct snd_soc_component *component,
+				 struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct q6apm_dai_rtd *prtd = substream->runtime->private_data;
+	struct snd_soc_dai *dai = snd_soc_rtd_to_cpu(rtd, 0);
+	struct q6apm_graph *root = prtd->graph;
+	struct snd_soc_dapm_widget_list *list;
+	int ret;
+
+	if (root->connected)
+		return 0;
+
+	ret = snd_soc_dapm_dai_get_connected_widgets(dai, substream->stream, &list,
+						     dpcm_end_walk_at_be);
+	if (ret < 0)
+		return ret;
+
+	ret = audioreach_open_graphs(root, rtd, substream->stream, list);
+	snd_soc_dapm_dai_free_widgets(&list);
+
+	if (ret)
+		q6apm_dai_free_graphs(prtd);
+
+	return ret;
+}
+
+static int q6apm_dai_hw_free(struct snd_soc_component *component,
+			     struct snd_pcm_substream *substream)
+{
+	q6apm_dai_free_graphs(substream->runtime->private_data);
+
+	return 0;
+}
+
 static int q6apm_dai_prepare(struct snd_soc_component *component,
 			     struct snd_pcm_substream *substream)
 {
@@ -250,6 +322,8 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 		q6apm_graph_stop(prtd->graph);
 		q6apm_free_fragments(prtd->graph, substream->stream);
 	}
+
+	audioreach_stop_graphs(prtd->graph);
 
 	prtd->last_pos_index = 0;
 	prtd->pcm_count = snd_pcm_lib_period_bytes(substream);
@@ -300,8 +374,13 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 		return ret;
 	}
 
+	ret = q6apm_dai_prepare_graphs(prtd);
+	if (ret)
+		return ret;
+
 	ret = q6apm_graph_start(prtd->graph);
 	if (ret) {
+		audioreach_stop_graphs(prtd->graph);
 		dev_err(dev, "Failed to Start Graph %d\n", ret);
 		return ret;
 	}
@@ -544,7 +623,7 @@ static int q6apm_dai_hw_params(struct snd_soc_component *component,
 		return -EINVAL;
 	}
 
-	return 0;
+	return q6apm_dai_open_graphs(component, substream);
 }
 
 static int q6apm_dai_memory_map(struct snd_soc_component *component,
@@ -1042,6 +1121,7 @@ static const struct snd_soc_component_driver q6apm_fe_dai_component = {
 	.pcm_new	= q6apm_dai_pcm_new,
 	.pcm_free	= q6apm_dai_pcm_free,
 	.hw_params	= q6apm_dai_hw_params,
+	.hw_free	= q6apm_dai_hw_free,
 	.pointer	= q6apm_dai_pointer,
 	.trigger	= q6apm_dai_trigger,
 	.ack		= q6apm_dai_ack,

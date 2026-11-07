@@ -123,6 +123,9 @@ struct q6apm_graph {
 	struct mutex lock;
 	struct audioreach_graph *ar_graph;
 	struct audioreach_graph_info *info;
+	struct q6apm_graph **connected;
+	unsigned int num_connected;
+	unsigned int num_started;
 };
 
 /* Graph Operations */
@@ -165,8 +168,11 @@ int q6apm_alloc_fragments(struct q6apm_graph *graph,
 int q6apm_free_fragments(struct q6apm_graph *graph, unsigned int dir);
 int q6apm_unmap_memory_fixed_region(struct device *dev, unsigned int graph_id);
 /* Helpers */
-struct audioreach_graph_info *audioreach_get_widget_graph(struct q6apm *apm,
-							  struct snd_soc_dapm_widget *w);
+void audioreach_stop_graphs(struct q6apm_graph *root);
+int audioreach_prepare_graphs(struct q6apm_graph *root,
+			      const struct snd_soc_dapm_widget_list *list, int stream);
+int audioreach_open_graphs(struct q6apm_graph *root, struct snd_soc_pcm_runtime *rtd,
+			   int stream, const struct snd_soc_dapm_widget_list *list);
 int q6apm_send_route(struct q6apm *apm, const struct audioreach_route *route,
 		     u32 opcode);
 int q6apm_send_cmd_sync(struct q6apm *apm, const struct gpr_pkt *pkt,

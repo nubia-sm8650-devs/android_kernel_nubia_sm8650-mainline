@@ -1069,8 +1069,8 @@ static int audioreach_widget_ready(struct snd_soc_component *component,
 	return 0;
 }
 
-struct audioreach_graph_info *audioreach_get_widget_graph(struct q6apm *apm,
-							  struct snd_soc_dapm_widget *w)
+static struct audioreach_graph_info *audioreach_get_widget_graph(struct q6apm *apm,
+								 struct snd_soc_dapm_widget *w)
 {
 	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
 	struct audioreach_module *module;
@@ -1099,7 +1099,128 @@ struct audioreach_graph_info *audioreach_get_widget_graph(struct q6apm *apm,
 		return NULL;
 	}
 }
-EXPORT_SYMBOL_GPL(audioreach_get_widget_graph);
+
+static bool audioreach_graph_has_dai(struct snd_soc_card *card, struct q6apm *apm, u32 id)
+{
+	struct snd_soc_pcm_runtime *rtd;
+	struct snd_soc_dai *dai;
+	int i;
+
+	for_each_card_rtds(card, rtd) {
+		for_each_rtd_cpu_dais(rtd, i, dai) {
+			if ((dai->dev == apm->dev || dai->dev->parent == apm->dev) &&
+			    dai->driver->id == id)
+				return true;
+		}
+	}
+
+	return false;
+}
+
+static bool audioreach_graph_is_connected(struct q6apm_graph *graph,
+					  const struct snd_soc_dapm_widget_list *list, int stream)
+{
+	enum snd_soc_dapm_direction dir = stream == SNDRV_PCM_STREAM_PLAYBACK ?
+					 SND_SOC_DAPM_DIR_OUT : SND_SOC_DAPM_DIR_IN;
+	struct snd_soc_dapm_widget *w;
+	int i;
+
+	for_each_dapm_widgets(list, i, w) {
+		struct audioreach_graph_info *info = audioreach_get_widget_graph(graph->apm, w);
+
+		if (!info || info->id != graph->id)
+			continue;
+
+		if (snd_soc_dapm_widget_get_connected_paths(w, dir))
+			return true;
+	}
+
+	return false;
+}
+
+void audioreach_stop_graphs(struct q6apm_graph *root)
+{
+	while (root->num_started) {
+		struct q6apm_graph *graph = root->connected[--root->num_started];
+		int ret = q6apm_graph_stop(graph);
+
+		if (ret)
+			dev_err(graph->dev, "Failed to stop graph %u: %d\n", graph->id, ret);
+	}
+}
+EXPORT_SYMBOL_GPL(audioreach_stop_graphs);
+
+int audioreach_prepare_graphs(struct q6apm_graph *root,
+			      const struct snd_soc_dapm_widget_list *list, int stream)
+{
+	int i, ret;
+
+	for (i = root->num_started; i < root->num_connected; i++) {
+		struct q6apm_graph *graph = root->connected[i];
+
+		if (!audioreach_graph_is_connected(graph, list, stream))
+			continue;
+
+		ret = q6apm_graph_prepare(graph);
+		if (ret)
+			goto err;
+
+		ret = q6apm_graph_start(graph);
+		if (ret)
+			goto err;
+
+		swap(root->connected[i], root->connected[root->num_started]);
+		root->num_started++;
+	}
+
+	return 0;
+
+err:
+	audioreach_stop_graphs(root);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(audioreach_prepare_graphs);
+
+int audioreach_open_graphs(struct q6apm_graph *root, struct snd_soc_pcm_runtime *rtd,
+			   int stream, const struct snd_soc_dapm_widget_list *list)
+{
+	struct snd_soc_dapm_widget *w;
+	int i, j, ret;
+
+	root->connected = kcalloc(list->num_widgets, sizeof(*root->connected), GFP_KERNEL);
+	if (!root->connected)
+		return -ENOMEM;
+
+	ret = 0;
+
+	for_each_dapm_widgets(list, i, w) {
+		struct audioreach_graph_info *info = audioreach_get_widget_graph(root->apm, w);
+		struct q6apm_graph *graph;
+
+		if (!info || audioreach_graph_has_dai(rtd->card, root->apm, info->id))
+			continue;
+
+		for (j = 0; j < root->num_connected; j++) {
+			if (root->connected[j]->id == info->id)
+				break;
+		}
+
+		if (j < root->num_connected)
+			continue;
+
+		graph = q6apm_graph_open(root->dev, NULL, NULL, info->id, stream);
+		if (IS_ERR(graph)) {
+			ret = PTR_ERR(graph);
+			break;
+		}
+
+		root->connected[root->num_connected++] = graph;
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(audioreach_open_graphs);
 
 static int audioreach_widget_unload(struct snd_soc_component *scomp,
 				    struct snd_soc_dobj *dobj)
