@@ -691,6 +691,8 @@ bool snd_soc_dapm_pin_has_prefix(struct snd_soc_card *card, const char *pin);
 void snd_soc_dapm_mark_endpoints_dirty(struct snd_soc_card *card);
 
 /* dapm path query */
+int snd_soc_dapm_widget_get_connected_paths(struct snd_soc_dapm_widget *w,
+					    enum snd_soc_dapm_direction dir);
 int snd_soc_dapm_dai_get_connected_widgets(struct snd_soc_dai *dai, int stream,
 	struct snd_soc_dapm_widget_list **list,
 	bool (*custom_stop_condition)(struct snd_soc_dapm_widget *, enum snd_soc_dapm_direction));

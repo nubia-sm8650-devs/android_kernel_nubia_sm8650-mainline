@@ -1586,6 +1586,25 @@ static int dapm_is_connected_input_ep(struct snd_soc_dapm_widget *widget,
 			dapm_is_connected_input_ep, custom_stop_condition);
 }
 
+int snd_soc_dapm_widget_get_connected_paths(struct snd_soc_dapm_widget *w,
+					    enum snd_soc_dapm_direction dir)
+{
+	struct snd_soc_card *card = snd_soc_dapm_to_card(w->dapm);
+	int paths;
+
+	snd_soc_dapm_mutex_lock(card);
+
+	if (dir == SND_SOC_DAPM_DIR_OUT)
+		paths = dapm_is_connected_output_ep(w, NULL, NULL);
+	else
+		paths = dapm_is_connected_input_ep(w, NULL, NULL);
+
+	snd_soc_dapm_mutex_unlock(card);
+
+	return paths;
+}
+EXPORT_SYMBOL_GPL(snd_soc_dapm_widget_get_connected_paths);
+
 /**
  * snd_soc_dapm_dai_get_connected_widgets - query audio path and it's widgets.
  * @dai: the soc DAI.
