@@ -1185,14 +1185,17 @@ EXPORT_SYMBOL_GPL(audioreach_prepare_graphs);
 int audioreach_open_graphs(struct q6apm_graph *root, struct snd_soc_pcm_runtime *rtd,
 			   int stream, const struct snd_soc_dapm_widget_list *list)
 {
+	unsigned int first = root->num_connected;
+	struct q6apm_graph **graphs;
 	struct snd_soc_dapm_widget *w;
 	int i, j, ret;
 
-	root->connected = kcalloc(list->num_widgets, sizeof(*root->connected), GFP_KERNEL);
-	if (!root->connected)
+	graphs = krealloc_array(root->connected, first + list->num_widgets,
+				sizeof(*graphs), GFP_KERNEL);
+	if (!graphs)
 		return -ENOMEM;
 
-	ret = 0;
+	root->connected = graphs;
 
 	for_each_dapm_widgets(list, i, w) {
 		struct audioreach_graph_info *info = audioreach_get_widget_graph(root->apm, w);
@@ -1212,11 +1215,17 @@ int audioreach_open_graphs(struct q6apm_graph *root, struct snd_soc_pcm_runtime 
 		graph = q6apm_graph_open(root->dev, NULL, NULL, info->id, stream);
 		if (IS_ERR(graph)) {
 			ret = PTR_ERR(graph);
-			break;
+			goto err;
 		}
 
 		root->connected[root->num_connected++] = graph;
 	}
+
+	return 0;
+
+err:
+	while (root->num_connected > first)
+		q6apm_graph_close(root->connected[--root->num_connected]);
 
 	return ret;
 }
