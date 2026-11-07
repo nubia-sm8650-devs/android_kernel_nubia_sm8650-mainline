@@ -89,7 +89,6 @@ struct audioreach_graph_data {
 struct audioreach_graph {
 	struct audioreach_graph_info *info;
 	uint32_t id;
-	int state;
 	int start_count;
 	/* Cached Graph data */
 	void *graph;
