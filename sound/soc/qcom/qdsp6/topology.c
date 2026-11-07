@@ -1069,6 +1069,38 @@ static int audioreach_widget_ready(struct snd_soc_component *component,
 	return 0;
 }
 
+struct audioreach_graph_info *audioreach_get_widget_graph(struct q6apm *apm,
+							  struct snd_soc_dapm_widget *w)
+{
+	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
+	struct audioreach_module *module;
+
+	if (!component || component->dev != apm->dev || !w->dobj.private)
+		return NULL;
+
+	switch (w->id) {
+	case snd_soc_dapm_mixer: {
+		struct snd_ar_control *control = w->dobj.private;
+
+		guard(mutex)(&apm->lock);
+
+		return idr_find(&apm->graph_info_idr, control->graph_id);
+	}
+	case snd_soc_dapm_aif_in:
+	case snd_soc_dapm_aif_out:
+	case snd_soc_dapm_buffer:
+	case snd_soc_dapm_decoder:
+	case snd_soc_dapm_encoder:
+	case snd_soc_dapm_src:
+	case snd_soc_dapm_pga:
+		module = w->dobj.private;
+		return module->container->sub_graph->info;
+	default:
+		return NULL;
+	}
+}
+EXPORT_SYMBOL_GPL(audioreach_get_widget_graph);
+
 static int audioreach_widget_unload(struct snd_soc_component *scomp,
 				    struct snd_soc_dobj *dobj)
 {

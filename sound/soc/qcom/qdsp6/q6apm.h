@@ -165,6 +165,8 @@ int q6apm_alloc_fragments(struct q6apm_graph *graph,
 int q6apm_free_fragments(struct q6apm_graph *graph, unsigned int dir);
 int q6apm_unmap_memory_fixed_region(struct device *dev, unsigned int graph_id);
 /* Helpers */
+struct audioreach_graph_info *audioreach_get_widget_graph(struct q6apm *apm,
+							  struct snd_soc_dapm_widget *w);
 int q6apm_send_route(struct q6apm *apm, const struct audioreach_route *route,
 		     u32 opcode);
 int q6apm_send_cmd_sync(struct q6apm *apm, const struct gpr_pkt *pkt,
