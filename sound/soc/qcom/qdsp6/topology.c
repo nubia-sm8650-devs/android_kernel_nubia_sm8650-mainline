@@ -1224,32 +1224,47 @@ static int audioreach_link_load(struct snd_soc_component *component, int index,
 	return 0;
 }
 
-static void audioreach_connect_sub_graphs(struct q6apm *apm,
-					  struct snd_ar_control *m1,
-					  const struct snd_ar_control *m2,
-					  bool connect)
+static int audioreach_connect_route(struct q6apm *apm, struct audioreach_route *route,
+				    u32 src_graph_id, u32 graph_id, bool connect)
+{
+	int ret;
+
+	guard(mutex)(&apm->graph_lock);
+
+	if (connect == !list_empty(&route->node))
+		return 0;
+
+	route->src_graph_id = src_graph_id;
+	route->graph_id = graph_id;
+
+	ret = q6apm_send_route(apm, route, connect ? APM_CMD_GRAPH_OPEN : APM_CMD_GRAPH_CLOSE);
+	if (ret)
+		return ret;
+
+	if (connect)
+		list_add_tail(&route->node, &apm->route_list);
+	else
+		list_del_init(&route->node);
+
+	return 1;
+}
+
+static int audioreach_connect_sub_graphs(struct q6apm *apm,
+					 struct snd_ar_control *m1,
+					 const struct snd_ar_control *m2,
+					 bool connect)
 {
 	struct audioreach_route *route = &m1->route;
 	struct audioreach_graph_info *info;
+	int ret;
 
 	mutex_lock(&apm->lock);
 	info = idr_find(&apm->graph_info_idr, m2->graph_id);
 	mutex_unlock(&apm->lock);
 
 	if (route->num_links) {
-		guard(mutex)(&apm->graph_lock);
-
-		if (connect == !list_empty(&route->node))
-			return;
-
-		route->graph_id = m2->graph_id;
-
-		if (connect)
-			list_add_tail(&route->node, &apm->route_list);
-		else
-			list_del_init(&route->node);
-
-		return;
+		ret = audioreach_connect_route(apm, route, m1->graph_id, m2->graph_id, connect);
+		return ret < 0 ? ret : 0;
 	}
 
 	if (connect) {
@@ -1264,6 +1279,8 @@ static void audioreach_connect_sub_graphs(struct q6apm *apm,
 		info->dst_mod_inst_id = 0;
 		info->dst_mod_ip_port_id = 0;
 	}
+
+	return 0;
 }
 
 static bool audioreach_is_vmixer_connected(struct q6apm *apm,
@@ -1317,14 +1334,15 @@ static int audioreach_put_audio_mixer(struct snd_kcontrol *kcontrol,
 	const struct snd_ar_control *dapm_scontrol = dw->dobj.private;
 	struct snd_ar_control *scontrol = mc->dobj.private;
 	struct q6apm *data = dev_get_drvdata(c->dev);
+	bool connect = ucontrol->value.integer.value[0];
+	int ret;
 
-	if (ucontrol->value.integer.value[0]) {
-		audioreach_connect_sub_graphs(data, scontrol, dapm_scontrol, true);
-		snd_soc_dapm_mixer_update_power(dapm, kcontrol, 1, NULL);
-	} else {
-		audioreach_connect_sub_graphs(data, scontrol, dapm_scontrol, false);
-		snd_soc_dapm_mixer_update_power(dapm, kcontrol, 0, NULL);
-	}
+	ret = audioreach_connect_sub_graphs(data, scontrol, dapm_scontrol, connect);
+	if (ret)
+		return ret;
+
+	snd_soc_dapm_mixer_update_power(dapm, kcontrol, connect, NULL);
+
 	return 0;
 }
 

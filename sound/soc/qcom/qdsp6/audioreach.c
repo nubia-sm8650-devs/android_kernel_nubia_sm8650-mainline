@@ -403,6 +403,29 @@ static unsigned int audioreach_copy_route_links(struct apm_module_conn_obj *conn
 	return n;
 }
 
+static bool audioreach_route_in_graph(struct q6apm *apm,
+				      const struct audioreach_route *route, u32 graph_id)
+{
+	u32 peer;
+	bool open;
+
+	if (route->src_graph_id == graph_id)
+		peer = route->graph_id;
+	else if (route->graph_id == graph_id)
+		peer = route->src_graph_id;
+	else
+		return false;
+
+	if (peer == graph_id)
+		return true;
+
+	mutex_lock(&apm->lock);
+	open = idr_find(&apm->graph_idr, peer);
+	mutex_unlock(&apm->lock);
+
+	return open;
+}
+
 static void audioreach_populate_graph(struct q6apm *apm,
 				      const struct audioreach_graph_info *info,
 				      struct apm_graph_open_params *open,
@@ -438,7 +461,7 @@ static void audioreach_populate_graph(struct q6apm *apm,
 	}
 
 	list_for_each_entry(route, &apm->route_list, node) {
-		if (route->graph_id == info->id)
+		if (audioreach_route_in_graph(apm, route, info->id))
 			nconn += audioreach_copy_route_links(&mc_data->conn_obj[nconn], route);
 	}
 
@@ -513,7 +536,7 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 		num_connections++;
 
 	list_for_each_entry(route, &apm->route_list, node) {
-		if (route->graph_id == info->id)
+		if (audioreach_route_in_graph(apm, route, info->id))
 			num_connections += route->num_links;
 	}
 
@@ -597,6 +620,25 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	return pkt;
 }
 EXPORT_SYMBOL_GPL(audioreach_alloc_graph_pkt);
+
+void *audioreach_alloc_route_pkt(const struct audioreach_route *route, u32 opcode)
+{
+	struct apm_mod_conn_list_params *mc_data;
+	int size = APM_MOD_CONN_PSIZE(mc_data, route->num_links);
+	struct gpr_pkt *pkt;
+
+	pkt = audioreach_alloc_apm_cmd_pkt(size, opcode, 0);
+	if (IS_ERR(pkt))
+		return pkt;
+
+	mc_data = (void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE;
+	mc_data->param_data.module_instance_id = APM_MODULE_INSTANCE_ID;
+	mc_data->param_data.param_id = APM_PARAM_ID_MODULE_CONN;
+	mc_data->param_data.param_size = size - APM_MODULE_PARAM_DATA_SIZE;
+	mc_data->num_connections = audioreach_copy_route_links(mc_data->conn_obj, route);
+
+	return pkt;
+}
 
 int audioreach_send_cmd_sync(struct device *dev, gpr_device_t *gdev,
 			     struct gpr_ibasic_rsp_result_t *result, struct mutex *cmd_lock,

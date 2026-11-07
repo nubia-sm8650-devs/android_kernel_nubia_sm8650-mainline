@@ -907,6 +907,7 @@ struct audioreach_connection {
 struct audioreach_route {
 	struct audioreach_connection *links;
 	unsigned int num_links;
+	u32 src_graph_id;
 	u32 graph_id;
 	struct list_head node;
 };
@@ -1048,6 +1049,7 @@ void *audioreach_alloc_pkt(int payload_size, uint32_t opcode,
 			   uint32_t dest_port);
 void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 				 const struct audioreach_graph_info *info);
+void *audioreach_alloc_route_pkt(const struct audioreach_route *route, u32 opcode);
 /* Topology specific */
 int audioreach_tplg_init(struct snd_soc_component *component);
 

@@ -99,6 +99,24 @@ static int q6apm_unmap_region(struct q6apm *apm, u32 token, u32 handle)
 	return q6apm_send_cmd_sync(apm, pkt, APM_CMD_SHARED_MEM_UNMAP_REGIONS);
 }
 
+int q6apm_send_route(struct q6apm *apm, const struct audioreach_route *route,
+		     u32 opcode)
+{
+	lockdep_assert_held(&apm->graph_lock);
+
+	scoped_guard(mutex, &apm->lock) {
+		if (!idr_find(&apm->graph_idr, route->src_graph_id) ||
+		    !idr_find(&apm->graph_idr, route->graph_id))
+			return 0;
+	}
+
+	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_route_pkt(route, opcode);
+	if (IS_ERR(pkt))
+		return PTR_ERR(pkt);
+
+	return q6apm_send_cmd_sync(apm, pkt, 0);
+}
+
 static struct audioreach_graph *q6apm_get_audioreach_graph(struct q6apm *apm, uint32_t graph_id)
 {
 	struct audioreach_graph_info *info;
