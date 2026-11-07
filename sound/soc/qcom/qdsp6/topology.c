@@ -1527,7 +1527,7 @@ static void audioreach_prune_graphs(struct q6apm_graph *root,
 	}
 }
 
-static int audioreach_prune_paths(struct q6apm *apm, struct snd_soc_card *card)
+static int audioreach_update_paths(struct q6apm *apm, struct snd_soc_card *card, bool connect)
 {
 	struct snd_soc_pcm_runtime *rtd;
 	int stream, ret = 0;
@@ -1544,7 +1544,7 @@ static int audioreach_prune_paths(struct q6apm *apm, struct snd_soc_card *card)
 			struct q6apm_graph *root = snd_soc_dai_dma_data_get(dai, stream);
 			struct snd_soc_dapm_widget_list *list;
 
-			if (!root || !root->num_connected)
+			if (!root || !root->connected)
 				continue;
 
 			ret = snd_soc_dapm_dai_get_connected_widgets(dai, stream, &list,
@@ -1552,8 +1552,15 @@ static int audioreach_prune_paths(struct q6apm *apm, struct snd_soc_card *card)
 			if (ret < 0)
 				goto out;
 
-			audioreach_prune_graphs(root, list);
+			if (connect)
+				ret = audioreach_open_graphs(root, rtd, stream, list);
+			else
+				audioreach_prune_graphs(root, list);
+
 			snd_soc_dapm_dai_free_widgets(&list);
+
+			if (ret < 0)
+				goto out;
 		}
 	}
 
@@ -1584,8 +1591,8 @@ static int audioreach_put_audio_mixer(struct snd_kcontrol *kcontrol,
 
 	snd_soc_dapm_mixer_update_power(dapm, kcontrol, connect, NULL);
 
-	if (!connect && scontrol->route.num_links)
-		return audioreach_prune_paths(data, c->card);
+	if (scontrol->route.num_links)
+		return audioreach_update_paths(data, c->card, connect);
 
 	return 0;
 }
