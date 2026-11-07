@@ -69,6 +69,9 @@ struct q6apm {
 	u32 cmd_token;
 	u32 param_token;
 	struct q6apm_param_response *param_response;
+	struct device *dma_dev;
+	long long dma_sid;
+	u32 param_map_handle;
 	uint32_t state;
 
 	struct list_head widget_list;
@@ -132,6 +135,7 @@ int q6apm_set_params(struct q6apm *apm, u32 graph_id,
 		     const void *data, size_t size);
 int q6apm_get_params(struct q6apm *apm, u32 graph_id, const void *query,
 		     size_t query_size, void *data, size_t *size);
+int devm_q6apm_set_dma_device(struct device *dev, long long sid);
 
 /* Media Format */
 int q6apm_graph_media_format_pcm(struct q6apm_graph *graph,

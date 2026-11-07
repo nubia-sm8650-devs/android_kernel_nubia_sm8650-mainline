@@ -3,6 +3,7 @@
 
 #include <dt-bindings/soc/qcom,gpr.h>
 #include <linux/delay.h>
+#include <linux/dma-mapping.h>
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -294,12 +295,14 @@ static int q6apm_validate_params(const struct audioreach_graph_info *info,
 static struct gpr_pkt *q6apm_alloc_params_pkt(struct q6apm *apm, u32 graph_id,
 					      const void *data, size_t size, u32 opcode)
 {
+	bool inband = size <= Q6APM_MAX_INBAND_PARAMS;
+	struct apm_cmd_header *cmd_header;
 	struct audioreach_graph *graph;
 	u32 destination, token;
 	struct gpr_pkt *pkt;
 	int ret;
 
-	if (size > Q6APM_MAX_INBAND_PARAMS)
+	if (!inband && opcode != APM_CMD_SET_CFG)
 		return ERR_PTR(-EMSGSIZE);
 
 	graph = idr_find(&apm->graph_idr, graph_id);
@@ -315,11 +318,63 @@ static struct gpr_pkt *q6apm_alloc_params_pkt(struct q6apm *apm, u32 graph_id,
 	if (!token)
 		token = ++apm->param_token;
 
-	pkt = audioreach_alloc_cmd_pkt(size, opcode, token, GPR_APM_MODULE_IID, destination);
-	if (!IS_ERR(pkt))
-		memcpy((void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE, data, size);
+	pkt = audioreach_alloc_cmd_pkt(inband ? size : 0, opcode, token,
+				       GPR_APM_MODULE_IID, destination);
+	if (IS_ERR(pkt))
+		return pkt;
+
+	cmd_header = (void *)pkt + GPR_HDR_SIZE;
+	cmd_header->payload_size = size;
+
+	if (inband)
+		memcpy(cmd_header + 1, data, size);
 
 	return pkt;
+}
+
+static int q6apm_send_mapped_params(struct q6apm *apm, struct gpr_pkt *pkt,
+				    const void *data, size_t size)
+{
+	struct apm_cmd_header *cmd_header = (void *)pkt + GPR_HDR_SIZE;
+	size_t map_size = ALIGN(size, SZ_4K);
+	phys_addr_t phys;
+	dma_addr_t addr;
+	int ret, unmap;
+	void *buf;
+
+	if (!apm->dma_dev)
+		return -EMSGSIZE;
+
+	buf = dma_alloc_coherent(apm->dma_dev, map_size, &addr, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	memcpy(buf, data, size);
+
+	phys = apm->dma_sid < 0 ? addr : addr | (apm->dma_sid << 32);
+
+	ret = q6apm_map_region(apm, APM_MMAP_TOKEN_MAP_TYPE_PARAMS, phys, map_size, 0);
+	if (ret)
+		goto free;
+
+	cmd_header->payload_address_lsw = lower_32_bits(phys);
+	cmd_header->payload_address_msw = upper_32_bits(phys);
+	cmd_header->mem_map_handle = apm->param_map_handle;
+
+	ret = q6apm_send_cmd_sync(apm, pkt, 0);
+
+	unmap = q6apm_unmap_region(apm, APM_MMAP_TOKEN_MAP_TYPE_PARAMS,
+				   apm->param_map_handle);
+	if (unmap) {
+		/* The DSP may still access a buffer it has not unmapped. */
+		dev_err(apm->dev, "Leaking parameter buffer still mapped by the DSP\n");
+		return ret ?: unmap;
+	}
+
+free:
+	dma_free_coherent(apm->dma_dev, map_size, buf, addr);
+
+	return ret;
 }
 
 int q6apm_set_params(struct q6apm *apm, u32 graph_id,
@@ -332,8 +387,33 @@ int q6apm_set_params(struct q6apm *apm, u32 graph_id,
 	if (IS_ERR(pkt))
 		return PTR_ERR(pkt);
 
+	if (size > Q6APM_MAX_INBAND_PARAMS)
+		return q6apm_send_mapped_params(apm, pkt, data, size);
+
 	return q6apm_send_cmd_sync(apm, pkt, 0);
 }
+
+static void q6apm_clear_dma_device(void *data)
+{
+	struct q6apm *apm = data;
+
+	guard(mutex)(&apm->graph_lock);
+
+	apm->dma_dev = NULL;
+}
+
+int devm_q6apm_set_dma_device(struct device *dev, long long sid)
+{
+	struct q6apm *apm = dev_get_drvdata(dev->parent);
+
+	scoped_guard(mutex, &apm->graph_lock) {
+		apm->dma_dev = dev;
+		apm->dma_sid = sid;
+	}
+
+	return devm_add_action_or_reset(dev, q6apm_clear_dma_device, apm);
+}
+EXPORT_SYMBOL_GPL(devm_q6apm_set_dma_device);
 
 int q6apm_get_params(struct q6apm *apm, u32 graph_id, const void *query,
 		     size_t query_size, void *data, size_t *size)
@@ -1231,6 +1311,11 @@ static int apm_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 				dev_err(dev, "Error (%d) Processing 0x%08x cmd\n", result->status,
 					result->opcode);
 
+			if (hdr->token & APM_MMAP_TOKEN_MAP_TYPE_PARAMS) {
+				wake_up(&apm->wait);
+				break;
+			}
+
 			graph_id = hdr->token & APM_MMAP_TOKEN_GID_MASK;
 			is_pos_buf = hdr->token & APM_MMAP_TOKEN_MAP_TYPE_POS_BUF;
 
@@ -1258,6 +1343,13 @@ static int apm_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 		apm->result.opcode = hdr->opcode;
 		apm->result.status = 0;
 		rsp = data->payload;
+
+		if (hdr->token & APM_MMAP_TOKEN_MAP_TYPE_PARAMS) {
+			apm->param_map_handle = rsp->mem_map_handle;
+			wake_up(&apm->wait);
+			break;
+		}
+
 		graph_id = hdr->token & APM_MMAP_TOKEN_GID_MASK;
 		is_pos_buf = hdr->token & APM_MMAP_TOKEN_MAP_TYPE_POS_BUF;
 

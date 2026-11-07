@@ -1070,6 +1070,10 @@ static int q6apm_dai_probe(struct platform_device *pdev)
 
 	dev_set_drvdata(dev, pdata);
 
+	rc = devm_q6apm_set_dma_device(dev, pdata->sid);
+	if (rc)
+		return rc;
+
 	return devm_snd_soc_register_component(dev, &q6apm_fe_dai_component, NULL, 0);
 }
 
