@@ -533,6 +533,8 @@ static int q6apm_dai_open(struct snd_soc_component *component,
 		prtd->pos_buffer = (struct sh_mem_pull_push_mode_position_buffer *)(pos_buffer);
 	}
 
+	snd_soc_dai_set_dma_data(cpu_dai, substream, prtd->graph);
+
 	return 0;
 err:
 	if (!IS_ERR(prtd->graph))
@@ -546,8 +548,11 @@ err:
 static int q6apm_dai_close(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream)
 {
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct q6apm_dai_rtd *prtd = runtime->private_data;
+
+	snd_soc_dai_set_dma_data(snd_soc_rtd_to_cpu(rtd, 0), substream, NULL);
 
 	if (prtd->state) {
 		/* only stop graph that is started */

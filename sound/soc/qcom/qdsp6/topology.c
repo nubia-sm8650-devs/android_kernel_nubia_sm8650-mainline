@@ -1477,6 +1477,85 @@ static int audioreach_get_audio_mixer(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static void audioreach_prune_graphs(struct q6apm_graph *root,
+				    struct snd_soc_dapm_widget_list *list)
+{
+	struct snd_soc_dapm_widget *w;
+	int i, j;
+
+	for (i = root->num_connected; i-- > 0;) {
+		struct q6apm_graph *graph = root->connected[i];
+		bool found = false;
+
+		for_each_dapm_widgets(list, j, w) {
+			struct audioreach_graph_info *info;
+
+			info = audioreach_get_widget_graph(root->apm, w);
+
+			if (info && info->id == graph->id) {
+				found = true;
+				break;
+			}
+		}
+
+		if (found)
+			continue;
+
+		if (i < root->num_started) {
+			int ret = q6apm_graph_stop(graph);
+
+			if (ret)
+				dev_err(graph->dev, "Failed to stop graph %u: %d\n",
+					graph->id, ret);
+
+			root->num_started--;
+		}
+
+		q6apm_graph_close(graph);
+		root->num_connected--;
+		memmove(&root->connected[i], &root->connected[i + 1],
+			(root->num_connected - i) * sizeof(*root->connected));
+	}
+}
+
+static int audioreach_prune_paths(struct q6apm *apm, struct snd_soc_card *card)
+{
+	struct snd_soc_pcm_runtime *rtd;
+	int stream, ret = 0;
+
+	snd_soc_dpcm_mutex_lock(card);
+
+	for_each_card_rtds(card, rtd) {
+		struct snd_soc_dai *dai = snd_soc_rtd_to_cpu(rtd, 0);
+
+		if (!rtd->dai_link->dynamic || dai->dev != apm->dev)
+			continue;
+
+		for_each_pcm_streams(stream) {
+			struct q6apm_graph *root = snd_soc_dai_dma_data_get(dai, stream);
+			struct snd_soc_dapm_widget_list *list;
+
+			if (!root || !root->num_connected)
+				continue;
+
+			ret = snd_soc_dapm_dai_get_connected_widgets(dai, stream, &list,
+								     dpcm_end_walk_at_be);
+			if (ret < 0)
+				goto out;
+
+			audioreach_prune_graphs(root, list);
+			snd_soc_dapm_dai_free_widgets(&list);
+		}
+	}
+
+	ret = 0;
+
+out:
+	snd_soc_dpcm_mutex_unlock(card);
+
+	return ret;
+}
+
 static int audioreach_put_audio_mixer(struct snd_kcontrol *kcontrol,
 				      struct snd_ctl_elem_value *ucontrol)
 {
@@ -1495,6 +1574,9 @@ static int audioreach_put_audio_mixer(struct snd_kcontrol *kcontrol,
 		return ret;
 
 	snd_soc_dapm_mixer_update_power(dapm, kcontrol, connect, NULL);
+
+	if (!connect && scontrol->route.num_links)
+		return audioreach_prune_paths(data, c->card);
 
 	return 0;
 }
