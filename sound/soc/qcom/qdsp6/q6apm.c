@@ -52,6 +52,46 @@ int q6apm_send_cmd_sync(struct q6apm *apm, const struct gpr_pkt *pkt,
 					NULL, &apm->wait, pkt, rsp_opcode);
 }
 
+static int q6apm_map_region(struct q6apm *apm, u32 token, phys_addr_t phys,
+			    size_t size, u32 flags)
+{
+	struct apm_shared_map_region_payload *region;
+	struct apm_cmd_shared_mem_map_regions *cmd;
+	struct gpr_pkt *pkt __free(kfree) =
+		audioreach_alloc_apm_cmd_pkt(sizeof(*cmd) + sizeof(*region),
+					     APM_CMD_SHARED_MEM_MAP_REGIONS, token);
+	if (IS_ERR(pkt))
+		return PTR_ERR(pkt);
+
+	cmd = (void *)pkt + GPR_HDR_SIZE;
+	cmd->mem_pool_id = APM_MEMORY_MAP_SHMEM8_4K_POOL;
+	cmd->num_regions = 1;
+	cmd->property_flag = flags;
+
+	region = (void *)(cmd + 1);
+	region->shm_addr_lsw = lower_32_bits(phys);
+	region->shm_addr_msw = upper_32_bits(phys);
+	/* DSP expects size should be aligned to 4K */
+	region->mem_size_bytes = ALIGN(size, SZ_4K);
+
+	return q6apm_send_cmd_sync(apm, pkt, APM_CMD_RSP_SHARED_MEM_MAP_REGIONS);
+}
+
+static int q6apm_unmap_region(struct q6apm *apm, u32 token, u32 handle)
+{
+	struct apm_cmd_shared_mem_unmap_regions *cmd;
+	struct gpr_pkt *pkt __free(kfree) =
+		audioreach_alloc_apm_cmd_pkt(sizeof(*cmd), APM_CMD_SHARED_MEM_UNMAP_REGIONS,
+					     token);
+	if (IS_ERR(pkt))
+		return PTR_ERR(pkt);
+
+	cmd = (void *)pkt + GPR_HDR_SIZE;
+	cmd->mem_map_handle = handle;
+
+	return q6apm_send_cmd_sync(apm, pkt, APM_CMD_SHARED_MEM_UNMAP_REGIONS);
+}
+
 static struct audioreach_graph *q6apm_get_audioreach_graph(struct q6apm *apm, uint32_t graph_id)
 {
 	struct audioreach_graph_info *info;
@@ -402,19 +442,8 @@ EXPORT_SYMBOL_GPL(q6apm_graph_media_format_shmem);
 static int __q6apm_map_memory_fixed_region(struct device *dev, unsigned int graph_id,
 					   phys_addr_t phys, size_t sz, bool is_pos_buf)
 {
-	struct audioreach_graph_info *info;
 	struct q6apm *apm = dev_get_drvdata(dev->parent);
-	struct apm_shared_map_region_payload *mregions;
-	struct apm_cmd_shared_mem_map_regions *cmd;
-	int payload_size = sizeof(*cmd) + (sizeof(*mregions));
-	uint32_t buf_sz;
-	void *p;
-	uint32_t pos_mask = is_pos_buf ? APM_MMAP_TOKEN_MAP_TYPE_POS_BUF : 0;
-	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_apm_cmd_pkt(payload_size,
-					APM_CMD_SHARED_MEM_MAP_REGIONS, (graph_id | pos_mask));
-
-	if (IS_ERR(pkt))
-		return PTR_ERR(pkt);
+	struct audioreach_graph_info *info;
 
 	info = idr_find(&apm->graph_info_idr, graph_id);
 	if (!info)
@@ -423,30 +452,15 @@ static int __q6apm_map_memory_fixed_region(struct device *dev, unsigned int grap
 	if (is_pos_buf) {
 		if (info->pos_buf_mem_map_handle)
 			return 0;
-	} else {
-		if (info->mem_map_handle)
-			return 0;
+
+		return q6apm_map_region(apm, graph_id | APM_MMAP_TOKEN_MAP_TYPE_POS_BUF,
+					phys, sz, 0x2);
 	}
 
-	/* DSP expects size should be aligned to 4K */
-	buf_sz = ALIGN(sz, 4096);
+	if (info->mem_map_handle)
+		return 0;
 
-	p = (void *)pkt + GPR_HDR_SIZE;
-	cmd = p;
-	cmd->mem_pool_id = APM_MEMORY_MAP_SHMEM8_4K_POOL;
-	cmd->num_regions = 1;
-	if (is_pos_buf)
-		cmd->property_flag = 0x2;
-	else
-		cmd->property_flag = 0x0;
-
-	mregions = p + sizeof(*cmd);
-
-	mregions->shm_addr_lsw = lower_32_bits(phys);
-	mregions->shm_addr_msw = upper_32_bits(phys);
-	mregions->mem_size_bytes = buf_sz;
-
-	return q6apm_send_cmd_sync(apm, pkt, APM_CMD_RSP_SHARED_MEM_MAP_REGIONS);
+	return q6apm_map_region(apm, graph_id, phys, sz, 0);
 }
 
 int q6apm_map_pos_buffer(struct device *dev, unsigned int graph_id, phys_addr_t phys, size_t sz)
@@ -517,14 +531,7 @@ EXPORT_SYMBOL_GPL(q6apm_alloc_fragments);
 static int __q6apm_unmap_memory_fixed_region(struct q6apm *apm, unsigned int graph_id,
 					     bool is_pos_buf)
 {
-	struct apm_cmd_shared_mem_unmap_regions *cmd;
 	struct audioreach_graph_info *info;
-	uint32_t mem_map_handle;
-	uint32_t pos_mask = is_pos_buf ? APM_MMAP_TOKEN_MAP_TYPE_POS_BUF : 0;
-	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_apm_cmd_pkt(sizeof(*cmd),
-					APM_CMD_SHARED_MEM_UNMAP_REGIONS, (graph_id | pos_mask));
-	if (IS_ERR(pkt))
-		return PTR_ERR(pkt);
 
 	info = idr_find(&apm->graph_info_idr, graph_id);
 	if (!info)
@@ -533,18 +540,15 @@ static int __q6apm_unmap_memory_fixed_region(struct q6apm *apm, unsigned int gra
 	if (is_pos_buf) {
 		if (!info->pos_buf_mem_map_handle)
 			return 0;
-		mem_map_handle = info->pos_buf_mem_map_handle;
-	} else {
 
-		if (!info->mem_map_handle)
-			return 0;
-		mem_map_handle = info->mem_map_handle;
+		return q6apm_unmap_region(apm, graph_id | APM_MMAP_TOKEN_MAP_TYPE_POS_BUF,
+					  info->pos_buf_mem_map_handle);
 	}
 
-	cmd = (void *)pkt + GPR_HDR_SIZE;
-	cmd->mem_map_handle = mem_map_handle;
+	if (!info->mem_map_handle)
+		return 0;
 
-	return q6apm_send_cmd_sync(apm, pkt, APM_CMD_SHARED_MEM_UNMAP_REGIONS);
+	return q6apm_unmap_region(apm, graph_id, info->mem_map_handle);
 }
 
 int q6apm_unmap_memory_fixed_region(struct device *dev, unsigned int graph_id)
