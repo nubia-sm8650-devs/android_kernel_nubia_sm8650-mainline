@@ -922,6 +922,7 @@ struct audioreach_connection {
 };
 
 struct audioreach_route {
+	struct audioreach_control_links *control_links;
 	struct audioreach_connection *links;
 	unsigned int num_links;
 	u32 src_graph_id;

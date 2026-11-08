@@ -538,7 +538,8 @@ audioreach_parse_control_links(const struct snd_soc_tplg_private *priv, u32 inst
 			u32 p;
 
 			if (bytes < sizeof(*link) ||
-			    le32_to_cpu(link->peer_1_mod_iid) != instance_id ||
+			    !link->peer_1_mod_iid ||
+			    (instance_id && le32_to_cpu(link->peer_1_mod_iid) != instance_id) ||
 			    !link->peer_1_mod_ctrl_port_id || !link->peer_2_mod_iid ||
 			    !link->peer_2_mod_ctrl_port_id)
 				return ERR_PTR(-EINVAL);
@@ -2168,6 +2169,7 @@ static int audioreach_control_load_links(struct audioreach_route *route,
 	const u8 *data = (const u8 *)priv->data;
 	u32 remaining = le32_to_cpu(priv->size);
 	struct audioreach_connection *links;
+	const u8 *cursor;
 	int ret = -EINVAL;
 	u32 i;
 
@@ -2227,9 +2229,50 @@ static int audioreach_control_load_links(struct audioreach_route *route,
 		route->links = links;
 	}
 
+	route->control_links = audioreach_parse_control_links(priv, 0);
+	if (IS_ERR(route->control_links)) {
+		ret = PTR_ERR(route->control_links);
+		route->control_links = NULL;
+		goto err;
+	}
+
+	if (!route->control_links)
+		return 0;
+
+	if (route->num_links)
+		goto err;
+
+	route->num_links = le32_to_cpu(route->control_links->num_links);
+	route->links = kcalloc(route->num_links, sizeof(*route->links), GFP_KERNEL);
+	if (!route->links) {
+		ret = -ENOMEM;
+		goto err;
+	}
+
+	cursor = route->control_links->data;
+
+	for (i = 0; i < route->num_links; i++) {
+		const struct apm_control_link *link = (const void *)cursor;
+		u32 p;
+
+		route->links[i].src_mod_inst_id = le32_to_cpu(link->peer_1_mod_iid);
+		route->links[i].src_mod_op_port_id = le32_to_cpu(link->peer_1_mod_ctrl_port_id);
+		route->links[i].dst_mod_inst_id = le32_to_cpu(link->peer_2_mod_iid);
+		route->links[i].dst_mod_ip_port_id = le32_to_cpu(link->peer_2_mod_ctrl_port_id);
+		cursor = (const void *)(link + 1);
+
+		for (p = 0; p < le32_to_cpu(link->num_props); p++) {
+			const struct apm_prop_data *prop = (const void *)cursor;
+
+			cursor += sizeof(*prop) + le32_to_cpu(prop->prop_size);
+		}
+	}
+
 	return 0;
 
 err:
+	kfree(route->control_links);
+	route->control_links = NULL;
 	kfree(route->links);
 	route->links = NULL;
 	route->num_links = 0;
@@ -2419,6 +2462,7 @@ static int audioreach_control_load(struct snd_soc_component *scomp, int index,
 		if (ret || !scontrol->route.num_links || sm->reg != SND_SOC_NOPM ||
 		    sm->min || sm->max != 1 || snd_soc_volsw_is_stereo(sm)) {
 			kfree(scontrol->route.links);
+			kfree(scontrol->route.control_links);
 			kfree(scontrol);
 			return ret ?: -EINVAL;
 		}
@@ -2466,6 +2510,7 @@ static int audioreach_control_unload(struct snd_soc_component *scomp,
 		kfree(scontrol->route.links);
 	}
 
+	kfree(scontrol->route.control_links);
 	kvfree(scontrol->query);
 	kfree(scontrol);
 

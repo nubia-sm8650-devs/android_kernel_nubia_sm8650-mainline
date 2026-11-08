@@ -628,8 +628,19 @@ static void audioreach_populate_graph(struct q6apm *apm,
 	}
 
 	list_for_each_entry(route, &apm->route_list, node) {
-		if (audioreach_route_in_graph(apm, route, info->id))
-			nconn += audioreach_copy_route_links(&mc_data->conn_obj[nconn], route);
+		if (!audioreach_route_in_graph(apm, route, info->id))
+			continue;
+
+		if (route->control_links) {
+			u32 size = le32_to_cpu(route->control_links->size) -
+				   sizeof(*route->control_links);
+
+			memcpy(control_cursor, route->control_links->data, size);
+			control_cursor += size;
+		} else {
+			conn_obj = &mc_data->conn_obj[nconn];
+			nconn += audioreach_copy_route_links(conn_obj, route);
+		}
 	}
 
 	list_for_each_entry(sg, sg_list, node) {
@@ -716,8 +727,16 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 		num_connections++;
 
 	list_for_each_entry(route, &apm->route_list, node) {
-		if (audioreach_route_in_graph(apm, route, info->id))
+		if (!audioreach_route_in_graph(apm, route, info->id))
+			continue;
+
+		if (route->control_links) {
+			num_control_links += route->num_links;
+			control_size += le32_to_cpu(route->control_links->size) -
+					sizeof(*route->control_links);
+		} else {
 			num_connections += route->num_links;
+		}
 	}
 
 	list_for_each_entry(sgs, sg_list, node) {
@@ -844,10 +863,54 @@ void *audioreach_alloc_route_pkt(const struct audioreach_route *route, u32 opcod
 	struct apm_mod_conn_list_params *mc_data;
 	int size = APM_MOD_CONN_PSIZE(mc_data, route->num_links);
 	struct gpr_pkt *pkt;
+	int i;
+
+	if (route->control_links) {
+		size = sizeof(struct apm_control_link_params);
+
+		if (opcode == APM_CMD_GRAPH_OPEN)
+			size += le32_to_cpu(route->control_links->size) -
+				sizeof(*route->control_links);
+		else
+			size += route->num_links * sizeof(struct apm_control_link);
+
+		size = ALIGN(size, 8);
+	}
 
 	pkt = audioreach_alloc_apm_cmd_pkt(size, opcode, 0);
 	if (IS_ERR(pkt))
 		return pkt;
+
+	if (route->control_links) {
+		struct apm_control_link_params *cfg =
+			(void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE;
+
+		cfg->param_data.module_instance_id = APM_MODULE_INSTANCE_ID;
+		cfg->param_data.param_id = APM_PARAM_ID_MODULE_CTRL_LINK_CFG;
+		cfg->param_data.param_size = size - APM_MODULE_PARAM_DATA_SIZE;
+		cfg->num_links = route->num_links;
+
+		if (opcode == APM_CMD_GRAPH_OPEN) {
+			memcpy(cfg->data, route->control_links->data,
+			       le32_to_cpu(route->control_links->size) -
+			       sizeof(*route->control_links));
+		} else {
+			struct apm_control_link *links = (void *)cfg->data;
+
+			for (i = 0; i < route->num_links; i++) {
+				links[i].peer_1_mod_iid =
+					cpu_to_le32(route->links[i].src_mod_inst_id);
+				links[i].peer_1_mod_ctrl_port_id =
+					cpu_to_le32(route->links[i].src_mod_op_port_id);
+				links[i].peer_2_mod_iid =
+					cpu_to_le32(route->links[i].dst_mod_inst_id);
+				links[i].peer_2_mod_ctrl_port_id =
+					cpu_to_le32(route->links[i].dst_mod_ip_port_id);
+			}
+		}
+
+		return pkt;
+	}
 
 	mc_data = (void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE;
 	mc_data->param_data.module_instance_id = APM_MODULE_INSTANCE_ID;
