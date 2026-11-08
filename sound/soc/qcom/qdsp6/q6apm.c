@@ -540,6 +540,10 @@ static int __q6apm_map_memory_fixed_region(struct device *dev, unsigned int grap
 	if (info->mem_map_handle)
 		return 0;
 
+	if (info->is_push_pull_mode &&
+	    __q6apm_find_module_by_mid(apm, info, MODULE_ID_SH_MEM_PUSH_MODE))
+		return q6apm_map_region(apm, graph_id, phys, sz, 0x2);
+
 	return q6apm_map_region(apm, graph_id, phys, sz, 0);
 }
 
