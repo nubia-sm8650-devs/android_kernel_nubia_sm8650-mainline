@@ -1418,8 +1418,8 @@ static int audioreach_speaker_protection_vi(struct q6apm_graph *graph,
 		 * E.g. for PCM_CHANNEL_FL and PCM_CHANNEL_FR to:
 		 * [1, 2, 3, 4]
 		 */
-		cm_cfg->cfg.channel_mapping[2 * j] = (mcfg->channel_map[i] - 1) * 2 + 1;
-		cm_cfg->cfg.channel_mapping[2 * j + 1] = (mcfg->channel_map[i] - 1) * 2 + 2;
+		cm_cfg->cfg.channel_mapping[2 * j] = 2 * j + 1;
+		cm_cfg->cfg.channel_mapping[2 * j + 1] = 2 * j + 2;
 
 		++j;
 	}
