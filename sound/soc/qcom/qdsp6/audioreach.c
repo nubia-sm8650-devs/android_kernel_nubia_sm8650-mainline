@@ -640,6 +640,9 @@ static int audioreach_display_port_set_media_format(struct q6apm_graph *graph,
 	int size = ic_sz + ep_sz + fs_sz;
 	void *p;
 
+	if (!cfg->data_format && !module->data_format)
+		return -EINVAL;
+
 	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_apm_cmd_pkt(size, APM_CMD_SET_CFG, 0);
 	if (IS_ERR(pkt))
 		return PTR_ERR(pkt);
@@ -656,7 +659,7 @@ static int audioreach_display_port_set_media_format(struct q6apm_graph *graph,
 	hw_cfg->mf.sample_rate = cfg->sample_rate;
 	hw_cfg->mf.bit_width = cfg->bit_width;
 	hw_cfg->mf.num_channels = cfg->num_channels;
-	hw_cfg->mf.data_format = module->data_format;
+	hw_cfg->mf.data_format = cfg->data_format ?: module->data_format;
 	p += ep_sz;
 
 	fs_cfg = p;
@@ -691,6 +694,10 @@ static void *audioreach_alloc_hw_ep_pkt(struct gpr_pkt **pkt,
 	struct apm_module_param_data *param_data;
 	struct apm_module_hw_ep_mf_cfg *hw_cfg;
 	int ep_sz = APM_HW_EP_CFG_PSIZE;
+	u32 data_format = cfg->data_format ?: module->data_format;
+
+	if (!data_format)
+		return ERR_PTR(-EINVAL);
 
 	*pkt = audioreach_alloc_apm_cmd_pkt(ep_sz + ic_sz, APM_CMD_SET_CFG, 0);
 	if (IS_ERR(*pkt))
@@ -703,7 +710,7 @@ static void *audioreach_alloc_hw_ep_pkt(struct gpr_pkt **pkt,
 	hw_cfg->mf.sample_rate = cfg->sample_rate;
 	hw_cfg->mf.bit_width = cfg->bit_width;
 	hw_cfg->mf.num_channels = cfg->num_channels;
-	hw_cfg->mf.data_format = module->data_format;
+	hw_cfg->mf.data_format = data_format;
 
 	param_data = (void *)hw_cfg + ep_sz;
 	param_data->module_instance_id = module->instance_id;
@@ -785,7 +792,7 @@ static int audioreach_codec_dma_set_media_format(struct q6apm_graph *graph,
 	hw_cfg->mf.sample_rate = cfg->sample_rate;
 	hw_cfg->mf.bit_width = cfg->bit_width;
 	hw_cfg->mf.num_channels = cfg->num_channels;
-	hw_cfg->mf.data_format = module->data_format;
+	hw_cfg->mf.data_format = cfg->data_format ?: module->data_format;
 	p += ep_sz;
 
 	fs_cfg = p;
@@ -1109,7 +1116,7 @@ static int audioreach_i2s_set_media_format(struct q6apm_graph *graph,
 	hw_cfg->mf.sample_rate = cfg->sample_rate;
 	hw_cfg->mf.bit_width = cfg->bit_width;
 	hw_cfg->mf.num_channels = cfg->num_channels;
-	hw_cfg->mf.data_format = module->data_format;
+	hw_cfg->mf.data_format = cfg->data_format ?: module->data_format;
 
 	p += ep_sz;
 	fs_cfg = p;
@@ -1181,7 +1188,7 @@ static int audioreach_audio_if_set_media_format(struct q6apm_graph *graph,
 	hw_cfg->mf.sample_rate = cfg->sample_rate;
 	hw_cfg->mf.bit_width = cfg->bit_width;
 	hw_cfg->mf.num_channels = cfg->num_channels;
-	hw_cfg->mf.data_format = module->data_format;
+	hw_cfg->mf.data_format = cfg->data_format ?: module->data_format;
 
 	p += ep_sz;
 	fd_cfg = p;
