@@ -239,15 +239,12 @@ static int q6apm_dai_prepare_graphs(struct q6apm_dai_rtd *prtd)
 	struct snd_soc_dapm_widget_list *list;
 	int ret;
 
-	if (root->num_started == root->num_connected)
-		return 0;
-
 	ret = snd_soc_dapm_dai_get_connected_widgets(dai, substream->stream, &list,
 						     dpcm_end_walk_at_be);
 	if (ret < 0)
 		return ret;
 
-	ret = audioreach_prepare_graphs(root, list, substream->stream);
+	ret = audioreach_prepare_graphs(root, rtd, substream->stream, list);
 	snd_soc_dapm_dai_free_widgets(&list);
 
 	return ret;

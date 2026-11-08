@@ -1169,21 +1169,105 @@ out:
 }
 EXPORT_SYMBOL_GPL(audioreach_get_dai_graph_id);
 
+static bool audioreach_dai_has_graph(struct q6apm *apm, struct snd_soc_dai *dai,
+				     int stream, u32 id)
+{
+	struct snd_soc_dapm_widget *port = snd_soc_dai_get_widget(dai, stream);
+	enum snd_soc_dapm_direction dir = stream == SNDRV_PCM_STREAM_PLAYBACK ?
+					 SND_SOC_DAPM_DIR_OUT : SND_SOC_DAPM_DIR_IN;
+	struct snd_soc_dapm_path *path;
+
+	if (!port)
+		return false;
+
+	snd_soc_dapm_widget_for_each_path(port, dir, path) {
+		struct snd_soc_dapm_widget *w = stream == SNDRV_PCM_STREAM_PLAYBACK ?
+					      path->source : path->sink;
+		struct audioreach_graph_info *info;
+
+		if (path->is_supply)
+			continue;
+
+		info = audioreach_get_widget_graph(apm, w);
+		if (info && info->id == id)
+			return true;
+	}
+
+	return false;
+}
+
 static bool audioreach_graph_has_dai(struct snd_soc_card *card, struct q6apm *apm, u32 id)
 {
 	struct snd_soc_pcm_runtime *rtd;
 	struct snd_soc_dai *dai;
-	int i;
+	bool found = false;
+	int i, stream;
+
+	snd_soc_dapm_mutex_lock(card);
 
 	for_each_card_rtds(card, rtd) {
 		for_each_rtd_cpu_dais(rtd, i, dai) {
 			if ((dai->dev == apm->dev || dai->dev->parent == apm->dev) &&
-			    dai->driver->id == id)
-				return true;
+			    dai->driver->id == id) {
+				found = true;
+				goto out;
+			}
+
+			if (dai->dev->parent != apm->dev)
+				continue;
+
+			for_each_pcm_streams(stream) {
+				if (audioreach_dai_has_graph(apm, dai, stream, id)) {
+					found = true;
+					goto out;
+				}
+			}
 		}
 	}
 
-	return false;
+out:
+	snd_soc_dapm_mutex_unlock(card);
+
+	return found;
+}
+
+static int audioreach_check_dai_graphs(struct q6apm *apm, struct snd_soc_pcm_runtime *rtd,
+				       int stream, const struct snd_soc_dapm_widget_list *list,
+				       bool prepared)
+{
+	struct snd_soc_pcm_runtime *be;
+	struct snd_soc_dai *dai;
+	int i, j;
+
+	for_each_card_rtds(rtd->card, be) {
+		for_each_rtd_cpu_dais(be, i, dai) {
+			struct snd_soc_dapm_widget *w;
+
+			if (dai->dev->parent != apm->dev)
+				continue;
+
+			for_each_dapm_widgets(list, j, w) {
+				struct q6apm_graph *graph;
+				int id;
+
+				if (w != snd_soc_dai_get_widget(dai, stream))
+					continue;
+
+				id = audioreach_get_dai_graph_id(be, dai, stream);
+				if (id < 0)
+					return id;
+
+				graph = snd_soc_dai_dma_data_get(dai, stream);
+				if (graph && graph->id != id)
+					return -EBUSY;
+
+				if (prepared && (!graph || !graph->path_prepared))
+					return -EPIPE;
+			}
+		}
+	}
+
+	return 0;
 }
 
 static bool audioreach_graph_is_connected(struct q6apm_graph *graph,
@@ -1219,11 +1303,15 @@ void audioreach_stop_graphs(struct q6apm_graph *root, unsigned int first)
 }
 EXPORT_SYMBOL_GPL(audioreach_stop_graphs);
 
-int audioreach_prepare_graphs(struct q6apm_graph *root,
-			      const struct snd_soc_dapm_widget_list *list, int stream)
+int audioreach_prepare_graphs(struct q6apm_graph *root, struct snd_soc_pcm_runtime *rtd,
+			      int stream, const struct snd_soc_dapm_widget_list *list)
 {
 	unsigned int first = root->num_started;
 	int i, ret;
+
+	ret = audioreach_check_dai_graphs(root->apm, rtd, stream, list, true);
+	if (ret)
+		return ret;
 
 	for (i = root->num_started; i < root->num_connected; i++) {
 		struct q6apm_graph *graph = root->connected[i];
@@ -1259,6 +1347,10 @@ int audioreach_open_graphs(struct q6apm_graph *root, struct snd_soc_pcm_runtime 
 	struct q6apm_graph **graphs;
 	struct snd_soc_dapm_widget *w;
 	int i, j, ret;
+
+	ret = audioreach_check_dai_graphs(root->apm, rtd, stream, list, false);
+	if (ret)
+		return ret;
 
 	graphs = krealloc_array(root->connected, first + list->num_widgets,
 				sizeof(*graphs), GFP_KERNEL);
@@ -1626,7 +1718,7 @@ static int audioreach_update_paths(struct q6apm *apm, struct snd_soc_card *card,
 				ret = audioreach_open_graphs(root, rtd, stream, list);
 
 				if (!ret && root->path_prepared)
-					ret = audioreach_prepare_graphs(root, list, stream);
+					ret = audioreach_prepare_graphs(root, rtd, stream, list);
 			} else {
 				audioreach_prune_graphs(root, list);
 			}

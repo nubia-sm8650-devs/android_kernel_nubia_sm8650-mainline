@@ -346,8 +346,19 @@ static int q6apm_lpass_dai_prepare(struct snd_pcm_substream *substream, struct s
 	struct q6apm_lpass_dai_data *dai_data = dev_get_drvdata(dai->dev);
 	struct audioreach_module_config *cfg = &dai_data->module_config[dai->id];
 	struct q6apm_graph *graph;
-	int graph_id = dai->id;
-	int rc;
+	int graph_id, rc;
+
+	graph_id = audioreach_get_dai_graph_id(snd_soc_substream_to_rtd(substream), dai,
+					       substream->stream);
+	if (graph_id < 0)
+		return graph_id;
+
+	graph = dai_data->graph[dai->id];
+	if (graph && graph->id != graph_id)
+		return -EBUSY;
+
+	if (graph)
+		graph->path_prepared = false;
 
 	if (dai_data->is_port_started[dai->id]) {
 		q6apm_graph_stop(dai_data->graph[dai->id]);
@@ -366,7 +377,7 @@ static int q6apm_lpass_dai_prepare(struct snd_pcm_substream *substream, struct s
 			rc = PTR_ERR(graph);
 			return rc;
 		}
-		dai_data->graph[graph_id] = graph;
+		dai_data->graph[dai->id] = graph;
 		snd_soc_dai_set_dma_data(dai, substream, graph);
 	}
 
@@ -383,6 +394,8 @@ static int q6apm_lpass_dai_prepare(struct snd_pcm_substream *substream, struct s
 		dev_err(dai->dev, "Failed to prepare Graph %d\n", rc);
 		goto err;
 	}
+	dai_data->graph[dai->id]->path_prepared = true;
+
 	return 0;
 err:
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -397,7 +410,12 @@ static int q6apm_lpass_dai_startup(struct snd_pcm_substream *substream, struct s
 {
 	struct q6apm_lpass_dai_data *dai_data = dev_get_drvdata(dai->dev);
 	struct q6apm_graph *graph;
-	int graph_id = dai->id;
+	int graph_id;
+
+	graph_id = audioreach_get_dai_graph_id(snd_soc_substream_to_rtd(substream), dai,
+					       substream->stream);
+	if (graph_id < 0)
+		return graph_id;
 
 	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
 		graph = q6apm_graph_open(dai->dev, NULL, dai->dev, graph_id, substream->stream);
@@ -405,7 +423,7 @@ static int q6apm_lpass_dai_startup(struct snd_pcm_substream *substream, struct s
 			dev_err(dai->dev, "Failed to open graph (%d)\n", graph_id);
 			return PTR_ERR(graph);
 		}
-		dai_data->graph[graph_id] = graph;
+		dai_data->graph[dai->id] = graph;
 		snd_soc_dai_set_dma_data(dai, substream, graph);
 	}
 
