@@ -69,3 +69,18 @@ Logger modules can be declared without logging fields when userspace
 supplies their calibration. Media-format preparation leaves those modules
 unchanged. Supplying legacy logging tokens selects the existing automatic
 enable and logger-configuration sequence, including explicit zero values.
+
+Hardware data formats
+---------------------
+
+Each hardware DAI exposes a ``Data Format`` enum for runtime endpoint
+configuration. Select the required native format before backend prepare.
+The ``Topology`` choice retains the module's existing format token. An
+explicit DAI choice overrides that token for hardware configuration without
+changing the topology declaration or calibration data.
+
+Writes update the requested configuration for the next backend prepare;
+they do not send DSP commands or change graph lifecycle. SLIMbus, USB and
+DisplayPort preparation rejects a missing format instead of submitting
+zero. Codec channel maps, USB tokens and DisplayPort channel allocation
+continue through their existing hardware DAI paths.
