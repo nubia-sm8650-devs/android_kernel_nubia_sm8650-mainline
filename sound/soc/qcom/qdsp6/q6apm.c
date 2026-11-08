@@ -1204,11 +1204,69 @@ static void q6apm_audio_remove(struct snd_soc_component *component)
 
 #define APM_AUDIO_DRV_NAME "q6apm-audio"
 
+static int q6apm_put_modules(struct snd_kcontrol *kcontrol, const unsigned int __user *bytes,
+			     unsigned int size, u32 opcode)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct q6apm *apm = dev_get_drvdata(component->dev);
+	struct apm_cmd_header *header;
+	u32 token;
+
+	if (size < (opcode == AMDB_CMD_REGISTER_MODULES ? 3 : 2) * sizeof(u32) ||
+	    size % sizeof(u32))
+		return -EINVAL;
+
+	if (size > Q6APM_MAX_INBAND_PARAMS)
+		return -EMSGSIZE;
+
+	void *data __free(kfree) = memdup_user(bytes, size);
+	if (IS_ERR(data))
+		return PTR_ERR(data);
+
+	guard(mutex)(&apm->graph_lock);
+
+	token = ++apm->param_token;
+	if (!token)
+		token = ++apm->param_token;
+
+	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_cmd_pkt(size, opcode, token,
+								 GPR_APM_MODULE_IID,
+								 AMDB_MODULE_INSTANCE_ID);
+	if (IS_ERR(pkt))
+		return PTR_ERR(pkt);
+
+	header = (void *)pkt + GPR_HDR_SIZE;
+	memcpy(header + 1, data, size);
+
+	return q6apm_send_cmd_sync(apm, pkt, 0);
+}
+
+static int q6apm_put_module_registration(struct snd_kcontrol *kcontrol,
+					 const unsigned int __user *bytes, unsigned int size)
+{
+	return q6apm_put_modules(kcontrol, bytes, size, AMDB_CMD_REGISTER_MODULES);
+}
+
+static int q6apm_put_module_deregistration(struct snd_kcontrol *kcontrol,
+					   const unsigned int __user *bytes, unsigned int size)
+{
+	return q6apm_put_modules(kcontrol, bytes, size, AMDB_CMD_DEREGISTER_MODULES);
+}
+
+static const struct snd_kcontrol_new q6apm_module_controls[] = {
+	SND_SOC_BYTES_TLV("AudioReach Module Registration", Q6APM_MAX_INBAND_PARAMS,
+			  NULL, q6apm_put_module_registration),
+	SND_SOC_BYTES_TLV("AudioReach Module Deregistration", Q6APM_MAX_INBAND_PARAMS,
+			  NULL, q6apm_put_module_deregistration),
+};
+
 static const struct snd_soc_component_driver q6apm_audio_component = {
 	.name		= APM_AUDIO_DRV_NAME,
 	.probe		= q6apm_audio_probe,
 	.remove		= q6apm_audio_remove,
 	.remove_order   = SND_SOC_COMP_ORDER_LAST,
+	.controls	= q6apm_module_controls,
+	.num_controls	= ARRAY_SIZE(q6apm_module_controls),
 };
 
 static int apm_probe(gpr_device_t *gdev)
@@ -1358,6 +1416,8 @@ static int apm_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 		case APM_CMD_GRAPH_STOP:
 		case APM_CMD_SET_CFG:
 		case APM_CMD_GET_CFG:
+		case AMDB_CMD_REGISTER_MODULES:
+		case AMDB_CMD_DEREGISTER_MODULES:
 			apm->result.opcode = result->opcode;
 			apm->result.status = result->status;
 			if (result->status)
