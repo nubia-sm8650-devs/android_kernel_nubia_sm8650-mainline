@@ -7,6 +7,7 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/uaccess.h>
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
 #include <sound/soc-dpcm.h>
@@ -83,6 +84,17 @@ struct q6apm_dai_rtd {
 	struct q6apm_graph *graph;
 	spinlock_t lock;
 	bool notify_on_drain;
+	struct list_head events;
+	struct snd_ctl_elem_id events_id;
+	unsigned int event_count;
+	size_t event_bytes;
+	bool events_lost;
+};
+
+struct q6apm_dai_event {
+	struct list_head node;
+	size_t size;
+	u8 data[];
 };
 
 struct q6apm_dai_data {
@@ -133,12 +145,63 @@ static const struct snd_pcm_hardware q6apm_dai_hardware_playback = {
 	.fifo_size =            0,
 };
 
+static void q6apm_dai_queue_event(struct q6apm_dai_rtd *prtd,
+				  const struct q6apm_module_event *notification)
+{
+	const struct apm_module_event *event = notification->event;
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(prtd->substream);
+	size_t size = sizeof(notification->module_instance_id) + sizeof(*event) +
+		      event->event_payload_size;
+	struct q6apm_dai_event *entry = NULL;
+	struct snd_ctl_elem_id id;
+	unsigned long flags;
+
+	if (size <= SZ_64K)
+		entry = kmalloc(struct_size(entry, data, size), GFP_KERNEL);
+
+	if (entry) {
+		entry->size = size;
+		memcpy(entry->data, &notification->module_instance_id, sizeof(u32));
+		memcpy(entry->data + sizeof(u32), event, size - sizeof(u32));
+	}
+
+	spin_lock_irqsave(&prtd->lock, flags);
+
+	if (!entry || prtd->event_count == 64 || prtd->event_bytes + size > SZ_64K) {
+		prtd->events_lost = true;
+	} else {
+		list_add_tail(&entry->node, &prtd->events);
+		prtd->event_count++;
+		prtd->event_bytes += size;
+		entry = NULL;
+	}
+
+	id = prtd->events_id;
+	spin_unlock_irqrestore(&prtd->lock, flags);
+
+	kfree(entry);
+	snd_ctl_notify(rtd->card->snd_card, SNDRV_CTL_EVENT_MASK_VALUE, &id);
+}
+
+static void q6apm_dai_free_events(struct q6apm_dai_rtd *prtd)
+{
+	struct q6apm_dai_event *entry, *next;
+
+	list_for_each_entry_safe(entry, next, &prtd->events, node) {
+		list_del(&entry->node);
+		kfree(entry);
+	}
+}
+
 static void event_handler(uint32_t opcode, uint32_t token, void *payload, void *priv)
 {
 	struct q6apm_dai_rtd *prtd = priv;
 	struct snd_pcm_substream *substream = prtd->substream;
 
 	switch (opcode) {
+	case APM_CLIENT_EVENT_MODULE_EVENT:
+		q6apm_dai_queue_event(prtd, payload);
+		break;
 	case APM_CLIENT_EVENT_WATERMARK_EVENT:
 		snd_pcm_period_elapsed(substream);
 		break;
@@ -496,6 +559,7 @@ static int q6apm_dai_open(struct snd_soc_component *component,
 		return -ENOMEM;
 
 	spin_lock_init(&prtd->lock);
+	INIT_LIST_HEAD(&prtd->events);
 	prtd->substream = substream;
 	prtd->graph = q6apm_graph_open(dev, event_handler, prtd, graph_id, substream->stream);
 	if (IS_ERR(prtd->graph)) {
@@ -592,6 +656,7 @@ static int q6apm_dai_close(struct snd_soc_component *component,
 
 	q6apm_graph_close(prtd->graph);
 	prtd->graph = NULL;
+	q6apm_dai_free_events(prtd);
 	kfree(prtd);
 	runtime->private_data = NULL;
 
@@ -704,6 +769,138 @@ static int q6apm_dai_memory_map(struct snd_soc_component *component,
 	return ret;
 }
 
+static void q6apm_dai_events_id(struct snd_pcm_substream *substream, struct snd_ctl_elem_id *id)
+{
+	id->iface = SNDRV_CTL_ELEM_IFACE_PCM;
+	id->device = substream->pcm->device;
+	strscpy(id->name, substream->stream == SNDRV_PCM_STREAM_PLAYBACK ?
+		"Playback Graph Events" : "Capture Graph Events", sizeof(id->name));
+}
+
+static int q6apm_dai_events_info(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_info *info)
+{
+	info->type = SNDRV_CTL_ELEM_TYPE_BYTES;
+	info->count = SZ_64K;
+
+	return 0;
+}
+
+static int q6apm_dai_events(struct snd_kcontrol *kcontrol, int op,
+			    unsigned int size, unsigned int __user *tlv)
+{
+	struct snd_pcm_substream *substream = snd_kcontrol_chip(kcontrol);
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct q6apm_dai_rtd *prtd;
+	struct q6apm_dai_event *entry;
+	u32 header[2];
+	unsigned long flags;
+	int ret = 0;
+
+	if (size < sizeof(header))
+		return -EINVAL;
+
+	snd_soc_dpcm_mutex_lock(rtd->card);
+
+	if (!substream->runtime || !substream->runtime->private_data) {
+		ret = -EBADFD;
+		goto unlock;
+	}
+
+	prtd = substream->runtime->private_data;
+
+	spin_lock_irqsave(&prtd->lock, flags);
+	prtd->events_id = kcontrol->id;
+	spin_unlock_irqrestore(&prtd->lock, flags);
+
+	if (op == SNDRV_CTL_TLV_OP_WRITE) {
+		void *data;
+
+		if (copy_from_user(header, tlv, sizeof(header))) {
+			ret = -EFAULT;
+			goto unlock;
+		}
+
+		if (header[0] != APM_CMD_REGISTER_MODULE_EVENTS ||
+		    header[1] > size - sizeof(header) || header[1] > Q6APM_MAX_INBAND_PARAMS) {
+			ret = -EINVAL;
+			goto unlock;
+		}
+
+		data = memdup_user(tlv + 2, header[1]);
+		if (IS_ERR(data)) {
+			ret = PTR_ERR(data);
+			goto unlock;
+		}
+
+		ret = q6apm_graph_register_event(prtd->graph, data, header[1]);
+		kfree(data);
+
+		goto unlock;
+	}
+
+	if (op != SNDRV_CTL_TLV_OP_READ) {
+		ret = -EINVAL;
+		goto unlock;
+	}
+
+	spin_lock_irqsave(&prtd->lock, flags);
+
+	if (prtd->events_lost) {
+		prtd->events_lost = false;
+		ret = -EOVERFLOW;
+	} else if (list_empty(&prtd->events)) {
+		ret = -EAGAIN;
+	}
+
+	entry = ret ? NULL : list_first_entry(&prtd->events, struct q6apm_dai_event, node);
+	spin_unlock_irqrestore(&prtd->lock, flags);
+
+	if (ret)
+		goto unlock;
+
+	if (entry->size > size - sizeof(header)) {
+		ret = -ENOSPC;
+		goto unlock;
+	}
+
+	header[0] = APM_EVENT_MODULE_TO_CLIENT;
+	header[1] = entry->size;
+
+	if (copy_to_user(tlv, header, sizeof(header)) ||
+	    copy_to_user(tlv + 2, entry->data, entry->size)) {
+		ret = -EFAULT;
+		goto unlock;
+	}
+
+	spin_lock_irqsave(&prtd->lock, flags);
+	list_del(&entry->node);
+	prtd->event_count--;
+	prtd->event_bytes -= entry->size;
+	spin_unlock_irqrestore(&prtd->lock, flags);
+
+	kfree(entry);
+
+unlock:
+	snd_soc_dpcm_mutex_unlock(rtd->card);
+
+	return ret;
+}
+
+static int q6apm_dai_add_events(struct snd_pcm_substream *substream)
+{
+	struct snd_kcontrol_new control = {
+		.iface = SNDRV_CTL_ELEM_IFACE_PCM,
+		.device = substream->pcm->device,
+		.name = substream->stream == SNDRV_PCM_STREAM_PLAYBACK ?
+			"Playback Graph Events" : "Capture Graph Events",
+		.access = SNDRV_CTL_ELEM_ACCESS_TLV_READWRITE | SNDRV_CTL_ELEM_ACCESS_TLV_CALLBACK,
+		.info = q6apm_dai_events_info,
+		.tlv.c = q6apm_dai_events,
+	};
+
+	return snd_ctl_add(substream->pcm->card, snd_ctl_new1(&control, substream));
+}
+
 static int q6apm_dai_pcm_new(struct snd_soc_component *component, struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
@@ -714,11 +911,20 @@ static int q6apm_dai_pcm_new(struct snd_soc_component *component, struct snd_soc
 	 * end of the addressable range.
 	 */
 	int size = BUFFER_BYTES_MAX + PAGE_SIZE;
-	int graph_id, ret;
+	int graph_id, ret, stream;
 	bool is_push_pull;
 	struct snd_pcm_substream *substream = NULL;
 
 	graph_id = cpu_dai->driver->id;
+
+	for_each_pcm_streams(stream) {
+		if (!pcm->streams[stream].substream)
+			continue;
+
+		ret = q6apm_dai_add_events(pcm->streams[stream].substream);
+		if (ret)
+			return ret;
+	}
 
 	/* Note: DSP backend dais are uni-directional ONLY(either playback or capture) */
 	if (pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream)
@@ -778,6 +984,16 @@ static void q6apm_dai_memory_unmap(struct snd_soc_component *component,
 static void q6apm_dai_pcm_free(struct snd_soc_component *component, struct snd_pcm *pcm)
 {
 	struct snd_pcm_substream *substream;
+	struct snd_ctl_elem_id id = {};
+	int stream;
+
+	for_each_pcm_streams(stream) {
+		substream = pcm->streams[stream].substream;
+		if (substream) {
+			q6apm_dai_events_id(substream, &id);
+			snd_ctl_remove_id(pcm->card, &id);
+		}
+	}
 
 	substream = pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream;
 	if (substream)
