@@ -1782,6 +1782,30 @@ static int audioreach_put_audio_mixer(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int audioreach_put_dapm_switch(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kcontrol);
+	struct snd_soc_component *c = snd_soc_dapm_to_component(dapm);
+	struct q6apm *apm = dev_get_drvdata(c->dev);
+	bool connect = ucontrol->value.integer.value[0] & 1;
+	int change, ret;
+
+	change = snd_soc_dapm_put_volsw(kcontrol, ucontrol);
+	if (change < 0)
+		return change;
+
+	if (!change) {
+		ret = snd_soc_dpcm_runtime_update(c->card);
+		if (ret)
+			return ret;
+	}
+
+	ret = audioreach_update_paths(apm, c->card, connect);
+
+	return ret ?: change;
+}
+
 static int audioreach_get_vol_ctrl_audio_mixer(struct snd_kcontrol *kcontrol,
 					       struct snd_ctl_elem_value *ucontrol)
 {
@@ -2119,6 +2143,8 @@ static int audioreach_control_unload(struct snd_soc_component *scomp,
 }
 
 static const struct snd_soc_tplg_kcontrol_ops audioreach_io_ops[] = {
+	{ SND_SOC_TPLG_DAPM_CTL_VOLSW, snd_soc_dapm_get_volsw,
+		audioreach_put_dapm_switch, snd_soc_info_volsw },
 	{SND_SOC_AR_TPLG_FE_BE_GRAPH_CTL_MIX, audioreach_get_audio_mixer,
 		audioreach_put_audio_mixer, snd_soc_info_volsw},
 	{SND_SOC_AR_TPLG_VOL_CTL, audioreach_get_vol_ctrl_audio_mixer,
