@@ -640,16 +640,15 @@ void *audioreach_alloc_route_pkt(const struct audioreach_route *route, u32 opcod
 	return pkt;
 }
 
-int audioreach_send_cmd_sync(struct device *dev, gpr_device_t *gdev,
-			     struct gpr_ibasic_rsp_result_t *result, struct mutex *cmd_lock,
-			     gpr_port_t *port, wait_queue_head_t *cmd_wait,
-			     const struct gpr_pkt *pkt, uint32_t rsp_opcode)
+static int __audioreach_send_cmd_sync(struct device *dev, gpr_device_t *gdev,
+				      struct gpr_ibasic_rsp_result_t *result, gpr_port_t *port,
+				      wait_queue_head_t *cmd_wait, const struct gpr_pkt *pkt,
+				      uint32_t rsp_opcode)
 {
 
 	const struct gpr_hdr *hdr = &pkt->hdr;
 	int rc;
 
-	mutex_lock(cmd_lock);
 	result->opcode = 0;
 	result->status = 0;
 
@@ -681,8 +680,17 @@ int audioreach_send_cmd_sync(struct device *dev, gpr_device_t *gdev,
 	}
 
 err:
-	mutex_unlock(cmd_lock);
 	return rc;
+}
+
+int audioreach_send_cmd_sync(struct device *dev, gpr_device_t *gdev,
+			     struct gpr_ibasic_rsp_result_t *result, struct mutex *cmd_lock,
+			     gpr_port_t *port, wait_queue_head_t *cmd_wait,
+			     const struct gpr_pkt *pkt, uint32_t rsp_opcode)
+{
+	guard(mutex)(cmd_lock);
+
+	return __audioreach_send_cmd_sync(dev, gdev, result, port, cmd_wait, pkt, rsp_opcode);
 }
 EXPORT_SYMBOL_GPL(audioreach_send_cmd_sync);
 
