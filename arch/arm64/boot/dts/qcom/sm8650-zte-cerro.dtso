@@ -1245,6 +1245,10 @@
 	status = "okay";
 };
 
+&mdss_dp0 {
+	status = "okay";
+};
+
 &mdss_dsi0 {
 	#address-cells = <1>;
 	#size-cells = <0>;
