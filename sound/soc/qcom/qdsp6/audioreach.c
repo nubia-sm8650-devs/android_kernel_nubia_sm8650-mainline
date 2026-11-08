@@ -115,6 +115,16 @@ struct apm_control_link_params {
 	u8 data[];
 } __packed;
 
+struct apm_voice_config {
+	struct apm_module_param_data param_data;
+	u32 num_sub_graphs;
+	u32 sub_graph_id;
+	u32 num_props;
+	struct apm_prop_data prop;
+	__le32 num_tags;
+	struct audioreach_voice_tag tags[];
+} __packed;
+
 struct apm_graph_open_params {
 	struct apm_cmd_header *cmd_header;
 	struct apm_sub_graph_params *sg_data;
@@ -123,6 +133,7 @@ struct apm_graph_open_params {
 	struct apm_prop_list_params *mod_prop_data;
 	struct apm_mod_conn_list_params *mod_conn_list_data;
 	struct apm_control_link_params *control_link_data;
+	void *voice_data;
 } __packed;
 
 struct apm_u32_property {
@@ -490,6 +501,72 @@ static bool audioreach_container_config_matches(const struct audioreach_containe
 		a->peer_heap_id == b->peer_heap_id;
 }
 
+static const struct audioreach_voice_tags *
+audioreach_sub_graph_voice_tags(const struct audioreach_sub_graph *sg)
+{
+	const struct audioreach_voice_tags *tags = NULL;
+	struct audioreach_container *container;
+	struct audioreach_module *module;
+	u32 i;
+
+	list_for_each_entry(container, &sg->container_list, node) {
+		list_for_each_entry(module, &container->modules_list, node) {
+			if (!module->voice_tags)
+				continue;
+
+			if (tags)
+				return ERR_PTR(-EINVAL);
+
+			tags = module->voice_tags;
+		}
+	}
+
+	if (!tags)
+		return NULL;
+
+	for (i = 0; i < le32_to_cpu(tags->num_tags); i++) {
+		bool found = false;
+
+		list_for_each_entry(container, &sg->container_list, node) {
+			list_for_each_entry(module, &container->modules_list, node) {
+				if (module->instance_id == le32_to_cpu(tags->tags[i].module_iid))
+					found = true;
+			}
+		}
+
+		if (!found)
+			return ERR_PTR(-EINVAL);
+	}
+
+	return tags;
+}
+
+static size_t apm_voice_config_size(const struct audioreach_voice_tags *tags)
+{
+	return ALIGN(sizeof(struct apm_voice_config) +
+		     le32_to_cpu(tags->num_tags) * sizeof(tags->tags[0]), 8);
+}
+
+static void *apm_populate_voice_config(void *data, u32 sub_graph_id,
+				       const struct audioreach_voice_tags *tags)
+{
+	struct apm_voice_config *cfg = data;
+	u32 size = apm_voice_config_size(tags);
+
+	cfg->param_data.module_instance_id = VCPM_MODULE_INSTANCE_ID;
+	cfg->param_data.param_id = VCPM_PARAM_ID_VOICE_CONFIG;
+	cfg->param_data.param_size = size - APM_MODULE_PARAM_DATA_SIZE;
+	cfg->num_sub_graphs = 1;
+	cfg->sub_graph_id = sub_graph_id;
+	cfg->num_props = 1;
+	cfg->prop.prop_id = VCPM_PROPERTY_ID_TAG_INFO;
+	cfg->prop.prop_size = sizeof(tags->num_tags) +
+		le32_to_cpu(tags->num_tags) * sizeof(tags->tags[0]);
+	memcpy(&cfg->num_tags, &tags->num_tags, cfg->prop.prop_size);
+
+	return data + size;
+}
+
 static bool audioreach_route_in_graph(struct q6apm *apm,
 				      const struct audioreach_route *route, u32 graph_id)
 {
@@ -556,6 +633,12 @@ static void audioreach_populate_graph(struct q6apm *apm,
 	}
 
 	list_for_each_entry(sg, sg_list, node) {
+		const struct audioreach_voice_tags *tags = audioreach_sub_graph_voice_tags(sg);
+
+		if (tags)
+			open->voice_data = apm_populate_voice_config(open->voice_data,
+								     sg->sub_graph_id, tags);
+
 		apm_populate_sub_graph_config(sg_cfg, sg);
 		sg_cfg = (void *)sg_cfg + apm_sub_graph_config_size(sg);
 
@@ -619,6 +702,7 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	int num_modules = 0;
 	int num_modules_list = 0;
 	int num_control_links = 0, control_size = 0;
+	int voice_size = 0;
 	struct gpr_pkt *pkt;
 	void *p;
 
@@ -637,6 +721,14 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	}
 
 	list_for_each_entry(sgs, sg_list, node) {
+		const struct audioreach_voice_tags *tags = audioreach_sub_graph_voice_tags(sgs);
+
+		if (IS_ERR(tags))
+			return ERR_CAST(tags);
+
+		if (tags)
+			voice_size += apm_voice_config_size(tags);
+
 		num_sub_graphs++;
 		sg_sz += apm_sub_graph_config_size(sgs);
 		list_for_each_entry(container, &sgs->container_list, node) {
@@ -674,7 +766,7 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	mp_sz = APM_MOD_PROP_PSIZE(mprop, num_modules);
 	mc_sz =	APM_MOD_CONN_PSIZE(mcon, num_connections);
 
-	payload_size = sg_sz + cont_sz + ml_sz + mp_sz + mc_sz;
+	payload_size = sg_sz + cont_sz + ml_sz + mp_sz + mc_sz + voice_size;
 	if (num_control_links) {
 		control_size = ALIGN(sizeof(struct apm_control_link_params) + control_size, 8);
 		payload_size += control_size;
@@ -736,7 +828,10 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 		param_data->param_id = APM_PARAM_ID_MODULE_CTRL_LINK_CFG;
 		param_data->param_size = control_size - APM_MODULE_PARAM_DATA_SIZE;
 		params.control_link_data->num_links = num_control_links;
+		p += control_size;
 	}
+
+	params.voice_data = p;
 
 	audioreach_populate_graph(apm, info, &params, sg_list, num_sub_graphs);
 
