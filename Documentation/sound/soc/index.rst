@@ -20,3 +20,4 @@ The documentation is split into the following sections:-
    codec-to-codec
    usb
    audioreach
+   audioreach-topology
