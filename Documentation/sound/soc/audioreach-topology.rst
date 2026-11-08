@@ -30,3 +30,25 @@ Retain native intent-list and heap properties in these records.
 The kernel includes the declarations in GRAPH_OPEN. They are not module
 SET data and do not establish a separate widget lifecycle or an ALSA
 enable control. Userspace must select the endpoint graphs together.
+
+Voice subgraph tags
+-------------------
+
+Attach one ``audioreach_voice_tags`` block to a module widget in each
+subgraph that supplies VCPM tag information. Set its type to
+``SND_SOC_AR_TPLG_VOICE_TAG_TYPE``. The little-endian header contains the
+block size, type and tag count, followed by ordered tag-ID/module-instance
+pairs. An empty list remains an explicit empty declaration.
+
+Tag IDs must be nonzero and unique within the list. Every referenced
+module must belong to the owning widget's subgraph. The kernel includes
+the tags in VCPM voice configuration inside GRAPH_OPEN, not a separate
+module SET command.
+
+Logger configuration
+--------------------
+
+Logger modules can be declared without logging fields when userspace
+supplies their calibration. Media-format preparation leaves those modules
+unchanged. Supplying legacy logging tokens selects the existing automatic
+enable and logger-configuration sequence, including explicit zero values.
