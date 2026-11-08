@@ -455,6 +455,77 @@ static struct audioreach_container *audioreach_parse_cont_tokens(struct q6apm *a
 	return cont;
 }
 
+static struct audioreach_control_links *
+audioreach_parse_control_links(const struct snd_soc_tplg_private *priv, u32 instance_id)
+{
+	const u8 *data = (const u8 *)priv->data;
+	u32 remaining = le32_to_cpu(priv->size);
+	const struct audioreach_control_links *links = NULL;
+
+	while (remaining) {
+		const struct audioreach_control_links *block = (const void *)data;
+		u32 size, bytes, n;
+		const u8 *cursor;
+
+		if (remaining < sizeof(*block))
+			return ERR_PTR(-EINVAL);
+
+		size = le32_to_cpu(block->size);
+		if (size < sizeof(*block) || size > remaining)
+			return ERR_PTR(-EINVAL);
+
+		data += size;
+		remaining -= size;
+
+		if (le32_to_cpu(block->type) != SND_SOC_AR_TPLG_CONTROL_LINK_TYPE)
+			continue;
+
+		if (links)
+			return ERR_PTR(-EINVAL);
+
+		links = block;
+		cursor = block->data;
+		bytes = size - sizeof(*block);
+
+		for (n = 0; n < le32_to_cpu(block->num_links); n++) {
+			const struct apm_control_link *link = (const void *)cursor;
+			u32 p;
+
+			if (bytes < sizeof(*link) ||
+			    le32_to_cpu(link->peer_1_mod_iid) != instance_id ||
+			    !link->peer_1_mod_ctrl_port_id || !link->peer_2_mod_iid ||
+			    !link->peer_2_mod_ctrl_port_id)
+				return ERR_PTR(-EINVAL);
+
+			cursor += sizeof(*link);
+			bytes -= sizeof(*link);
+
+			for (p = 0; p < le32_to_cpu(link->num_props); p++) {
+				const struct apm_prop_data *prop = (const void *)cursor;
+				u32 length;
+
+				if (bytes < sizeof(*prop))
+					return ERR_PTR(-EINVAL);
+
+				length = le32_to_cpu(prop->prop_size);
+				if (length > bytes - sizeof(*prop))
+					return ERR_PTR(-EINVAL);
+
+				cursor += sizeof(*prop) + length;
+				bytes -= sizeof(*prop) + length;
+			}
+		}
+
+		if (bytes)
+			return ERR_PTR(-EINVAL);
+	}
+
+	if (!links || !le32_to_cpu(links->num_links))
+		return NULL;
+
+	return kmemdup(links, le32_to_cpu(links->size), GFP_KERNEL) ?: ERR_PTR(-ENOMEM);
+}
+
 static int audioreach_parse_extra_links(const struct snd_soc_tplg_private *priv,
 					struct audioreach_connection *links, u32 instance_id)
 {
@@ -521,6 +592,7 @@ static struct audioreach_module *audioreach_parse_common_tokens(struct q6apm *ap
 	const struct snd_soc_tplg_vendor_array *mod_array;
 	struct audioreach_module *mod = NULL;
 	struct audioreach_connection *connections;
+	struct audioreach_control_links *control_links;
 	uint32_t token;
 	bool found, has_instance = false;
 	int max_tokens;
@@ -641,9 +713,15 @@ static struct audioreach_module *audioreach_parse_common_tokens(struct q6apm *ap
 	if (extra < 0)
 		return ERR_PTR(extra);
 
+	control_links = audioreach_parse_control_links(private, instance_id);
+	if (IS_ERR(control_links))
+		return ERR_CAST(control_links);
+
 	connections = kcalloc(id + extra, sizeof(*connections), GFP_KERNEL);
-	if (!connections && (id + extra))
+	if (!connections && (id + extra)) {
+		kfree(control_links);
 		return ERR_PTR(-ENOMEM);
+	}
 
 	if (extra)
 		audioreach_parse_extra_links(private, connections + id, instance_id);
@@ -651,10 +729,12 @@ static struct audioreach_module *audioreach_parse_common_tokens(struct q6apm *ap
 	mod = audioreach_tplg_alloc_module(apm, cont, w, instance_id, &found);
 	if (IS_ERR(mod) || found) {
 		kfree(connections);
+		kfree(control_links);
 		return IS_ERR(mod) ? mod : ERR_PTR(-EINVAL);
 	}
 
 	mod->module_id = module_id;
+	mod->control_links = control_links;
 	mod->max_ip_port = max_ip_port;
 	mod->max_op_port = max_op_port;
 	mod->src_mod_inst_id = src_mod_inst_id;
@@ -1558,6 +1638,7 @@ static int audioreach_widget_unload(struct snd_soc_component *scomp,
 	list_del(&mod->node);
 	kfree(mod->data);
 	kfree(mod->connections);
+	kfree(mod->control_links);
 	kfree(mod);
 	/* Graph Info has N sub-graphs, sub-graph has N containers, Container has N Modules */
 	if (list_empty(&cont->modules_list)) { /* if no modules in the container then remove it */

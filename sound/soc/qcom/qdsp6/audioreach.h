@@ -174,6 +174,15 @@ struct apm_module_prop_cfg {
 } __packed;
 
 #define APM_PARAM_ID_MODULE_CONN		0x08001004
+#define APM_PARAM_ID_MODULE_CTRL_LINK_CFG	0x08001061
+
+struct apm_control_link {
+	__le32 peer_1_mod_iid;
+	__le32 peer_1_mod_ctrl_port_id;
+	__le32 peer_2_mod_iid;
+	__le32 peer_2_mod_ctrl_port_id;
+	__le32 num_props;
+} __packed;
 
 struct apm_param_id_module_conn {
 	uint32_t num_connections;
@@ -968,6 +977,7 @@ struct audioreach_container {
 #define AR_MAX_MOD_LINKS	8
 
 struct audioreach_module {
+	struct audioreach_control_links *control_links;
 	uint32_t module_id;
 	uint32_t instance_id;
 

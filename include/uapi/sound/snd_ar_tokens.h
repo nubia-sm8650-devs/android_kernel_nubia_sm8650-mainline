@@ -342,6 +342,15 @@ enum ar_event_types {
 #define AR_AUDIO_IF_CLK_INVERTED		1
 
 #define SND_SOC_AR_TPLG_MODULE_CFG_TYPE 0x01001006
+#define SND_SOC_AR_TPLG_CONTROL_LINK_TYPE 0x08001061
+
+struct audioreach_control_links {
+	__le32 size;
+	__le32 type;
+	__le32 num_links;
+	__u8 data[];
+};
+
 struct audioreach_module_priv_data {
 	__le32 size;	/* size in bytes of the array, including all elements */
 	__le32 type;	/* SND_SOC_AR_TPLG_MODULE_CFG_TYPE */
