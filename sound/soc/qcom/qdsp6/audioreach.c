@@ -109,6 +109,12 @@ struct apm_mod_conn_list_params {
 
 #define APM_MOD_CONN_PSIZE(p, n) ALIGN(struct_size(p, conn_obj, n), 8)
 
+struct apm_control_link_params {
+	struct apm_module_param_data param_data;
+	u32 num_links;
+	u8 data[];
+} __packed;
+
 struct apm_graph_open_params {
 	struct apm_cmd_header *cmd_header;
 	struct apm_sub_graph_params *sg_data;
@@ -116,6 +122,7 @@ struct apm_graph_open_params {
 	struct apm_module_list_params *mod_list_data;
 	struct apm_prop_list_params *mod_prop_data;
 	struct apm_mod_conn_list_params *mod_conn_list_data;
+	struct apm_control_link_params *control_link_data;
 } __packed;
 
 struct apm_u32_property {
@@ -527,6 +534,7 @@ static void audioreach_populate_graph(struct q6apm *apm,
 	struct apm_sub_graph_data *sg_cfg;
 	struct apm_mod_list_obj *mlobj;
 	struct audioreach_route *route;
+	u8 *control_cursor = open->control_link_data ? open->control_link_data->data : NULL;
 
 	mlobj = &ml_data->mod_list_obj[0];
 	cobj = &c_data->cont_obj[0];
@@ -566,6 +574,13 @@ static void audioreach_populate_graph(struct q6apm *apm,
 
 				module_prop_obj = &mp_data->mod_prop_obj[nmodule++];
 				apm_populate_module_prop_obj(module_prop_obj, module);
+				if (module->control_links) {
+					u32 size = le32_to_cpu(module->control_links->size) -
+						   sizeof(*module->control_links);
+
+					memcpy(control_cursor, module->control_links->data, size);
+					control_cursor += size;
+				}
 
 				for (pn = 0; pn < module->num_connections; pn++) {
 					link = &module->connections[pn];
@@ -591,7 +606,7 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	struct audioreach_container *container;
 	struct apm_sub_graph_params *sg_params;
 	struct apm_mod_conn_list_params *mcon;
-	struct apm_graph_open_params params;
+	struct apm_graph_open_params params = {};
 	struct apm_prop_list_params *mprop;
 	struct audioreach_route *route;
 	struct audioreach_module *module;
@@ -603,6 +618,7 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	int num_sub_graphs = 0;
 	int num_modules = 0;
 	int num_modules_list = 0;
+	int num_control_links = 0, control_size = 0;
 	struct gpr_pkt *pkt;
 	void *p;
 
@@ -640,6 +656,12 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 
 			list_for_each_entry(module, &container->modules_list, node) {
 				num_connections += module->num_connections;
+				if (module->control_links) {
+					num_control_links +=
+						le32_to_cpu(module->control_links->num_links);
+					control_size += le32_to_cpu(module->control_links->size) -
+							sizeof(*module->control_links);
+				}
 			}
 		}
 	}
@@ -653,6 +675,10 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	mc_sz =	APM_MOD_CONN_PSIZE(mcon, num_connections);
 
 	payload_size = sg_sz + cont_sz + ml_sz + mp_sz + mc_sz;
+	if (num_control_links) {
+		control_size = ALIGN(sizeof(struct apm_control_link_params) + control_size, 8);
+		payload_size += control_size;
+	}
 	pkt = audioreach_alloc_apm_cmd_pkt(payload_size, APM_CMD_GRAPH_OPEN, 0);
 	if (IS_ERR(pkt))
 		return pkt;
@@ -703,6 +729,14 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	param_data->param_size = mc_sz - APM_MODULE_PARAM_DATA_SIZE;
 	params.mod_conn_list_data->num_connections = num_connections;
 	p += mc_sz;
+	if (num_control_links) {
+		params.control_link_data = p;
+		param_data = &params.control_link_data->param_data;
+		param_data->module_instance_id = APM_MODULE_INSTANCE_ID;
+		param_data->param_id = APM_PARAM_ID_MODULE_CTRL_LINK_CFG;
+		param_data->param_size = control_size - APM_MODULE_PARAM_DATA_SIZE;
+		params.control_link_data->num_links = num_control_links;
+	}
 
 	audioreach_populate_graph(apm, info, &params, sg_list, num_sub_graphs);
 
