@@ -637,6 +637,24 @@ static int audioreach_widget_load_module_common(struct snd_soc_component *compon
 	return 0;
 }
 
+static int audioreach_widget_load_effect(struct snd_soc_component *component,
+					 int index, struct snd_soc_dapm_widget *w,
+					 const struct snd_soc_tplg_dapm_widget *tplg_w)
+{
+	struct audioreach_module *mod;
+	int ret;
+
+	ret = audioreach_widget_load_module_common(component, index, w, tplg_w);
+	if (ret)
+		return ret;
+
+	mod = w->dobj.private;
+	if (mod->module_id == MODULE_ID_GAIN)
+		mod->gain = VOL_CTRL_DEFAULT_GAIN;
+
+	return 0;
+}
+
 static int audioreach_widget_load_enc_dec_cnv(struct snd_soc_component *component,
 					      int index, struct snd_soc_dapm_widget *w,
 					      const struct snd_soc_tplg_dapm_widget *tplg_w)
@@ -911,6 +929,11 @@ static int audioreach_widget_load_buffer(struct snd_soc_component *component,
 	mod_array = audioreach_get_module_array(&tplg_w->priv);
 
 	switch (mod->module_id) {
+	case MODULE_ID_WR_SHARED_MEM_EP:
+	case MODULE_ID_RD_SHARED_MEM_EP:
+	case MODULE_ID_SH_MEM_PULL_MODE:
+	case MODULE_ID_SH_MEM_PUSH_MODE:
+		break;
 	case MODULE_ID_CODEC_DMA_SINK:
 	case MODULE_ID_CODEC_DMA_SOURCE:
 	case MODULE_ID_SLIMBUS_SINK:
@@ -1044,16 +1067,15 @@ static int audioreach_widget_ready(struct snd_soc_component *component,
 	switch (w->id) {
 	case snd_soc_dapm_aif_in:
 	case snd_soc_dapm_aif_out:
-		audioreach_widget_load_buffer(component, index, w, tplg_w);
-		break;
+		return audioreach_widget_load_buffer(component, index, w, tplg_w);
 	case snd_soc_dapm_decoder:
 	case snd_soc_dapm_encoder:
 	case snd_soc_dapm_src:
-		audioreach_widget_load_enc_dec_cnv(component, index, w, tplg_w);
-		break;
+		return audioreach_widget_load_enc_dec_cnv(component, index, w, tplg_w);
 	case snd_soc_dapm_buffer:
-		audioreach_widget_load_buffer(component, index, w, tplg_w);
-		break;
+		return audioreach_widget_load_buffer(component, index, w, tplg_w);
+	case snd_soc_dapm_effect:
+		return audioreach_widget_load_effect(component, index, w, tplg_w);
 	case snd_soc_dapm_mixer:
 		return audioreach_widget_load_mixer(component, index, w, tplg_w);
 	case snd_soc_dapm_pga:
@@ -1090,6 +1112,7 @@ static struct audioreach_graph_info *audioreach_get_widget_graph(struct q6apm *a
 	case snd_soc_dapm_aif_out:
 	case snd_soc_dapm_buffer:
 	case snd_soc_dapm_decoder:
+	case snd_soc_dapm_effect:
 	case snd_soc_dapm_encoder:
 	case snd_soc_dapm_src:
 	case snd_soc_dapm_pga:
