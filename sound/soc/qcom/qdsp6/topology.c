@@ -1231,6 +1231,22 @@ out:
 	return found;
 }
 
+static bool audioreach_graph_has_fe(struct snd_soc_card *card, struct q6apm *apm, u32 id)
+{
+	struct snd_soc_pcm_runtime *rtd;
+	struct snd_soc_dai *dai;
+	int i;
+
+	for_each_card_rtds(card, rtd) {
+		for_each_rtd_cpu_dais(rtd, i, dai) {
+			if (dai->dev == apm->dev && dai->driver->id == id)
+				return true;
+		}
+	}
+
+	return false;
+}
+
 static int audioreach_check_dai_graphs(struct q6apm *apm, struct snd_soc_pcm_runtime *rtd,
 				       int stream, const struct snd_soc_dapm_widget_list *list,
 				       bool prepared)
@@ -1316,6 +1332,9 @@ int audioreach_prepare_graphs(struct q6apm_graph *root, struct snd_soc_pcm_runti
 	for (i = root->num_started; i < root->num_connected; i++) {
 		struct q6apm_graph *graph = root->connected[i];
 
+		if (audioreach_graph_has_dai(rtd->card, root->apm, graph->id))
+			continue;
+
 		if (!audioreach_graph_is_connected(graph, list, stream))
 			continue;
 
@@ -1363,7 +1382,7 @@ int audioreach_open_graphs(struct q6apm_graph *root, struct snd_soc_pcm_runtime 
 		struct audioreach_graph_info *info = audioreach_get_widget_graph(root->apm, w);
 		struct q6apm_graph *graph;
 
-		if (!info || audioreach_graph_has_dai(rtd->card, root->apm, info->id))
+		if (!info || audioreach_graph_has_fe(rtd->card, root->apm, info->id))
 			continue;
 
 		for (j = 0; j < root->num_connected; j++) {
