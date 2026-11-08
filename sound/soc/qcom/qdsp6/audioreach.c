@@ -32,7 +32,7 @@ struct apm_sub_graph_params  {
 	struct apm_sub_graph_data sg_cfg[];
 } __packed;
 
-#define APM_SUB_GRAPH_PSIZE(p, n) ALIGN(struct_size(p, sg_cfg, n), 8)
+#define APM_SUB_GRAPH_PSIZE(p, size) ALIGN(sizeof(*(p)) + (size), 8)
 
 /* container config */
 struct apm_container_obj  {
@@ -61,7 +61,7 @@ struct apm_container_params  {
 	struct apm_container_obj cont_obj[];
 } __packed;
 
-#define APM_CONTAINER_PSIZE(p, n) ALIGN(struct_size(p, cont_obj, n), 8)
+#define APM_CONTAINER_PSIZE(p, size) ALIGN(sizeof(*(p)) + (size), 8)
 
 /* Module List config */
 struct apm_mod_list_obj {
@@ -306,6 +306,16 @@ void *audioreach_alloc_apm_cmd_pkt(int pkt_size, uint32_t opcode, uint32_t token
 }
 EXPORT_SYMBOL_GPL(audioreach_alloc_apm_cmd_pkt);
 
+static size_t apm_container_config_size(const struct audioreach_container *cont)
+{
+	return sizeof(struct apm_container_obj);
+}
+
+static size_t apm_sub_graph_config_size(const struct audioreach_sub_graph *sg)
+{
+	return sizeof(struct apm_sub_graph_data);
+}
+
 static void apm_populate_container_config(struct apm_container_obj *cfg,
 					  const struct audioreach_container *cont)
 {
@@ -437,18 +447,20 @@ static void audioreach_populate_graph(struct q6apm *apm,
 	struct apm_prop_list_params *mp_data = open->mod_prop_data;
 	struct apm_container_params *c_data = open->cont_data;
 	struct apm_sub_graph_params *sg_data = open->sg_data;
-	int ncontainer = 0, nmodule = 0, nconn = 0;
+	int nmodule = 0, nconn = 0;
 	struct apm_mod_prop_obj *module_prop_obj;
 	struct audioreach_container *container;
 	struct apm_module_conn_obj *conn_obj;
 	struct audioreach_module *module;
 	struct audioreach_sub_graph *sg;
 	struct apm_container_obj *cobj;
+	struct apm_sub_graph_data *sg_cfg;
 	struct apm_mod_list_obj *mlobj;
 	struct audioreach_route *route;
-	int i = 0;
 
 	mlobj = &ml_data->mod_list_obj[0];
+	cobj = &c_data->cont_obj[0];
+	sg_cfg = &sg_data->sg_cfg[0];
 
 
 	if (info->dst_mod_inst_id && info->src_mod_inst_id) {
@@ -466,14 +478,12 @@ static void audioreach_populate_graph(struct q6apm *apm,
 	}
 
 	list_for_each_entry(sg, sg_list, node) {
-		struct apm_sub_graph_data *sg_cfg = &sg_data->sg_cfg[i++];
-
 		apm_populate_sub_graph_config(sg_cfg, sg);
+		sg_cfg = (void *)sg_cfg + apm_sub_graph_config_size(sg);
 
 		list_for_each_entry(container, &sg->container_list, node) {
-			cobj = &c_data->cont_obj[ncontainer];
-
 			apm_populate_container_config(cobj, container);
+			cobj = (void *)cobj + apm_container_config_size(container);
 			apm_populate_module_list_obj(mlobj, container, sg->sub_graph_id);
 
 			list_for_each_entry(module, &container->modules_list, node) {
@@ -498,8 +508,6 @@ static void audioreach_populate_graph(struct q6apm *apm,
 			}
 			mlobj = (void *) mlobj + APM_MOD_LIST_OBJ_PSIZE(mlobj,
 									container->num_modules);
-
-			ncontainer++;
 		}
 	}
 }
@@ -530,6 +538,8 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 
 	sg_list = &info->sg_list;
 	ml_sz = 0;
+	sg_sz = 0;
+	cont_sz = 0;
 
 	/* add FE-BE connections */
 	if (info->dst_mod_inst_id && info->src_mod_inst_id)
@@ -542,8 +552,10 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 
 	list_for_each_entry(sgs, sg_list, node) {
 		num_sub_graphs++;
+		sg_sz += apm_sub_graph_config_size(sgs);
 		list_for_each_entry(container, &sgs->container_list, node) {
 			num_containers++;
+			cont_sz += apm_container_config_size(container);
 			num_modules += container->num_modules;
 			ml_sz = ml_sz + sizeof(struct apm_module_list_params) +
 				APM_MOD_LIST_OBJ_PSIZE(mlobj, container->num_modules);
@@ -555,8 +567,8 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	}
 
 	num_modules_list = num_containers;
-	sg_sz = APM_SUB_GRAPH_PSIZE(sg_params, num_sub_graphs);
-	cont_sz = APM_CONTAINER_PSIZE(cont_params, num_containers);
+	sg_sz = APM_SUB_GRAPH_PSIZE(sg_params, sg_sz);
+	cont_sz = APM_CONTAINER_PSIZE(cont_params, cont_sz);
 
 	ml_sz = ALIGN(ml_sz, 8);
 
