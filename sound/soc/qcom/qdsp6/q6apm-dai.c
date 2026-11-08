@@ -288,6 +288,15 @@ static int q6apm_dai_hw_free(struct snd_soc_component *component,
 	return 0;
 }
 
+static bool q6apm_dai_formats_graph(struct snd_pcm_substream *substream, bool hostless)
+{
+	struct snd_pcm_substream *playback =
+		substream->pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream;
+
+	return substream->stream == SNDRV_PCM_STREAM_PLAYBACK || !hostless ||
+	       !playback || !playback->runtime;
+}
+
 static int q6apm_dai_prepare(struct snd_soc_component *component,
 			     struct snd_pcm_substream *substream)
 {
@@ -296,6 +305,7 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 	struct audioreach_module_config cfg = {};
 	struct device *dev = component->dev;
 	struct q6apm_dai_data *pdata;
+	bool hostless;
 	int ret;
 
 	pdata = snd_soc_component_get_drvdata(component);
@@ -308,6 +318,7 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 	}
 
 	prtd->graph->path_prepared = false;
+	hostless = q6apm_graph_is_hostless(prtd->graph);
 
 	cfg.direction = substream->stream;
 	cfg.sample_rate = runtime->rate;
@@ -322,7 +333,8 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 	if (prtd->state) {
 		/* clear the previous setup if any  */
 		q6apm_graph_stop(prtd->graph);
-		q6apm_free_fragments(prtd->graph, substream->stream);
+		if (!hostless)
+			q6apm_free_fragments(prtd->graph, substream->stream);
 	}
 
 	audioreach_stop_graphs(prtd->graph, 0);
@@ -348,7 +360,7 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 			}
 			prtd->push_pull_size = prtd->pcm_size;
 		}
-	} else {
+	} else if (!hostless) {
 		ret = q6apm_alloc_fragments(prtd->graph, substream->stream, prtd->phys,
 					(prtd->pcm_size / prtd->periods), prtd->periods);
 		if (ret < 0) {
@@ -358,17 +370,20 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 
 	}
 
-	ret = q6apm_graph_media_format_pcm(prtd->graph, &cfg);
-	if (ret < 0) {
-		dev_err(dev, "%s: CMD Format block failed\n", __func__);
-		return ret;
+	if (q6apm_dai_formats_graph(substream, hostless)) {
+		ret = q6apm_graph_media_format_pcm(prtd->graph, &cfg);
+		if (ret < 0) {
+			dev_err(dev, "%s: CMD Format block failed\n", __func__);
+			return ret;
+		}
 	}
 
-	/* rate and channels are sent to audio driver */
-	ret = q6apm_graph_media_format_shmem(prtd->graph, &cfg);
-	if (ret < 0) {
-		dev_err(dev, "Failed to set media format %d\n", ret);
-		return ret;
+	if (!hostless) {
+		ret = q6apm_graph_media_format_shmem(prtd->graph, &cfg);
+		if (ret < 0) {
+			dev_err(dev, "Failed to set media format %d\n", ret);
+			return ret;
+		}
 	}
 
 	ret = q6apm_graph_prepare(prtd->graph);
@@ -387,7 +402,7 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 		dev_err(dev, "Failed to Start Graph %d\n", ret);
 		return ret;
 	}
-	if (!q6apm_is_graph_in_push_pull_mode(prtd->graph)) {
+	if (!hostless && !q6apm_is_graph_in_push_pull_mode(prtd->graph)) {
 		if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
 			int i;
 			/* Queue the buffers for Capture ONLY after graph is started */
@@ -409,7 +424,8 @@ static int q6apm_dai_ack(struct snd_soc_component *component, struct snd_pcm_sub
 	struct q6apm_dai_rtd *prtd = runtime->private_data;
 	int i, ret = 0, avail_periods;
 
-	if (q6apm_is_graph_in_push_pull_mode(prtd->graph))
+	if (q6apm_graph_is_hostless(prtd->graph) ||
+	    q6apm_is_graph_in_push_pull_mode(prtd->graph))
 		return 0;
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -500,6 +516,12 @@ static int q6apm_dai_open(struct snd_soc_component *component,
 		goto err;
 	}
 
+	if (q6apm_graph_is_hostless(prtd->graph)) {
+		runtime->hw.channels_min = 1;
+		runtime->hw.period_bytes_min = PLAYBACK_MIN_PERIOD_SIZE;
+		goto setup_runtime;
+	}
+
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		ret = snd_pcm_hw_constraint_minmax(runtime, SNDRV_PCM_HW_PARAM_BUFFER_BYTES,
 						   BUFFER_BYTES_MIN, BUFFER_BYTES_MAX);
@@ -522,6 +544,7 @@ static int q6apm_dai_open(struct snd_soc_component *component,
 		goto err;
 	}
 
+setup_runtime:
 	runtime->private_data = prtd;
 	runtime->dma_bytes = BUFFER_BYTES_MAX;
 	if (pdata->sid < 0)
@@ -562,7 +585,8 @@ static int q6apm_dai_close(struct snd_soc_component *component,
 	if (prtd->state) {
 		/* only stop graph that is started */
 		q6apm_graph_stop(prtd->graph);
-		q6apm_free_fragments(prtd->graph, substream->stream);
+		if (!q6apm_graph_is_hostless(prtd->graph))
+			q6apm_free_fragments(prtd->graph, substream->stream);
 	}
 
 	q6apm_graph_close(prtd->graph);
@@ -579,6 +603,9 @@ static snd_pcm_uframes_t q6apm_dai_pointer(struct snd_soc_component *component,
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct q6apm_dai_rtd *prtd = runtime->private_data;
 	snd_pcm_uframes_t ptr;
+
+	if (q6apm_graph_is_hostless(prtd->graph))
+		return 0;
 
 	if (q6apm_is_graph_in_push_pull_mode(prtd->graph)) {
 		int retries = 10;
@@ -700,6 +727,10 @@ static int q6apm_dai_pcm_new(struct snd_soc_component *component, struct snd_soc
 
 
 	if (substream) {
+		if (q6apm_is_graph_hostless_from_id(component->dev, graph_id))
+			return snd_pcm_set_fixed_buffer_all(pcm, SNDRV_DMA_TYPE_VMALLOC,
+						    component->dev, size);
+
 		is_push_pull = q6apm_is_graph_in_push_pull_mode_from_id(component->dev,
 									graph_id,
 									substream->stream);
@@ -734,6 +765,9 @@ static void q6apm_dai_memory_unmap(struct snd_soc_component *component,
 		return;
 
 	graph_id = cpu_dai->driver->id;
+	if (q6apm_is_graph_hostless_from_id(component->dev, graph_id))
+		return;
+
 	q6apm_unmap_memory_fixed_region(component->dev, graph_id);
 
 	if (q6apm_is_graph_in_push_pull_mode_from_id(component->dev, graph_id, substream->stream))

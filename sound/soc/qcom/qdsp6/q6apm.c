@@ -1013,6 +1013,24 @@ bool q6apm_is_graph_in_push_pull_mode(struct q6apm_graph *graph)
 }
 EXPORT_SYMBOL_GPL(q6apm_is_graph_in_push_pull_mode);
 
+bool q6apm_is_graph_hostless_from_id(struct device *dev, unsigned int graph_id)
+{
+	struct q6apm *apm = dev_get_drvdata(dev->parent);
+	struct audioreach_graph_info *info;
+
+	guard(mutex)(&apm->lock);
+
+	info = idr_find(&apm->graph_info_idr, graph_id);
+	if (!info)
+		return false;
+
+	return !__q6apm_find_module_by_mid(apm, info, MODULE_ID_SH_MEM_PULL_MODE) &&
+		!__q6apm_find_module_by_mid(apm, info, MODULE_ID_WR_SHARED_MEM_EP) &&
+		!__q6apm_find_module_by_mid(apm, info, MODULE_ID_SH_MEM_PUSH_MODE) &&
+		!__q6apm_find_module_by_mid(apm, info, MODULE_ID_RD_SHARED_MEM_EP);
+}
+EXPORT_SYMBOL_GPL(q6apm_is_graph_hostless_from_id);
+
 static int q6apm_graph_get_module_iid(struct q6apm_graph *graph, uint32_t mid)
 {
 	struct audioreach_module *module;
@@ -1067,8 +1085,12 @@ struct q6apm_graph *q6apm_graph_open(struct device *dev, q6apm_cb cb,
 			graph->info->is_push_pull_mode = true;
 	}
 
-	if (iid > 0)
+	if (iid > 0) {
 		graph->shm_iid = iid;
+	} else if (!q6apm_is_graph_hostless_from_id(dev, graph_id)) {
+		ret = -EINVAL;
+		goto free_graph;
+	}
 
 	mutex_init(&graph->lock);
 	init_waitqueue_head(&graph->cmd_wait);

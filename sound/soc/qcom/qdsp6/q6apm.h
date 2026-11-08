@@ -192,6 +192,13 @@ int q6apm_remove_trailing_silence(struct device *dev, struct q6apm_graph *graph,
 int q6apm_set_real_module_id(struct device *dev, struct q6apm_graph *graph, uint32_t codec_id);
 int q6apm_get_hw_pointer(struct q6apm_graph *graph, int dir);
 bool q6apm_is_graph_in_push_pull_mode(struct q6apm_graph *graph);
+bool q6apm_is_graph_hostless_from_id(struct device *dev, unsigned int graph_id);
+
+static inline bool q6apm_graph_is_hostless(struct q6apm_graph *graph)
+{
+	return !graph->shm_iid;
+}
+
 bool q6apm_is_graph_in_push_pull_mode_from_id(struct device *dev, unsigned int graph_id, int dir);
 int q6apm_push_pull_config(struct q6apm_graph *graph, phys_addr_t bphys,
 			   phys_addr_t pphys, uint32_t size);
