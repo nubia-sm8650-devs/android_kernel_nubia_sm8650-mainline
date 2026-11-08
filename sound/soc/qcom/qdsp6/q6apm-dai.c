@@ -453,6 +453,9 @@ static int q6apm_dai_open(struct snd_soc_component *component,
 
 	return 0;
 err:
+	if (!IS_ERR(prtd->graph))
+		q6apm_graph_close(prtd->graph);
+
 	kfree(prtd);
 
 	return ret;
