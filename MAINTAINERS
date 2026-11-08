@@ -22129,6 +22129,7 @@ L:	linux-arm-msm@vger.kernel.org
 S:	Supported
 F:	Documentation/devicetree/bindings/soc/qcom/qcom,apr*
 F:	Documentation/devicetree/bindings/sound/qcom,*
+F:	Documentation/sound/soc/audioreach.rst
 F:	drivers/soc/qcom/apr.c
 F:	drivers/soundwire/qcom.c
 F:	include/dt-bindings/sound/qcom,wcd93*
