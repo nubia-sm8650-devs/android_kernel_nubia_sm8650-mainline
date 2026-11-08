@@ -1626,6 +1626,54 @@ static int audioreach_connect_sub_graphs(struct q6apm *apm,
 	return 0;
 }
 
+static int audioreach_get_connection(struct snd_kcontrol *kcontrol,
+				     struct snd_ctl_elem_value *ucontrol)
+{
+	struct soc_mixer_control *mc = (void *)kcontrol->private_value;
+	struct snd_ar_control *control = mc->dobj.private;
+	struct q6apm *apm = dev_get_drvdata(control->scomp->dev);
+
+	guard(mutex)(&apm->graph_lock);
+
+	ucontrol->value.integer.value[0] = !list_empty(&control->route.node);
+
+	return 0;
+}
+
+static int audioreach_put_connection(struct snd_kcontrol *kcontrol,
+				     struct snd_ctl_elem_value *ucontrol)
+{
+	struct soc_mixer_control *mc = (void *)kcontrol->private_value;
+	struct snd_ar_control *control = mc->dobj.private;
+	struct q6apm *apm = dev_get_drvdata(control->scomp->dev);
+	u32 src_graph_id = 0, dst_graph_id = 0;
+	int i;
+
+	scoped_guard(mutex, &apm->lock) {
+		for (i = 0; i < control->route.num_links; i++) {
+			const struct audioreach_connection *link = &control->route.links[i];
+			struct audioreach_module *src, *dst;
+			u32 src_id, dst_id;
+
+			src = idr_find(&apm->modules_idr, link->src_mod_inst_id);
+			dst = idr_find(&apm->modules_idr, link->dst_mod_inst_id);
+			if (!src || !dst)
+				return -ENODEV;
+
+			src_id = src->container->sub_graph->info->id;
+			dst_id = dst->container->sub_graph->info->id;
+			if (i && (src_graph_id != src_id || dst_graph_id != dst_id))
+				return -EINVAL;
+
+			src_graph_id = src_id;
+			dst_graph_id = dst_id;
+		}
+	}
+
+	return audioreach_connect_route(apm, &control->route, src_graph_id, dst_graph_id,
+					 ucontrol->value.integer.value[0] & 1);
+}
+
 static bool audioreach_is_vmixer_connected(struct q6apm *apm,
 					   const struct snd_ar_control *m1,
 					   const struct snd_ar_control *m2)
@@ -2096,6 +2144,22 @@ static int audioreach_control_load(struct snd_soc_component *scomp, int index,
 	INIT_LIST_HEAD(&scontrol->route.node);
 
 	switch (le32_to_cpu(hdr->ops.get)) {
+	case SND_SOC_TPLG_CTL_VOLSW: {
+		struct snd_soc_tplg_mixer_control *mc =
+			container_of(hdr, struct snd_soc_tplg_mixer_control, hdr);
+
+		sm = (struct soc_mixer_control *)kc->private_value;
+		ret = audioreach_control_load_links(&scontrol->route, &mc->priv);
+		if (ret || !scontrol->route.num_links || sm->reg != SND_SOC_NOPM ||
+		    sm->min || sm->max != 1 || snd_soc_volsw_is_stereo(sm)) {
+			kfree(scontrol->route.links);
+			kfree(scontrol);
+			return ret ?: -EINVAL;
+		}
+
+		dobj = &sm->dobj;
+		break;
+	}
 	case SND_SOC_AR_TPLG_FE_BE_GRAPH_CTL_MIX:
 		sm = (struct soc_mixer_control *)kc->private_value;
 		dobj = &sm->dobj;
@@ -2143,6 +2207,8 @@ static int audioreach_control_unload(struct snd_soc_component *scomp,
 }
 
 static const struct snd_soc_tplg_kcontrol_ops audioreach_io_ops[] = {
+	{ SND_SOC_TPLG_CTL_VOLSW, audioreach_get_connection,
+		audioreach_put_connection, snd_soc_info_volsw },
 	{ SND_SOC_TPLG_DAPM_CTL_VOLSW, snd_soc_dapm_get_volsw,
 		audioreach_put_dapm_switch, snd_soc_info_volsw },
 	{SND_SOC_AR_TPLG_FE_BE_GRAPH_CTL_MIX, audioreach_get_audio_mixer,
