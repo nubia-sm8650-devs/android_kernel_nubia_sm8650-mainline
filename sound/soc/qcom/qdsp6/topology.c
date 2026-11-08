@@ -455,6 +455,56 @@ static struct audioreach_container *audioreach_parse_cont_tokens(struct q6apm *a
 	return cont;
 }
 
+static int audioreach_parse_extra_links(const struct snd_soc_tplg_private *priv,
+					struct audioreach_connection *links, u32 instance_id)
+{
+	const u8 *data = (const u8 *)priv->data;
+	u32 remaining = le32_to_cpu(priv->size);
+	int count = 0;
+
+	while (remaining) {
+		const struct snd_soc_tplg_vendor_array *array = (const void *)data;
+		u32 size, n;
+
+		if (remaining < sizeof(*array))
+			return -EINVAL;
+
+		size = le32_to_cpu(array->size);
+		if (size < sizeof(*array) || size > remaining)
+			return -EINVAL;
+
+		data += size;
+		remaining -= size;
+
+		if (le32_to_cpu(array->type) != SND_SOC_TPLG_TUPLE_TYPE_WORD)
+			continue;
+
+		n = le32_to_cpu(array->num_elems);
+		if (size < struct_size(array, value, n))
+			return -EINVAL;
+
+		if (!n || le32_to_cpu(array->value[0].token) != AR_TKN_U32_MODULE_SRC_OP_PORT_ID)
+			continue;
+
+		if (n != 3 ||
+		    le32_to_cpu(array->value[1].token) != AR_TKN_U32_MODULE_DST_IN_PORT_ID ||
+		    le32_to_cpu(array->value[2].token) != AR_TKN_U32_MODULE_DST_INSTANCE_ID ||
+		    !array->value[0].value || !array->value[1].value || !array->value[2].value)
+			return -EINVAL;
+
+		if (links) {
+			links[count].src_mod_inst_id = instance_id;
+			links[count].src_mod_op_port_id = le32_to_cpu(array->value[0].value);
+			links[count].dst_mod_ip_port_id = le32_to_cpu(array->value[1].value);
+			links[count].dst_mod_inst_id = le32_to_cpu(array->value[2].value);
+		}
+
+		count++;
+	}
+
+	return count;
+}
+
 static struct audioreach_module *audioreach_parse_common_tokens(struct q6apm *apm,
 							struct audioreach_container *cont,
 							const struct snd_soc_tplg_private *private,
@@ -474,7 +524,7 @@ static struct audioreach_module *audioreach_parse_common_tokens(struct q6apm *ap
 	uint32_t token;
 	bool found, has_instance = false;
 	int max_tokens;
-	int pn, id = 0;
+	int pn, extra, id = 0;
 
 	mod_array = audioreach_get_module_array(private);
 	mod_elem = mod_array->value;
@@ -587,9 +637,16 @@ static struct audioreach_module *audioreach_parse_common_tokens(struct q6apm *ap
 			id++;
 	}
 
-	connections = kcalloc(id, sizeof(*connections), GFP_KERNEL);
-	if (!connections && id)
+	extra = audioreach_parse_extra_links(private, NULL, instance_id);
+	if (extra < 0)
+		return ERR_PTR(extra);
+
+	connections = kcalloc(id + extra, sizeof(*connections), GFP_KERNEL);
+	if (!connections && (id + extra))
 		return ERR_PTR(-ENOMEM);
+
+	if (extra)
+		audioreach_parse_extra_links(private, connections + id, instance_id);
 
 	mod = audioreach_tplg_alloc_module(apm, cont, w, instance_id, &found);
 	if (IS_ERR(mod) || found) {
@@ -602,7 +659,7 @@ static struct audioreach_module *audioreach_parse_common_tokens(struct q6apm *ap
 	mod->max_op_port = max_op_port;
 	mod->src_mod_inst_id = src_mod_inst_id;
 	mod->connections = connections;
-	mod->num_connections = id;
+	mod->num_connections = id + extra;
 
 	id = 0;
 
