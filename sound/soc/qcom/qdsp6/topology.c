@@ -388,6 +388,10 @@ static struct audioreach_sub_graph *audioreach_parse_sg_tokens(struct q6apm *apm
 		case AR_TKN_U32_SUB_GRAPH_SCENARIO_ID:
 			sg->scenario_id = le32_to_cpu(sg_elem->value);
 			break;
+		case AR_TKN_U32_SUB_GRAPH_VSID:
+			sg->vsid = le32_to_cpu(sg_elem->value);
+			sg->has_vsid = true;
+			break;
 		default:
 			dev_err(apm->dev, "Not a valid token %d for graph\n", sg_elem->token);
 			break;
@@ -436,6 +440,18 @@ static struct audioreach_container *audioreach_parse_cont_tokens(struct q6apm *a
 			break;
 		case AR_TKN_U32_CONTAINER_PROC_DOMAIN:
 			cont->proc_domain = le32_to_cpu(cont_elem->value);
+			break;
+		case AR_TKN_U32_CONTAINER_PARENT_ID:
+			cont->parent_container_id = le32_to_cpu(cont_elem->value);
+			cont->has_parent_container_id = true;
+			break;
+		case AR_TKN_U32_CONTAINER_HEAP_ID:
+			cont->heap_id = le32_to_cpu(cont_elem->value);
+			cont->has_heap_id = true;
+			break;
+		case AR_TKN_U32_CONTAINER_PEER_HEAP_ID:
+			cont->peer_heap_id = le32_to_cpu(cont_elem->value);
+			cont->has_peer_heap_id = true;
 			break;
 		default:
 			dev_err(apm->dev, "Not a valid token %d for graph\n", cont_elem->token);

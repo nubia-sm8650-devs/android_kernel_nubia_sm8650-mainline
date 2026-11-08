@@ -490,8 +490,12 @@ struct apm_sg_prop_id_scenario_id {
 } __packed;
 
 #define APM_SG_PROP_ID_SID_SIZE			4
+#define APM_SUB_GRAPH_PROP_ID_VSID		0x080010CC
 /* container api */
 #define APM_PARAM_ID_CONTAINER_CONFIG		0x08001000
+#define APM_CONTAINER_PROP_ID_PARENT_CONTAINER_ID	0x080010CB
+#define APM_CONTAINER_PROP_ID_HEAP_ID		0x08001174
+#define APM_CONTAINER_PROP_ID_PEER_HEAP_ID		0x0800124D
 
 struct apm_param_id_container_cfg {
 	uint32_t num_containers;
@@ -934,6 +938,8 @@ struct audioreach_sub_graph {
 	uint32_t direction;
 	uint32_t scenario_id;
 	struct list_head node;
+	u32 vsid;
+	bool has_vsid;
 
 	struct audioreach_graph_info *info;
 	uint32_t num_containers;
@@ -947,6 +953,12 @@ struct audioreach_container {
 	uint32_t stack_size;
 	uint32_t proc_domain;
 	struct list_head node;
+	u32 parent_container_id;
+	u32 heap_id;
+	u32 peer_heap_id;
+	bool has_parent_container_id;
+	bool has_heap_id;
+	bool has_peer_heap_id;
 
 	uint32_t num_modules;
 	struct list_head modules_list;

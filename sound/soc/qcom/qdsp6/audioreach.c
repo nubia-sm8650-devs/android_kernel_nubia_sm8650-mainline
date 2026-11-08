@@ -118,6 +118,11 @@ struct apm_graph_open_params {
 	struct apm_mod_conn_list_params *mod_conn_list_data;
 } __packed;
 
+struct apm_u32_property {
+	struct apm_prop_data data;
+	u32 value;
+} __packed;
+
 struct apm_pcm_module_media_fmt_cmd {
 	struct apm_module_param_data param_data;
 	struct param_id_pcm_output_format_cfg header;
@@ -308,17 +313,31 @@ EXPORT_SYMBOL_GPL(audioreach_alloc_apm_cmd_pkt);
 
 static size_t apm_container_config_size(const struct audioreach_container *cont)
 {
-	return sizeof(struct apm_container_obj);
+	return sizeof(struct apm_container_obj) + sizeof(struct apm_u32_property) *
+		(cont->has_parent_container_id + cont->has_heap_id + cont->has_peer_heap_id);
 }
 
 static size_t apm_sub_graph_config_size(const struct audioreach_sub_graph *sg)
 {
-	return sizeof(struct apm_sub_graph_data);
+	return sizeof(struct apm_sub_graph_data) +
+		sizeof(struct apm_u32_property) * sg->has_vsid;
+}
+
+static void *apm_populate_u32_property(void *cursor, u32 id, u32 value)
+{
+	struct apm_u32_property *prop = cursor;
+
+	prop->data.prop_id = id;
+	prop->data.prop_size = sizeof(prop->value);
+	prop->value = value;
+
+	return prop + 1;
 }
 
 static void apm_populate_container_config(struct apm_container_obj *cfg,
 					  const struct audioreach_container *cont)
 {
+	void *cursor = cfg + 1;
 
 	/* Container Config */
 	cfg->container_cfg.container_id = cont->container_id;
@@ -344,6 +363,25 @@ static void apm_populate_container_config(struct apm_container_obj *cfg,
 	cfg->domain_data.prop_id = APM_CONTAINER_PROP_ID_PROC_DOMAIN;
 	cfg->domain_data.prop_size = sizeof(struct apm_cont_prop_id_domain);
 	cfg->domain.proc_domain = cont->proc_domain;
+
+	if (cont->has_parent_container_id) {
+		cursor = apm_populate_u32_property(cursor,
+						   APM_CONTAINER_PROP_ID_PARENT_CONTAINER_ID,
+						   cont->parent_container_id);
+		cfg->container_cfg.num_prop++;
+	}
+
+	if (cont->has_heap_id) {
+		cursor = apm_populate_u32_property(cursor, APM_CONTAINER_PROP_ID_HEAP_ID,
+						   cont->heap_id);
+		cfg->container_cfg.num_prop++;
+	}
+
+	if (cont->has_peer_heap_id) {
+		apm_populate_u32_property(cursor, APM_CONTAINER_PROP_ID_PEER_HEAP_ID,
+					  cont->peer_heap_id);
+		cfg->container_cfg.num_prop++;
+	}
 }
 
 static void apm_populate_sub_graph_config(struct apm_sub_graph_data *cfg,
@@ -366,6 +404,11 @@ static void apm_populate_sub_graph_config(struct apm_sub_graph_data *cfg,
 	cfg->sid_data.prop_id = APM_SUB_GRAPH_PROP_ID_SCENARIO_ID;
 	cfg->sid_data.prop_size = APM_SG_PROP_ID_SID_SIZE;
 	cfg->sid.scenario_id = sg->scenario_id;
+
+	if (sg->has_vsid) {
+		apm_populate_u32_property(cfg + 1, APM_SUB_GRAPH_PROP_ID_VSID, sg->vsid);
+		cfg->sub_graph_cfg.num_sub_graph_prop++;
+	}
 }
 
 static void apm_populate_module_prop_obj(struct apm_mod_prop_obj *obj,
