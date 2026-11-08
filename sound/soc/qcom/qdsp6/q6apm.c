@@ -906,8 +906,6 @@ static int graph_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 		atomic_set(&graph->rx_data.hw_ptr, token + 1);
 		if (lower_32_bits(phys) == done->buf_addr_lsw &&
 		    upper_32_bits(phys) == done->buf_addr_msw) {
-			graph->result.opcode = hdr->opcode;
-			graph->result.status = done->status;
 			if (graph->cb)
 				graph->cb(client_event, hdr->token, data->payload, graph->priv);
 		} else {
@@ -933,8 +931,6 @@ static int graph_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 
 		if (upper_32_bits(phys) == rd_done->buf_addr_msw &&
 		    lower_32_bits(phys) == rd_done->buf_addr_lsw) {
-			graph->result.opcode = hdr->opcode;
-			graph->result.status = rd_done->status;
 			if (graph->cb)
 				graph->cb(client_event, hdr->token, data->payload, graph->priv);
 		} else {
@@ -1093,6 +1089,7 @@ struct q6apm_graph *q6apm_graph_open(struct device *dev, q6apm_cb cb,
 	}
 
 	mutex_init(&graph->lock);
+	mutex_init(&graph->cmd_lock);
 	init_waitqueue_head(&graph->cmd_wait);
 
 	graph->port = gpr_alloc_port(apm->gdev, dev, graph_callback, graph);

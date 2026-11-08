@@ -690,7 +690,7 @@ int audioreach_graph_send_cmd_sync(struct q6apm_graph *graph, const struct gpr_p
 				   uint32_t rsp_opcode)
 {
 
-	return audioreach_send_cmd_sync(graph->dev, NULL,  &graph->result, &graph->lock,
+	return audioreach_send_cmd_sync(graph->dev, NULL, &graph->result, &graph->cmd_lock,
 					graph->port, &graph->cmd_wait, pkt, rsp_opcode);
 }
 EXPORT_SYMBOL_GPL(audioreach_graph_send_cmd_sync);
