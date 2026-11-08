@@ -46,6 +46,15 @@ int q6dsp_map_channels(u8 ch_map[PCM_MAX_NUM_CHANNEL], int ch)
 		ch_map[4] = PCM_CHANNEL_LS;
 		ch_map[5] = PCM_CHANNEL_RS;
 		break;
+	case 7:
+		ch_map[0] = PCM_CHANNEL_FL;
+		ch_map[1] = PCM_CHANNEL_FR;
+		ch_map[2] = PCM_CHANNEL_LFE;
+		ch_map[3] = PCM_CHANNEL_FC;
+		ch_map[4] = PCM_CHANNEL_LS;
+		ch_map[5] = PCM_CHANNEL_RS;
+		ch_map[6] = PCM_CHANNEL_CS;
+		break;
 	case 8:
 		ch_map[0] = PCM_CHANNEL_FL;
 		ch_map[1] = PCM_CHANNEL_FR;
