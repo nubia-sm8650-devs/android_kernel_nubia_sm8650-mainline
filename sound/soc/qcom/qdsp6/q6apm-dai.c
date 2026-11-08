@@ -221,7 +221,7 @@ static void q6apm_dai_free_graphs(struct q6apm_dai_rtd *prtd)
 {
 	struct q6apm_graph *root = prtd->graph;
 
-	audioreach_stop_graphs(root);
+	audioreach_stop_graphs(root, 0);
 
 	while (root->num_connected)
 		q6apm_graph_close(root->connected[--root->num_connected]);
@@ -323,7 +323,7 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 		q6apm_free_fragments(prtd->graph, substream->stream);
 	}
 
-	audioreach_stop_graphs(prtd->graph);
+	audioreach_stop_graphs(prtd->graph, 0);
 
 	prtd->last_pos_index = 0;
 	prtd->pcm_count = snd_pcm_lib_period_bytes(substream);
@@ -380,7 +380,7 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 
 	ret = q6apm_graph_start(prtd->graph);
 	if (ret) {
-		audioreach_stop_graphs(prtd->graph);
+		audioreach_stop_graphs(prtd->graph, 0);
 		dev_err(dev, "Failed to Start Graph %d\n", ret);
 		return ret;
 	}

@@ -1138,9 +1138,9 @@ static bool audioreach_graph_is_connected(struct q6apm_graph *graph,
 	return false;
 }
 
-void audioreach_stop_graphs(struct q6apm_graph *root)
+void audioreach_stop_graphs(struct q6apm_graph *root, unsigned int first)
 {
-	while (root->num_started) {
+	while (root->num_started > first) {
 		struct q6apm_graph *graph = root->connected[--root->num_started];
 		int ret = q6apm_graph_stop(graph);
 
@@ -1153,6 +1153,7 @@ EXPORT_SYMBOL_GPL(audioreach_stop_graphs);
 int audioreach_prepare_graphs(struct q6apm_graph *root,
 			      const struct snd_soc_dapm_widget_list *list, int stream)
 {
+	unsigned int first = root->num_started;
 	int i, ret;
 
 	for (i = root->num_started; i < root->num_connected; i++) {
@@ -1176,7 +1177,7 @@ int audioreach_prepare_graphs(struct q6apm_graph *root,
 	return 0;
 
 err:
-	audioreach_stop_graphs(root);
+	audioreach_stop_graphs(root, first);
 
 	return ret;
 }
