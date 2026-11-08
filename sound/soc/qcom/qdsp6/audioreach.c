@@ -1158,6 +1158,11 @@ static int audioreach_logging_set_media_format(struct q6apm_graph *graph,
 	return q6apm_send_cmd_sync(graph->apm, pkt, 0);
 }
 
+static unsigned int audioreach_pcm_word_bits(const struct audioreach_module_config *cfg)
+{
+	return cfg->bits_per_sample ?: (cfg->bit_width == 24 ? 32 : cfg->bit_width);
+}
+
 static int audioreach_pcm_set_media_format(struct q6apm_graph *graph,
 					   const struct audioreach_module *module,
 					   const struct audioreach_module_config *mcfg)
@@ -1195,7 +1200,12 @@ static int audioreach_pcm_set_media_format(struct q6apm_graph *graph,
 	media_cfg->interleaved = module->interleave_type;
 	media_cfg->num_channels = mcfg->num_channels;
 	media_cfg->q_factor = mcfg->bit_width - 1;
-	media_cfg->bits_per_sample = mcfg->bit_width;
+	media_cfg->bits_per_sample = audioreach_pcm_word_bits(mcfg);
+	if (mcfg->bit_width == 24 && mcfg->direction == SNDRV_PCM_STREAM_PLAYBACK) {
+		media_cfg->bits_per_sample = 32;
+		media_cfg->q_factor = 27;
+	}
+
 	/* Convert the physical mapping to a logical mapping of the channels */
 	for (i = 0, j = 0; i < PCM_MAX_NUM_CHANNEL && j < mcfg->num_channels; i++) {
 		if (!mcfg->channel_map[i])
@@ -1282,7 +1292,7 @@ static int audioreach_shmem_set_media_format(struct q6apm_graph *graph,
 		cfg->sample_rate = mcfg->sample_rate;
 		cfg->bit_width = mcfg->bit_width;
 		cfg->alignment = PCM_LSB_ALIGNED;
-		cfg->bits_per_sample = mcfg->bit_width;
+		cfg->bits_per_sample = audioreach_pcm_word_bits(mcfg);
 		cfg->q_factor = mcfg->bit_width - 1;
 		cfg->endianness = PCM_LITTLE_ENDIAN;
 		cfg->num_channels = mcfg->num_channels;
