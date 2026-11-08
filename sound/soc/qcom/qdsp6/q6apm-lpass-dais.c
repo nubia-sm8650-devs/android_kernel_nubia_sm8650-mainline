@@ -32,8 +32,71 @@ struct q6apm_lpass_dai_data {
 	struct q6apm_graph *graph[APM_PORT_MAX];
 	bool is_port_started[APM_PORT_MAX];
 	struct audioreach_module_config module_config[APM_PORT_MAX];
+	u16 data_format[APM_PORT_MAX];
 	struct q6apm_dai_priv_data priv[APM_PORT_MAX];
 };
+
+static const char * const q6apm_data_format_text[] = {
+	"Topology", "Fixed Point", "IEC61937", "IEC60958", "DSD over PCM",
+	"Generic Compressed", "Raw Compressed", "Compressed over PCM",
+	"IEC60958 Non-Linear",
+};
+
+static int q6apm_data_format_info(struct snd_kcontrol *kcontrol,
+				  struct snd_ctl_elem_info *uinfo)
+{
+	return snd_ctl_enum_info(uinfo, 1, ARRAY_SIZE(q6apm_data_format_text),
+				 q6apm_data_format_text);
+}
+
+static u16 *q6apm_data_format_of(struct snd_kcontrol *kcontrol)
+{
+	struct snd_soc_dai *dai = snd_kcontrol_chip(kcontrol);
+	struct q6apm_lpass_dai_data *data = dev_get_drvdata(dai->dev);
+
+	return &data->data_format[dai->id];
+}
+
+static int q6apm_data_format_get(struct snd_kcontrol *kcontrol,
+				 struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.enumerated.item[0] = READ_ONCE(*q6apm_data_format_of(kcontrol));
+
+	return 0;
+}
+
+static int q6apm_data_format_put(struct snd_kcontrol *kcontrol,
+				 struct snd_ctl_elem_value *ucontrol)
+{
+	unsigned int format = ucontrol->value.enumerated.item[0];
+	u16 *value = q6apm_data_format_of(kcontrol);
+
+	if (format >= ARRAY_SIZE(q6apm_data_format_text))
+		return -EINVAL;
+
+	if (READ_ONCE(*value) == format)
+		return 0;
+
+	WRITE_ONCE(*value, format);
+
+	return 1;
+}
+
+static int q6apm_data_format_probe(struct snd_soc_dai *dai)
+{
+	struct snd_kcontrol_new control = {
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.info = q6apm_data_format_info,
+		.get = q6apm_data_format_get,
+		.put = q6apm_data_format_put,
+	};
+
+	control.name = devm_kasprintf(dai->dev, GFP_KERNEL, "%s Data Format", dai->name);
+	if (!control.name)
+		return -ENOMEM;
+
+	return snd_soc_add_dai_controls(dai, &control, 1);
+}
 
 static void q6apm_lpass_dai_disable_clocks(struct q6apm_lpass_dai_data *dai_data, int id)
 {
@@ -306,6 +369,7 @@ static int q6apm_lpass_dai_prepare(struct snd_pcm_substream *substream, struct s
 	}
 
 	cfg->direction = substream->stream;
+	cfg->data_format = READ_ONCE(dai_data->data_format[dai->id]);
 	rc = q6apm_graph_media_format_pcm(dai_data->graph[dai->id], cfg);
 	if (rc) {
 		dev_err(dai->dev, "Failed to set media format %d\n", rc);
@@ -458,6 +522,7 @@ static int q6tdm_set_tdm_slot(struct snd_soc_dai *dai,
 }
 
 static const struct snd_soc_dai_ops q6dma_ops = {
+	.probe		= q6apm_data_format_probe,
 	.prepare	= q6apm_lpass_dai_prepare,
 	.startup	= q6apm_lpass_dai_startup,
 	.shutdown	= q6apm_lpass_dai_shutdown,
@@ -467,6 +532,7 @@ static const struct snd_soc_dai_ops q6dma_ops = {
 };
 
 static const struct snd_soc_dai_ops q6i2s_ops = {
+	.probe		= q6apm_data_format_probe,
 	.prepare	= q6apm_lpass_dai_prepare,
 	.startup	= q6i2s_dai_startup,
 	.shutdown	= q6i2s_lpass_dai_shutdown,
@@ -478,6 +544,7 @@ static const struct snd_soc_dai_ops q6i2s_ops = {
 };
 
 static const struct snd_soc_dai_ops q6hdmi_ops = {
+	.probe		= q6apm_data_format_probe,
 	.prepare	= q6apm_lpass_dai_prepare,
 	.startup	= q6apm_lpass_dai_startup,
 	.shutdown	= q6apm_lpass_dai_shutdown,
@@ -487,6 +554,7 @@ static const struct snd_soc_dai_ops q6hdmi_ops = {
 };
 
 static const struct snd_soc_dai_ops q6tdm_ops = {
+	.probe		= q6apm_data_format_probe,
 	.prepare	= q6apm_lpass_dai_prepare,
 	.startup	= q6apm_lpass_dai_startup,
 	.shutdown	= q6i2s_lpass_dai_shutdown,
@@ -498,6 +566,7 @@ static const struct snd_soc_dai_ops q6tdm_ops = {
 };
 
 static const struct snd_soc_dai_ops q6slim_ops = {
+	.probe		= q6apm_data_format_probe,
 	.prepare	= q6apm_lpass_dai_prepare,
 	.startup	= q6apm_lpass_dai_startup,
 	.shutdown	= q6apm_lpass_dai_shutdown,
@@ -507,6 +576,7 @@ static const struct snd_soc_dai_ops q6slim_ops = {
 };
 
 static const struct snd_soc_dai_ops q6usb_ops = {
+	.probe		= q6apm_data_format_probe,
 	.prepare	= q6apm_lpass_dai_prepare,
 	.startup	= q6apm_lpass_dai_startup,
 	.shutdown	= q6apm_lpass_dai_shutdown,
