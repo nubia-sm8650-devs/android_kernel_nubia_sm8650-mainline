@@ -81,7 +81,6 @@ struct q6apm {
 	struct idr graph_idr;
 	struct idr graph_info_idr;
 	struct idr sub_graphs_idr;
-	struct idr containers_idr;
 	struct idr modules_idr;
 };
 

@@ -456,6 +456,33 @@ static unsigned int audioreach_copy_route_links(struct apm_module_conn_obj *conn
 	return n;
 }
 
+static const struct audioreach_container *
+audioreach_first_container(const struct list_head *sg_list, u32 id)
+{
+	struct audioreach_container *cont;
+	struct audioreach_sub_graph *sg;
+
+	list_for_each_entry(sg, sg_list, node) {
+		list_for_each_entry(cont, &sg->container_list, node) {
+			if (cont->container_id == id)
+				return cont;
+		}
+	}
+
+	return NULL;
+}
+
+static bool audioreach_container_config_matches(const struct audioreach_container *a,
+						const struct audioreach_container *b)
+{
+	return a->capability_id == b->capability_id && a->graph_pos == b->graph_pos &&
+		a->stack_size == b->stack_size && a->proc_domain == b->proc_domain &&
+		a->has_parent_container_id == b->has_parent_container_id &&
+		a->has_heap_id == b->has_heap_id && a->has_peer_heap_id == b->has_peer_heap_id &&
+		a->parent_container_id == b->parent_container_id && a->heap_id == b->heap_id &&
+		a->peer_heap_id == b->peer_heap_id;
+}
+
 static bool audioreach_route_in_graph(struct q6apm *apm,
 				      const struct audioreach_route *route, u32 graph_id)
 {
@@ -525,8 +552,12 @@ static void audioreach_populate_graph(struct q6apm *apm,
 		sg_cfg = (void *)sg_cfg + apm_sub_graph_config_size(sg);
 
 		list_for_each_entry(container, &sg->container_list, node) {
-			apm_populate_container_config(cobj, container);
-			cobj = (void *)cobj + apm_container_config_size(container);
+			if (audioreach_first_container(sg_list, container->container_id) ==
+			    container) {
+				apm_populate_container_config(cobj, container);
+				cobj = (void *)cobj + apm_container_config_size(container);
+			}
+
 			apm_populate_module_list_obj(mlobj, container, sg->sub_graph_id);
 
 			list_for_each_entry(module, &container->modules_list, node) {
@@ -575,12 +606,12 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	int num_containers = 0;
 	int num_sub_graphs = 0;
 	int num_modules = 0;
-	int num_modules_list;
+	int num_modules_list = 0;
 	struct gpr_pkt *pkt;
 	void *p;
 
 	sg_list = &info->sg_list;
-	ml_sz = 0;
+	ml_sz = sizeof(struct apm_module_list_params);
 	sg_sz = 0;
 	cont_sz = 0;
 
@@ -597,11 +628,19 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 		num_sub_graphs++;
 		sg_sz += apm_sub_graph_config_size(sgs);
 		list_for_each_entry(container, &sgs->container_list, node) {
-			num_containers++;
-			cont_sz += apm_container_config_size(container);
+			const struct audioreach_container *first;
+
+			first = audioreach_first_container(sg_list, container->container_id);
+			if (first == container) {
+				num_containers++;
+				cont_sz += apm_container_config_size(container);
+			} else if (!audioreach_container_config_matches(first, container)) {
+				return ERR_PTR(-EINVAL);
+			}
+
+			num_modules_list++;
 			num_modules += container->num_modules;
-			ml_sz = ml_sz + sizeof(struct apm_module_list_params) +
-				APM_MOD_LIST_OBJ_PSIZE(mlobj, container->num_modules);
+			ml_sz += APM_MOD_LIST_OBJ_PSIZE(mlobj, container->num_modules);
 
 			list_for_each_entry(module, &container->modules_list, node) {
 				num_connections += module->num_connections;
@@ -609,7 +648,6 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 		}
 	}
 
-	num_modules_list = num_containers;
 	sg_sz = APM_SUB_GRAPH_PSIZE(sg_params, sg_sz);
 	cont_sz = APM_CONTAINER_PSIZE(cont_params, cont_sz);
 

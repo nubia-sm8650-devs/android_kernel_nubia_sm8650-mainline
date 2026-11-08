@@ -123,19 +123,19 @@ static struct audioreach_container *audioreach_tplg_alloc_container(struct q6apm
 							    bool *found)
 {
 	struct audioreach_container *cont;
-	int ret;
 
 	if (!container_id)
 		return ERR_PTR(-EINVAL);
 
-	mutex_lock(&apm->lock);
-	cont = idr_find(&apm->containers_idr, container_id);
-	mutex_unlock(&apm->lock);
+	guard(mutex)(&apm->lock);
 
-	if (cont) {
-		*found = true;
-		return cont;
+	list_for_each_entry(cont, &sg->container_list, node) {
+		if (cont->container_id == container_id) {
+			*found = true;
+			return cont;
+		}
 	}
+
 	*found = false;
 
 	cont = kzalloc_obj(*cont);
@@ -143,16 +143,6 @@ static struct audioreach_container *audioreach_tplg_alloc_container(struct q6apm
 		return ERR_PTR(-ENOMEM);
 
 	INIT_LIST_HEAD(&cont->modules_list);
-
-	mutex_lock(&apm->lock);
-	ret = idr_alloc_u32(&apm->containers_idr, cont, &container_id, container_id, GFP_KERNEL);
-	mutex_unlock(&apm->lock);
-
-	if (ret < 0) {
-		dev_err(apm->dev, "Failed to allocate Container Instance ID (%x)\n", container_id);
-		kfree(cont);
-		return ERR_PTR(ret);
-	}
 
 	cont->container_id = container_id;
 	cont->sub_graph = sg;
@@ -1504,7 +1494,6 @@ static int audioreach_widget_unload(struct snd_soc_component *scomp,
 	if (list_empty(&cont->modules_list)) { /* if no modules in the container then remove it */
 		struct audioreach_sub_graph *sg = cont->sub_graph;
 
-		idr_remove(&apm->containers_idr, cont->container_id);
 		list_del(&cont->node);
 		sg->num_containers--;
 		kfree(cont);
