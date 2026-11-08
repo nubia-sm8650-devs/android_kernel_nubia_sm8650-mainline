@@ -127,6 +127,8 @@ struct q6apm_graph {
 	struct audioreach_graph_data tx_data;
 	struct gpr_ibasic_rsp_result_t result;
 	wait_queue_head_t cmd_wait;
+	u32 cmd_token;
+	u32 cmd_opcode;
 	struct mutex cmd_lock; /* Buffer completion callbacks must not acquire this mutex. */
 	struct mutex lock;
 	struct audioreach_graph *ar_graph;

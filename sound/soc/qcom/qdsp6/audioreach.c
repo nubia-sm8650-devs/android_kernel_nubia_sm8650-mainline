@@ -694,12 +694,28 @@ int audioreach_send_cmd_sync(struct device *dev, gpr_device_t *gdev,
 }
 EXPORT_SYMBOL_GPL(audioreach_send_cmd_sync);
 
-int audioreach_graph_send_cmd_sync(struct q6apm_graph *graph, const struct gpr_pkt *pkt,
+int audioreach_graph_send_cmd_sync(struct q6apm_graph *graph, struct gpr_pkt *pkt,
 				   uint32_t rsp_opcode)
 {
+	int ret;
 
-	return audioreach_send_cmd_sync(graph->dev, NULL, &graph->result, &graph->cmd_lock,
-					graph->port, &graph->cmd_wait, pkt, rsp_opcode);
+	guard(mutex)(&graph->cmd_lock);
+
+	scoped_guard(mutex, &graph->lock) {
+		pkt->hdr.token = ++graph->cmd_token;
+		if (!pkt->hdr.token)
+			pkt->hdr.token = ++graph->cmd_token;
+
+		graph->cmd_opcode = pkt->hdr.opcode;
+	}
+
+	ret = __audioreach_send_cmd_sync(graph->dev, NULL, &graph->result, graph->port,
+					 &graph->cmd_wait, pkt, rsp_opcode);
+
+	scoped_guard(mutex, &graph->lock)
+		graph->cmd_opcode = 0;
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(audioreach_graph_send_cmd_sync);
 

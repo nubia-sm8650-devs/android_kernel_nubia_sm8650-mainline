@@ -887,19 +887,35 @@ static int q6apm_graph_event(struct q6apm_graph *graph, const struct gpr_resp_pk
 	return 0;
 }
 
+static int q6apm_graph_response(struct q6apm_graph *graph, const struct gpr_resp_pkt *data)
+{
+	const struct gpr_ibasic_rsp_result_t *result = data->payload;
+
+	if (data->payload_size < sizeof(*result))
+		return -EPROTO;
+
+	guard(mutex)(&graph->lock);
+
+	if (!graph->cmd_opcode || data->hdr.token != graph->cmd_token ||
+	    result->opcode != graph->cmd_opcode)
+		return 0;
+
+	graph->result = *result;
+	wake_up(&graph->cmd_wait);
+
+	return 0;
+}
+
 static int graph_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 {
 	struct data_cmd_rsp_rd_sh_mem_ep_data_buffer_done_v2 *rd_done;
 	struct data_cmd_rsp_wr_sh_mem_ep_data_buffer_done_v2 *done;
-	const struct gpr_ibasic_rsp_result_t *result;
 	struct q6apm_graph *graph = priv;
 	const struct gpr_hdr *hdr = &data->hdr;
 	struct device *dev = graph->dev;
 	uint32_t client_event;
 	phys_addr_t phys;
 	int token;
-
-	result = data->payload;
 
 	switch (hdr->opcode) {
 	case APM_EVENT_MODULE_TO_CLIENT:
@@ -960,22 +976,7 @@ static int graph_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 			graph->cb(client_event, hdr->token, data->payload, graph->priv);
 		break;
 	case GPR_BASIC_RSP_RESULT:
-		switch (result->opcode) {
-		case APM_CMD_SHARED_MEM_MAP_REGIONS:
-		case DATA_CMD_WR_SH_MEM_EP_MEDIA_FORMAT:
-		case APM_CMD_REGISTER_MODULE_EVENTS:
-		case APM_CMD_SET_CFG:
-			graph->result.opcode = result->opcode;
-			graph->result.status = result->status;
-			if (result->status)
-				dev_err(dev, "Error (%d) Processing 0x%08x cmd\n",
-					result->status, result->opcode);
-			wake_up(&graph->cmd_wait);
-			break;
-		default:
-			break;
-		}
-		break;
+		return q6apm_graph_response(graph, data);
 	default:
 		break;
 	}
