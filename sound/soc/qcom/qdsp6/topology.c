@@ -2077,6 +2077,14 @@ static int audioreach_control_load(struct snd_soc_component *scomp, int index,
 		dobj = &sm->dobj;
 		ret = audioreach_control_load_mix(scomp, scontrol, kc, hdr);
 		break;
+	case SND_SOC_TPLG_DAPM_CTL_VOLSW:
+		sm = (struct soc_mixer_control *)kc->private_value;
+		if (sm->reg != SND_SOC_NOPM || sm->min || sm->max != 1 ||
+		    snd_soc_volsw_is_stereo(sm)) {
+			kfree(scontrol);
+			return -EINVAL;
+		}
+		fallthrough;
 	case SND_SOC_AR_TPLG_VOL_CTL:
 		sm = (struct soc_mixer_control *)kc->private_value;
 		dobj = &sm->dobj;
