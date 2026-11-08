@@ -95,12 +95,13 @@ static const struct snd_pcm_hardware q6apm_dai_hardware_capture = {
 				 SNDRV_PCM_INFO_NO_REWINDS | SNDRV_PCM_INFO_SYNC_APPLPTR |
 				 SNDRV_PCM_INFO_BATCH),
 	.formats =              (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE |
+				 SNDRV_PCM_FMTBIT_S24_3LE |
 				 SNDRV_PCM_FMTBIT_S32_LE),
-	.rates =                SNDRV_PCM_RATE_8000_48000,
+	.rates =                SNDRV_PCM_RATE_8000_192000,
 	.rate_min =             8000,
-	.rate_max =             48000,
-	.channels_min =         2,
-	.channels_max =         4,
+	.rate_max =             192000,
+	.channels_min =         1,
+	.channels_max =         PCM_MAX_NUM_CHANNEL,
 	.buffer_bytes_max =     CAPTURE_MAX_NUM_PERIODS * CAPTURE_MAX_PERIOD_SIZE,
 	.period_bytes_min =	CAPTURE_MIN_PERIOD_SIZE,
 	.period_bytes_max =     CAPTURE_MAX_PERIOD_SIZE,
@@ -116,12 +117,13 @@ static const struct snd_pcm_hardware q6apm_dai_hardware_playback = {
 				 SNDRV_PCM_INFO_NO_REWINDS | SNDRV_PCM_INFO_SYNC_APPLPTR |
 				 SNDRV_PCM_INFO_BATCH),
 	.formats =              (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE |
+				 SNDRV_PCM_FMTBIT_S24_3LE |
 				 SNDRV_PCM_FMTBIT_S32_LE),
 	.rates =                SNDRV_PCM_RATE_8000_192000,
 	.rate_min =             8000,
 	.rate_max =             192000,
-	.channels_min =         2,
-	.channels_max =         8,
+	.channels_min =         1,
+	.channels_max =         PCM_MAX_NUM_CHANNEL,
 	.buffer_bytes_max =     (PLAYBACK_MAX_NUM_PERIODS * PLAYBACK_MAX_PERIOD_SIZE),
 	.period_bytes_min =	PLAYBACK_MIN_PERIOD_SIZE,
 	.period_bytes_max =     PLAYBACK_MAX_PERIOD_SIZE,
@@ -237,6 +239,7 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 	cfg.sample_rate = runtime->rate;
 	cfg.num_channels = runtime->channels;
 	cfg.bit_width = prtd->bits_per_sample;
+	cfg.bits_per_sample = snd_pcm_format_physical_width(runtime->format);
 	cfg.fmt = SND_AUDIOCODEC_PCM;
 	ret = q6dsp_map_channels(cfg.channel_map, runtime->channels);
 	if (ret)
@@ -531,6 +534,7 @@ static int q6apm_dai_hw_params(struct snd_soc_component *component,
 		prtd->bits_per_sample = 16;
 		break;
 	case SNDRV_PCM_FORMAT_S24_LE:
+	case SNDRV_PCM_FORMAT_S24_3LE:
 		prtd->bits_per_sample = 24;
 		break;
 	case SNDRV_PCM_FORMAT_S32_LE:
