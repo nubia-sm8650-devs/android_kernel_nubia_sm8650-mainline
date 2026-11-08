@@ -169,6 +169,8 @@ int q6apm_alloc_fragments(struct q6apm_graph *graph,
 int q6apm_free_fragments(struct q6apm_graph *graph, unsigned int dir);
 int q6apm_unmap_memory_fixed_region(struct device *dev, unsigned int graph_id);
 /* Helpers */
+int audioreach_get_dai_graph_id(struct snd_soc_pcm_runtime *be, struct snd_soc_dai *dai,
+				int stream);
 void audioreach_stop_graphs(struct q6apm_graph *root, unsigned int first);
 int audioreach_prepare_graphs(struct q6apm_graph *root,
 			      const struct snd_soc_dapm_widget_list *list, int stream);
