@@ -455,6 +455,52 @@ static struct audioreach_container *audioreach_parse_cont_tokens(struct q6apm *a
 	return cont;
 }
 
+static struct audioreach_voice_tags *
+audioreach_parse_voice_tags(const struct snd_soc_tplg_private *priv)
+{
+	const u8 *data = (const u8 *)priv->data;
+	u32 remaining = le32_to_cpu(priv->size);
+	const struct audioreach_voice_tags *tags = NULL;
+
+	while (remaining) {
+		const struct audioreach_voice_tags *block = (const void *)data;
+		u32 size, i, j;
+
+		if (remaining < sizeof(*block))
+			return ERR_PTR(-EINVAL);
+
+		size = le32_to_cpu(block->size);
+		if (size < sizeof(*block) || size > remaining)
+			return ERR_PTR(-EINVAL);
+
+		data += size;
+		remaining -= size;
+
+		if (le32_to_cpu(block->type) != SND_SOC_AR_TPLG_VOICE_TAG_TYPE)
+			continue;
+
+		if (tags || size != struct_size(block, tags, le32_to_cpu(block->num_tags)))
+			return ERR_PTR(-EINVAL);
+
+		for (i = 0; i < le32_to_cpu(block->num_tags); i++) {
+			if (!block->tags[i].tag_id || !block->tags[i].module_iid)
+				return ERR_PTR(-EINVAL);
+
+			for (j = 0; j < i; j++) {
+				if (block->tags[i].tag_id == block->tags[j].tag_id)
+					return ERR_PTR(-EINVAL);
+			}
+		}
+
+		tags = block;
+	}
+
+	if (!tags)
+		return NULL;
+
+	return kmemdup(tags, le32_to_cpu(tags->size), GFP_KERNEL) ?: ERR_PTR(-ENOMEM);
+}
+
 static struct audioreach_control_links *
 audioreach_parse_control_links(const struct snd_soc_tplg_private *priv, u32 instance_id)
 {
@@ -593,6 +639,7 @@ static struct audioreach_module *audioreach_parse_common_tokens(struct q6apm *ap
 	struct audioreach_module *mod = NULL;
 	struct audioreach_connection *connections;
 	struct audioreach_control_links *control_links;
+	struct audioreach_voice_tags *voice_tags;
 	uint32_t token;
 	bool found, has_instance = false;
 	int max_tokens;
@@ -717,9 +764,16 @@ static struct audioreach_module *audioreach_parse_common_tokens(struct q6apm *ap
 	if (IS_ERR(control_links))
 		return ERR_CAST(control_links);
 
+	voice_tags = audioreach_parse_voice_tags(private);
+	if (IS_ERR(voice_tags)) {
+		kfree(control_links);
+		return ERR_CAST(voice_tags);
+	}
+
 	connections = kcalloc(id + extra, sizeof(*connections), GFP_KERNEL);
 	if (!connections && (id + extra)) {
 		kfree(control_links);
+		kfree(voice_tags);
 		return ERR_PTR(-ENOMEM);
 	}
 
@@ -730,11 +784,13 @@ static struct audioreach_module *audioreach_parse_common_tokens(struct q6apm *ap
 	if (IS_ERR(mod) || found) {
 		kfree(connections);
 		kfree(control_links);
+		kfree(voice_tags);
 		return IS_ERR(mod) ? mod : ERR_PTR(-EINVAL);
 	}
 
 	mod->module_id = module_id;
 	mod->control_links = control_links;
+	mod->voice_tags = voice_tags;
 	mod->max_ip_port = max_ip_port;
 	mod->max_op_port = max_op_port;
 	mod->src_mod_inst_id = src_mod_inst_id;
@@ -1639,6 +1695,7 @@ static int audioreach_widget_unload(struct snd_soc_component *scomp,
 	kfree(mod->data);
 	kfree(mod->connections);
 	kfree(mod->control_links);
+	kfree(mod->voice_tags);
 	kfree(mod);
 	/* Graph Info has N sub-graphs, sub-graph has N containers, Container has N Modules */
 	if (list_empty(&cont->modules_list)) { /* if no modules in the container then remove it */

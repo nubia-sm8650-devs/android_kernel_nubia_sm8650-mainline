@@ -977,6 +977,7 @@ struct audioreach_container {
 #define AR_MAX_MOD_LINKS	8
 
 struct audioreach_module {
+	struct audioreach_voice_tags *voice_tags;
 	struct audioreach_control_links *control_links;
 	uint32_t module_id;
 	uint32_t instance_id;

@@ -343,6 +343,19 @@ enum ar_event_types {
 
 #define SND_SOC_AR_TPLG_MODULE_CFG_TYPE 0x01001006
 #define SND_SOC_AR_TPLG_CONTROL_LINK_TYPE 0x08001061
+#define SND_SOC_AR_TPLG_VOICE_TAG_TYPE 0x080011B2
+
+struct audioreach_voice_tag {
+	__le32 tag_id;
+	__le32 module_iid;
+};
+
+struct audioreach_voice_tags {
+	__le32 size;
+	__le32 type;
+	__le32 num_tags;
+	struct audioreach_voice_tag tags[];
+};
 
 struct audioreach_control_links {
 	__le32 size;
