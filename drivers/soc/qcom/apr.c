@@ -83,6 +83,7 @@ void gpr_free_port(gpr_port_t *port)
 	idr_remove(&gpr->svcs_idr, port->id);
 	spin_unlock_irqrestore(&gpr->svcs_lock, flags);
 
+	flush_work(&gpr->rx_work);
 	kfree(port);
 }
 EXPORT_SYMBOL_GPL(gpr_free_port);
