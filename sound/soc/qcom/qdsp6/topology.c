@@ -470,9 +470,11 @@ static struct audioreach_module *audioreach_parse_common_tokens(struct q6apm *ap
 	const struct snd_soc_tplg_vendor_value_elem *mod_elem;
 	const struct snd_soc_tplg_vendor_array *mod_array;
 	struct audioreach_module *mod = NULL;
+	struct audioreach_connection *connections;
 	uint32_t token;
-	bool found;
+	bool found, has_instance = false;
 	int max_tokens;
+	int pn, id = 0;
 
 	mod_array = audioreach_get_module_array(private);
 	mod_elem = mod_array->value;
@@ -486,16 +488,7 @@ static struct audioreach_module *audioreach_parse_common_tokens(struct q6apm *ap
 			break;
 		case AR_TKN_U32_MODULE_INSTANCE_ID:
 			instance_id = le32_to_cpu(mod_elem->value);
-			mod = audioreach_tplg_alloc_module(apm, cont, w,
-							   instance_id, &found);
-			if (IS_ERR(mod)) {
-				return mod;
-			} else if (found) {
-				dev_err(apm->dev, "Duplicate Module Instance ID 0x%08x found\n",
-					instance_id);
-				return ERR_PTR(-EINVAL);
-			}
-
+			has_instance = true;
 			break;
 		case AR_TKN_U32_MODULE_MAX_IP_PORTS:
 			max_ip_port = le32_to_cpu(mod_elem->value);
@@ -586,23 +579,41 @@ static struct audioreach_module *audioreach_parse_common_tokens(struct q6apm *ap
 		mod_elem++;
 	}
 
-	if (mod) {
-		int pn, id = 0;
+	if (!has_instance)
+		return NULL;
 
-		mod->module_id = module_id;
-		mod->max_ip_port = max_ip_port;
-		mod->max_op_port = max_op_port;
-		mod->src_mod_inst_id = src_mod_inst_id;
-		for (pn = 0; pn < ARRAY_SIZE(src_mod_op_port_id); pn++) {
-			if (src_mod_op_port_id[pn] && dst_mod_inst_id[pn] &&
-			    dst_mod_ip_port_id[pn]) {
-				mod->src_mod_op_port_id[id] = src_mod_op_port_id[pn];
-				mod->dst_mod_inst_id[id] = dst_mod_inst_id[pn];
-				mod->dst_mod_ip_port_id[id] = dst_mod_ip_port_id[pn];
-				id++;
-			}
+	for (pn = 0; pn < ARRAY_SIZE(src_mod_op_port_id); pn++) {
+		if (src_mod_op_port_id[pn] && dst_mod_inst_id[pn] && dst_mod_ip_port_id[pn])
+			id++;
+	}
+
+	connections = kcalloc(id, sizeof(*connections), GFP_KERNEL);
+	if (!connections && id)
+		return ERR_PTR(-ENOMEM);
+
+	mod = audioreach_tplg_alloc_module(apm, cont, w, instance_id, &found);
+	if (IS_ERR(mod) || found) {
+		kfree(connections);
+		return IS_ERR(mod) ? mod : ERR_PTR(-EINVAL);
+	}
+
+	mod->module_id = module_id;
+	mod->max_ip_port = max_ip_port;
+	mod->max_op_port = max_op_port;
+	mod->src_mod_inst_id = src_mod_inst_id;
+	mod->connections = connections;
+	mod->num_connections = id;
+
+	id = 0;
+
+	for (pn = 0; pn < ARRAY_SIZE(src_mod_op_port_id); pn++) {
+		if (src_mod_op_port_id[pn] && dst_mod_inst_id[pn] && dst_mod_ip_port_id[pn]) {
+			connections[id].src_mod_inst_id = mod->instance_id;
+			connections[id].src_mod_op_port_id = src_mod_op_port_id[pn];
+			connections[id].dst_mod_inst_id = dst_mod_inst_id[pn];
+			connections[id].dst_mod_ip_port_id = dst_mod_ip_port_id[pn];
+			id++;
 		}
-		mod->num_connections = id;
 	}
 
 	return mod;
@@ -1489,6 +1500,7 @@ static int audioreach_widget_unload(struct snd_soc_component *scomp,
 
 	list_del(&mod->node);
 	kfree(mod->data);
+	kfree(mod->connections);
 	kfree(mod);
 	/* Graph Info has N sub-graphs, sub-graph has N containers, Container has N Modules */
 	if (list_empty(&cont->modules_list)) { /* if no modules in the container then remove it */

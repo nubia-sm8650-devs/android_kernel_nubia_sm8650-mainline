@@ -561,23 +561,19 @@ static void audioreach_populate_graph(struct q6apm *apm,
 			apm_populate_module_list_obj(mlobj, container, sg->sub_graph_id);
 
 			list_for_each_entry(module, &container->modules_list, node) {
+				const struct audioreach_connection *link;
 				int pn;
 
 				module_prop_obj = &mp_data->mod_prop_obj[nmodule++];
 				apm_populate_module_prop_obj(module_prop_obj, module);
 
 				for (pn = 0; pn < module->num_connections; pn++) {
-					if (module->dst_mod_inst_id[pn]) {
-						conn_obj = &mc_data->conn_obj[nconn];
-						conn_obj->src_mod_inst_id = module->instance_id;
-						conn_obj->src_mod_op_port_id =
-								module->src_mod_op_port_id[pn];
-						conn_obj->dst_mod_inst_id =
-								module->dst_mod_inst_id[pn];
-						conn_obj->dst_mod_ip_port_id =
-								module->dst_mod_ip_port_id[pn];
-						nconn++;
-					}
+					link = &module->connections[pn];
+					conn_obj = &mc_data->conn_obj[nconn++];
+					conn_obj->src_mod_inst_id = link->src_mod_inst_id;
+					conn_obj->src_mod_op_port_id = link->src_mod_op_port_id;
+					conn_obj->dst_mod_inst_id = link->dst_mod_inst_id;
+					conn_obj->dst_mod_ip_port_id = link->dst_mod_ip_port_id;
 				}
 			}
 			mlobj = (void *) mlobj + APM_MOD_LIST_OBJ_PSIZE(mlobj,

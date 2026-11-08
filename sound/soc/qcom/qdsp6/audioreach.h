@@ -975,11 +975,9 @@ struct audioreach_module {
 	uint32_t max_op_port;
 
 	uint32_t num_connections;
+	struct audioreach_connection *connections;
 	/* Connections */
 	uint32_t src_mod_inst_id;
-	uint32_t src_mod_op_port_id[AR_MAX_MOD_LINKS];
-	uint32_t dst_mod_inst_id[AR_MAX_MOD_LINKS];
-	uint32_t dst_mod_ip_port_id[AR_MAX_MOD_LINKS];
 
 	/* Format specifics */
 	uint32_t ch_fmt;
