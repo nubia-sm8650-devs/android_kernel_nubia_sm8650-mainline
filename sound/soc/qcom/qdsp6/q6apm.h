@@ -145,6 +145,7 @@ int q6apm_graph_prepare(struct q6apm_graph *graph);
 int q6apm_graph_start(struct q6apm_graph *graph);
 int q6apm_graph_stop(struct q6apm_graph *graph);
 int q6apm_graph_flush(struct q6apm_graph *graph);
+int q6apm_graph_register_event(struct q6apm_graph *graph, const void *data, size_t size);
 int q6apm_set_params(struct q6apm *apm, u32 graph_id,
 		     const void *data, size_t size);
 int q6apm_get_params(struct q6apm *apm, u32 graph_id, const void *query,

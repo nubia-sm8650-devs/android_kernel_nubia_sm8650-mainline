@@ -1191,6 +1191,67 @@ int q6apm_graph_flush(struct q6apm_graph *graph)
 }
 EXPORT_SYMBOL_GPL(q6apm_graph_flush);
 
+static bool q6apm_graph_event_target(struct q6apm_graph *graph, u32 instance_id)
+{
+	struct audioreach_graph_info *info;
+	struct audioreach_sub_graph *sg;
+	struct audioreach_module *module;
+	unsigned int i;
+
+	guard(mutex)(&graph->apm->lock);
+
+	module = idr_find(&graph->apm->modules_idr, instance_id);
+
+	for (i = 0; i <= graph->num_connected; i++) {
+		info = i ? graph->connected[i - 1]->info : graph->info;
+
+		if (module && module->container->sub_graph->info == info)
+			return true;
+
+		if (instance_id == VCPM_MODULE_INSTANCE_ID) {
+			list_for_each_entry(sg, &info->sg_list, node) {
+				if (sg->scenario_id == APM_SUB_GRAPH_SID_AUDIO_VOICE_CALL)
+					return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+int q6apm_graph_register_event(struct q6apm_graph *graph, const void *data, size_t size)
+{
+	const struct apm_module_register_events *event = data;
+	size_t payload_size;
+
+	if (size < sizeof(*event) || size > Q6APM_MAX_INBAND_PARAMS)
+		return -EINVAL;
+
+	if (event->event_config_payload_size > size - sizeof(*event) ||
+	    event->is_register > 1 || event->reserved || event->error_code)
+		return -EINVAL;
+
+	payload_size = sizeof(*event) + event->event_config_payload_size;
+	if (size != payload_size && size != ALIGN(payload_size, 8))
+		return -EINVAL;
+
+	guard(mutex)(&graph->apm->graph_lock);
+
+	if (!q6apm_graph_event_target(graph, event->module_instance_id))
+		return -EINVAL;
+
+	struct gpr_pkt *pkt __free(kfree) =
+		audioreach_alloc_cmd_pkt(ALIGN(payload_size, 8), APM_CMD_REGISTER_MODULE_EVENTS,
+					 0, graph->port->id, event->module_instance_id);
+	if (IS_ERR(pkt))
+		return PTR_ERR(pkt);
+
+	memcpy((void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE, data, payload_size);
+
+	return audioreach_graph_send_cmd_sync(graph, pkt, 0);
+}
+EXPORT_SYMBOL_GPL(q6apm_graph_register_event);
+
 static int q6apm_audio_probe(struct snd_soc_component *component)
 {
 	return audioreach_tplg_init(component);
