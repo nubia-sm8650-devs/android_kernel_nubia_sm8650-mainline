@@ -310,6 +310,7 @@ static void q6apm_lpass_dai_shutdown(struct snd_pcm_substream *substream, struct
 	}
 
 	if (dai_data->graph[dai->id]) {
+		snd_soc_dai_set_dma_data(dai, substream, NULL);
 		q6apm_graph_close(dai_data->graph[dai->id]);
 		dai_data->graph[dai->id] = NULL;
 	}
@@ -366,6 +367,7 @@ static int q6apm_lpass_dai_prepare(struct snd_pcm_substream *substream, struct s
 			return rc;
 		}
 		dai_data->graph[graph_id] = graph;
+		snd_soc_dai_set_dma_data(dai, substream, graph);
 	}
 
 	cfg->direction = substream->stream;
@@ -384,6 +386,7 @@ static int q6apm_lpass_dai_prepare(struct snd_pcm_substream *substream, struct s
 	return 0;
 err:
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		snd_soc_dai_set_dma_data(dai, substream, NULL);
 		q6apm_graph_close(dai_data->graph[dai->id]);
 		dai_data->graph[dai->id] = NULL;
 	}
@@ -403,6 +406,7 @@ static int q6apm_lpass_dai_startup(struct snd_pcm_substream *substream, struct s
 			return PTR_ERR(graph);
 		}
 		dai_data->graph[graph_id] = graph;
+		snd_soc_dai_set_dma_data(dai, substream, graph);
 	}
 
 	return 0;
