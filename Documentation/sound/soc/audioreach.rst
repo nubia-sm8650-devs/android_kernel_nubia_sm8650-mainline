@@ -61,6 +61,34 @@ subsequent reads can drain retained records. Closing the PCM discards its
 queue. Unregister events before detaching their graphs, and register them
 again after reopening those graphs.
 
+Shareable cyclic audio buffers
+-----------------------------
+
+Push/pull PCMs expose a ``Playback Data Buffer`` or ``Capture Data Buffer``
+control using the PCM interface and device number. Configure hardware
+parameters, then issue ``SNDRV_CTL_IOCTL_TLV_COMMAND`` with four
+native-endian 32-bit words.
+
+.. code-block:: text
+
+   type (zero)
+   payload length (eight bytes)
+   descriptor (output)
+   configured audio ring size in bytes (output)
+
+The returned close-on-exec descriptor refers to an uncached DMA buffer,
+not a PCM file. It can be mapped and passed to the audio client without
+transferring PCM ioctl authority. Use the returned ring size for audio
+wraparound. The allocation may be larger than that size and contains no
+DSP position buffer. Normal PCM data mmap remains available to the PCM
+owner.
+
+Close the descriptor when it is no longer needed. Retained descriptors or
+DMA-buffer mappings keep only their original allocation alive, not the
+PCM or card. Reopening the PCM allocates a different ring. Userspace must
+stop using the old ring after stream teardown or DSP restart and obtain a
+new descriptor for the replacement stream.
+
 DSP restart
 -----------
 
