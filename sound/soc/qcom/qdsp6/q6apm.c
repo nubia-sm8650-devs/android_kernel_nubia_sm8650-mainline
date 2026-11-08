@@ -58,6 +58,9 @@ static int q6apm_map_region(struct q6apm *apm, u32 token, phys_addr_t phys,
 {
 	struct apm_shared_map_region_payload *region;
 	struct apm_cmd_shared_mem_map_regions *cmd;
+
+	token |= (u32)atomic_inc_return(&apm->map_token) << APM_MMAP_TOKEN_SEQUENCE_SHIFT;
+
 	struct gpr_pkt *pkt __free(kfree) =
 		audioreach_alloc_apm_cmd_pkt(sizeof(*cmd) + sizeof(*region),
 					     APM_CMD_SHARED_MEM_MAP_REGIONS, token);
@@ -81,6 +84,9 @@ static int q6apm_map_region(struct q6apm *apm, u32 token, phys_addr_t phys,
 static int q6apm_unmap_region(struct q6apm *apm, u32 token, u32 handle)
 {
 	struct apm_cmd_shared_mem_unmap_regions *cmd;
+
+	token |= (u32)atomic_inc_return(&apm->map_token) << APM_MMAP_TOKEN_SEQUENCE_SHIFT;
+
 	struct gpr_pkt *pkt __free(kfree) =
 		audioreach_alloc_apm_cmd_pkt(sizeof(*cmd), APM_CMD_SHARED_MEM_UNMAP_REGIONS,
 					     token);
@@ -1170,6 +1176,7 @@ static int apm_probe(gpr_device_t *gdev)
 	mutex_init(&apm->cmd_lock);
 	mutex_init(&apm->graph_lock);
 	mutex_init(&apm->response_lock);
+	atomic_set(&apm->map_token, 0);
 	apm->dev = dev;
 	apm->gdev = gdev;
 	init_waitqueue_head(&apm->wait);

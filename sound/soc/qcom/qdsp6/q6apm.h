@@ -68,6 +68,7 @@ struct q6apm {
 	u32 cmd_opcode;
 	u32 cmd_token;
 	u32 param_token;
+	atomic_t map_token;
 	struct q6apm_param_response *param_response;
 	struct device *dma_dev;
 	long long dma_sid;
