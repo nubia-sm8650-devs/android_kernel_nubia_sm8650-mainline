@@ -31,6 +31,23 @@ The kernel includes the declarations in GRAPH_OPEN. They are not module
 SET data and do not establish a separate widget lifecycle or an ALSA
 enable control. Userspace must select the endpoint graphs together.
 
+Cross-graph reference controls
+------------------------------
+
+Use standard non-DAPM boolean mixer controls for selection-dependent links.
+For data links, supply one word array per connection with the source
+instance, source output port, destination instance and destination input
+port tokens. For control links, attach an ``audioreach_control_links``
+block instead. A control must not mix the two declaration types.
+
+Enabling a reference does not open either endpoint graph. If either graph
+is absent, the reference is staged. Its links enter GRAPH_OPEN when the
+second graph opens, or when both endpoints belong to the graph being
+opened. With both graphs open, the boolean sends a link-only OPEN or CLOSE.
+Control-link OPEN preserves native properties; CLOSE supplies peer
+identities with no properties. A failed command retains the prior boolean
+state. Prepare, start and stop remain owned by the existing graph users.
+
 Voice subgraph tags
 -------------------
 
