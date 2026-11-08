@@ -862,11 +862,35 @@ int q6apm_get_hw_pointer(struct q6apm_graph *graph, int dir)
 }
 EXPORT_SYMBOL_GPL(q6apm_get_hw_pointer);
 
+static int q6apm_graph_event(struct q6apm_graph *graph, const struct gpr_resp_pkt *data)
+{
+	const struct apm_module_event *event = data->payload;
+	struct q6apm_module_event notification;
+
+	if (data->payload_size < sizeof(*event) ||
+	    event->event_payload_size > data->payload_size - sizeof(*event))
+		return -EINVAL;
+
+	if (!graph->cb)
+		return 0;
+
+	if (event->event_id == EVENT_ID_SH_MEM_PULL_PUSH_MODE_WATERMARK) {
+		graph->cb(APM_CLIENT_EVENT_WATERMARK_EVENT, data->hdr.token,
+			  data->payload, graph->priv);
+	} else {
+		notification.module_instance_id = data->hdr.src_port;
+		notification.event = event;
+		graph->cb(APM_CLIENT_EVENT_MODULE_EVENT, data->hdr.token,
+			  &notification, graph->priv);
+	}
+
+	return 0;
+}
+
 static int graph_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 {
 	struct data_cmd_rsp_rd_sh_mem_ep_data_buffer_done_v2 *rd_done;
 	struct data_cmd_rsp_wr_sh_mem_ep_data_buffer_done_v2 *done;
-	struct apm_module_event *event;
 	const struct gpr_ibasic_rsp_result_t *result;
 	struct q6apm_graph *graph = priv;
 	const struct gpr_hdr *hdr = &data->hdr;
@@ -879,15 +903,7 @@ static int graph_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 
 	switch (hdr->opcode) {
 	case APM_EVENT_MODULE_TO_CLIENT:
-		event = data->payload;
-		switch (event->event_id) {
-		case EVENT_ID_SH_MEM_PULL_PUSH_MODE_WATERMARK:
-			client_event = APM_CLIENT_EVENT_WATERMARK_EVENT;
-			graph->cb(client_event, hdr->token, data->payload, graph->priv);
-			break;
-		}
-
-		break;
+		return q6apm_graph_event(graph, data);
 	case DATA_CMD_RSP_WR_SH_MEM_EP_DATA_BUFFER_DONE_V2:
 		if (!graph->ar_graph)
 			break;
