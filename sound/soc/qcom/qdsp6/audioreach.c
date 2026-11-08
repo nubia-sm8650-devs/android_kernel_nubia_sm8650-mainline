@@ -1847,6 +1847,9 @@ int audioreach_set_media_format(struct q6apm_graph *graph,
 
 	switch (module->module_id) {
 	case MODULE_ID_DATA_LOGGING:
+		if (!module->has_log_config)
+			return 0;
+
 		rc = audioreach_module_enable(graph, module, true);
 		if (!rc)
 			rc = audioreach_logging_set_media_format(graph, module);

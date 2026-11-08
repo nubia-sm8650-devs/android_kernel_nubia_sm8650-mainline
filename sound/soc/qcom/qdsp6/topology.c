@@ -919,12 +919,15 @@ static int audioreach_widget_log_module_load(struct audioreach_module *mod,
 
 		case AR_TKN_U32_MODULE_LOG_CODE:
 			mod->log_code = le32_to_cpu(mod_elem->value);
+			mod->has_log_config = true;
 			break;
 		case AR_TKN_U32_MODULE_LOG_TAP_POINT_ID:
 			mod->log_tap_point_id = le32_to_cpu(mod_elem->value);
+			mod->has_log_config = true;
 			break;
 		case AR_TKN_U32_MODULE_LOG_MODE:
 			mod->log_mode = le32_to_cpu(mod_elem->value);
+			mod->has_log_config = true;
 			break;
 		default:
 			break;

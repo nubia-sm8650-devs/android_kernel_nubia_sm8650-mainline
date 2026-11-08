@@ -1032,6 +1032,7 @@ struct audioreach_module {
 	uint32_t log_code;
 	uint32_t log_tap_point_id;
 	uint32_t log_mode;
+	bool has_log_config;
 
 	/* bookkeeping */
 	struct list_head node;
