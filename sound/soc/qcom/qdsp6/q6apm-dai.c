@@ -283,7 +283,10 @@ static int q6apm_dai_open_graphs(struct snd_soc_component *component,
 static int q6apm_dai_hw_free(struct snd_soc_component *component,
 			     struct snd_pcm_substream *substream)
 {
-	q6apm_dai_free_graphs(substream->runtime->private_data);
+	struct q6apm_dai_rtd *prtd = substream->runtime->private_data;
+
+	prtd->graph->path_prepared = false;
+	q6apm_dai_free_graphs(prtd);
 
 	return 0;
 }
@@ -306,6 +309,8 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 		dev_err(dev, "%s: private data null or audio client freed\n", __func__);
 		return -EINVAL;
 	}
+
+	prtd->graph->path_prepared = false;
 
 	cfg.direction = substream->stream;
 	cfg.sample_rate = runtime->rate;
@@ -395,6 +400,7 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 
 	/* Now that graph as been prepared and started update the internal state accordingly */
 	prtd->state = Q6APM_STREAM_RUNNING;
+	prtd->graph->path_prepared = true;
 
 	return 0;
 }

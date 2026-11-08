@@ -1553,10 +1553,14 @@ static int audioreach_update_paths(struct q6apm *apm, struct snd_soc_card *card,
 			if (ret < 0)
 				goto out;
 
-			if (connect)
+			if (connect) {
 				ret = audioreach_open_graphs(root, rtd, stream, list);
-			else
+
+				if (!ret && root->path_prepared)
+					ret = audioreach_prepare_graphs(root, list, stream);
+			} else {
 				audioreach_prune_graphs(root, list);
+			}
 
 			snd_soc_dapm_dai_free_widgets(&list);
 
