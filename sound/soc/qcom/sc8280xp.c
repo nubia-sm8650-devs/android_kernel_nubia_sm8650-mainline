@@ -6,6 +6,7 @@
 #include <linux/platform_device.h>
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
+#include <sound/soc-dpcm.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <linux/soundwire/sdw.h>
@@ -351,6 +352,8 @@ static int sc8280xp_add_be_config_control(struct snd_soc_pcm_runtime *rtd,
 	return snd_soc_add_card_controls(card, &control, 1);
 }
 
+static int sc8280xp_add_slim_map_control(struct snd_soc_pcm_runtime *rtd);
+
 static int sc8280xp_add_be_config(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
@@ -366,7 +369,7 @@ static int sc8280xp_add_be_config(struct snd_soc_pcm_runtime *rtd)
 
 	switch (cpu_dai->id) {
 	case SLIMBUS_0_RX ... SLIMBUS_6_TX:
-		return 0;
+		return sc8280xp_add_slim_map_control(rtd);
 	default:
 		return sc8280xp_add_be_config_control(rtd, SC8280XP_BE_CHANNELS,
 						      "Channels");
@@ -453,6 +456,60 @@ static int sc8280xp_get_slim_channels(struct snd_soc_pcm_runtime *rtd,
 	}
 
 	return -ENOTSUPP;
+}
+
+static int sc8280xp_slim_map_info(struct snd_kcontrol *kcontrol,
+				  struct snd_ctl_elem_info *info)
+{
+	info->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	info->count = SLIM_MAX_PORTS + 1;
+	info->value.integer.min = 0;
+	info->value.integer.max = 255;
+
+	return 0;
+}
+
+static int sc8280xp_slim_map_get(struct snd_kcontrol *kcontrol,
+				 struct snd_ctl_elem_value *value)
+{
+	struct snd_soc_pcm_runtime *rtd = (void *)kcontrol->private_value;
+	unsigned int ch[SLIM_MAX_PORTS] = {}, num = 0;
+	int i, ret;
+
+	snd_soc_dpcm_mutex_lock(rtd->card);
+	ret = sc8280xp_get_slim_channels(rtd, ch, &num);
+	snd_soc_dpcm_mutex_unlock(rtd->card);
+
+	if (ret)
+		return ret;
+
+	if (!num)
+		return -ENODATA;
+
+	value->value.integer.value[0] = num;
+
+	for (i = 0; i < SLIM_MAX_PORTS; i++)
+		value->value.integer.value[i + 1] = ch[i];
+
+	return 0;
+}
+
+static int sc8280xp_add_slim_map_control(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_kcontrol_new control = {
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.access = SNDRV_CTL_ELEM_ACCESS_READ,
+		.info = sc8280xp_slim_map_info,
+		.get = sc8280xp_slim_map_get,
+		.private_value = (unsigned long)rtd,
+	};
+
+	control.name = devm_kasprintf(rtd->card->dev, GFP_KERNEL, "%s Channel Map",
+				      rtd->dai_link->name);
+	if (!control.name)
+		return -ENOMEM;
+
+	return snd_soc_add_card_controls(rtd->card, &control, 1);
 }
 
 static int sc8280xp_slim_hw_params(struct snd_soc_pcm_runtime *rtd)
