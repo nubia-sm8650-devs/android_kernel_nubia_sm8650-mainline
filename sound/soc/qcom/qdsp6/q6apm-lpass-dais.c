@@ -334,6 +334,15 @@ static int q6apm_lpass_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 				dai_data->is_port_started[dai->id] = true;
 		}
 		break;
+	case SNDRV_PCM_TRIGGER_STOP:
+		if (dai_data->is_port_started[dai->id]) {
+			ret = q6apm_graph_stop(dai_data->graph[dai->id]);
+			if (ret)
+				return ret;
+
+			dai_data->is_port_started[dai->id] = false;
+		}
+		break;
 	default:
 		break;
 	}

@@ -1107,6 +1107,7 @@ struct q6apm_graph *q6apm_graph_open(struct device *dev, q6apm_cb cb,
 
 	mutex_init(&graph->lock);
 	mutex_init(&graph->cmd_lock);
+	mutex_init(&graph->path_lock);
 	init_waitqueue_head(&graph->cmd_wait);
 
 	graph->port = gpr_alloc_port(apm->gdev, dev, graph_callback, graph);

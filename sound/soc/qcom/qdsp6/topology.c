@@ -1307,22 +1307,50 @@ static bool audioreach_graph_is_connected(struct q6apm_graph *graph,
 	return false;
 }
 
-void audioreach_stop_graphs(struct q6apm_graph *root, unsigned int first)
+int audioreach_stop_graphs(struct q6apm_graph *root, unsigned int first)
 {
 	while (root->num_started > first) {
-		struct q6apm_graph *graph = root->connected[--root->num_started];
+		struct q6apm_graph *graph = root->connected[root->num_started - 1];
 		int ret = q6apm_graph_stop(graph);
 
 		if (ret)
-			dev_err(graph->dev, "Failed to stop graph %u: %d\n", graph->id, ret);
+			return ret;
+
+		root->num_started--;
 	}
+
+	return 0;
 }
 EXPORT_SYMBOL_GPL(audioreach_stop_graphs);
+
+int audioreach_start_graphs(struct q6apm_graph *root)
+{
+	unsigned int first = root->num_started;
+	int i, ret;
+
+	for (i = first; i < root->num_connected; i++) {
+		struct q6apm_graph *graph = root->connected[i];
+
+		if (!graph->path_prepared)
+			continue;
+
+		ret = q6apm_graph_start(graph);
+		if (ret) {
+			audioreach_stop_graphs(root, first);
+			return ret;
+		}
+
+		swap(root->connected[i], root->connected[root->num_started]);
+		root->num_started++;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(audioreach_start_graphs);
 
 int audioreach_prepare_graphs(struct q6apm_graph *root, struct snd_soc_pcm_runtime *rtd,
 			      int stream, const struct snd_soc_dapm_widget_list *list)
 {
-	unsigned int first = root->num_started;
 	int i, ret;
 
 	ret = audioreach_check_dai_graphs(root->apm, rtd, stream, list, true);
@@ -1332,6 +1360,8 @@ int audioreach_prepare_graphs(struct q6apm_graph *root, struct snd_soc_pcm_runti
 	for (i = root->num_started; i < root->num_connected; i++) {
 		struct q6apm_graph *graph = root->connected[i];
 
+		graph->path_prepared = false;
+
 		if (audioreach_graph_has_dai(rtd->card, root->apm, graph->id))
 			continue;
 
@@ -1340,22 +1370,12 @@ int audioreach_prepare_graphs(struct q6apm_graph *root, struct snd_soc_pcm_runti
 
 		ret = q6apm_graph_prepare(graph);
 		if (ret)
-			goto err;
+			return ret;
 
-		ret = q6apm_graph_start(graph);
-		if (ret)
-			goto err;
-
-		swap(root->connected[i], root->connected[root->num_started]);
-		root->num_started++;
+		graph->path_prepared = true;
 	}
 
 	return 0;
-
-err:
-	audioreach_stop_graphs(root, first);
-
-	return ret;
 }
 EXPORT_SYMBOL_GPL(audioreach_prepare_graphs);
 
@@ -1561,6 +1581,8 @@ static int audioreach_link_load(struct snd_soc_component *component, int index,
 {
 	link->nonatomic = true;
 	link->dynamic = true;
+	link->trigger[SNDRV_PCM_STREAM_PLAYBACK] = SND_SOC_DPCM_TRIGGER_POST;
+	link->trigger[SNDRV_PCM_STREAM_CAPTURE] = SND_SOC_DPCM_TRIGGER_POST;
 	link->platforms->name = NULL;
 	link->platforms->of_node = of_get_compatible_child(component->dev->of_node,
 							   "qcom,q6apm-dais");
@@ -1715,8 +1737,8 @@ static int audioreach_get_audio_mixer(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static void audioreach_prune_graphs(struct q6apm_graph *root,
-				    struct snd_soc_dapm_widget_list *list)
+static int audioreach_prune_graphs(struct q6apm_graph *root,
+				   struct snd_soc_dapm_widget_list *list)
 {
 	struct snd_soc_dapm_widget *w;
 	int i, j;
@@ -1743,8 +1765,7 @@ static void audioreach_prune_graphs(struct q6apm_graph *root,
 			int ret = q6apm_graph_stop(graph);
 
 			if (ret)
-				dev_err(graph->dev, "Failed to stop graph %u: %d\n",
-					graph->id, ret);
+				return ret;
 
 			root->num_started--;
 		}
@@ -1754,6 +1775,8 @@ static void audioreach_prune_graphs(struct q6apm_graph *root,
 		memmove(&root->connected[i], &root->connected[i + 1],
 			(root->num_connected - i) * sizeof(*root->connected));
 	}
+
+	return 0;
 }
 
 static int audioreach_update_paths(struct q6apm *apm, struct snd_soc_card *card, bool connect)
@@ -1776,6 +1799,8 @@ static int audioreach_update_paths(struct q6apm *apm, struct snd_soc_card *card,
 			if (!root || !root->connected)
 				continue;
 
+			guard(mutex)(&root->path_lock);
+
 			ret = snd_soc_dapm_dai_get_connected_widgets(dai, stream, &list,
 								     dpcm_end_walk_at_be);
 			if (ret < 0)
@@ -1786,8 +1811,11 @@ static int audioreach_update_paths(struct q6apm *apm, struct snd_soc_card *card,
 
 				if (!ret && root->path_prepared)
 					ret = audioreach_prepare_graphs(root, rtd, stream, list);
+
+				if (!ret && root->started)
+					ret = audioreach_start_graphs(root);
 			} else {
-				audioreach_prune_graphs(root, list);
+				ret = audioreach_prune_graphs(root, list);
 			}
 
 			snd_soc_dapm_dai_free_widgets(&list);

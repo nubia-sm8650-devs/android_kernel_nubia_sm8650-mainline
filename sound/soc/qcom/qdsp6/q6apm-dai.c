@@ -283,8 +283,11 @@ static void event_handler_compr(uint32_t opcode, uint32_t token,
 static void q6apm_dai_free_graphs(struct q6apm_dai_rtd *prtd)
 {
 	struct q6apm_graph *root = prtd->graph;
+	int ret;
 
-	audioreach_stop_graphs(root, 0);
+	ret = audioreach_stop_graphs(root, 0);
+	if (ret)
+		dev_err(root->dev, "Failed to stop connected graphs: %d\n", ret);
 
 	while (root->num_connected)
 		q6apm_graph_close(root->connected[--root->num_connected]);
@@ -323,6 +326,8 @@ static int q6apm_dai_open_graphs(struct snd_soc_component *component,
 	struct snd_soc_dapm_widget_list *list;
 	int ret;
 
+	guard(mutex)(&root->path_lock);
+
 	if (root->connected)
 		return 0;
 
@@ -344,8 +349,20 @@ static int q6apm_dai_hw_free(struct snd_soc_component *component,
 			     struct snd_pcm_substream *substream)
 {
 	struct q6apm_dai_rtd *prtd = substream->runtime->private_data;
+	int ret;
+
+	guard(mutex)(&prtd->graph->path_lock);
 
 	prtd->graph->path_prepared = false;
+
+	ret = q6apm_graph_stop(prtd->graph);
+	if (ret)
+		return ret;
+
+	ret = audioreach_stop_graphs(prtd->graph, 0);
+	if (ret)
+		return ret;
+
 	q6apm_dai_free_graphs(prtd);
 
 	return 0;
@@ -380,6 +397,8 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 		return -EINVAL;
 	}
 
+	guard(mutex)(&prtd->graph->path_lock);
+
 	prtd->graph->path_prepared = false;
 	hostless = q6apm_graph_is_hostless(prtd->graph);
 
@@ -395,12 +414,17 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 
 	if (prtd->state) {
 		/* clear the previous setup if any  */
-		q6apm_graph_stop(prtd->graph);
+		ret = q6apm_graph_stop(prtd->graph);
+		if (ret)
+			return ret;
+
 		if (!hostless)
 			q6apm_free_fragments(prtd->graph, substream->stream);
 	}
 
-	audioreach_stop_graphs(prtd->graph, 0);
+	ret = audioreach_stop_graphs(prtd->graph, 0);
+	if (ret)
+		return ret;
 
 	prtd->last_pos_index = 0;
 	prtd->pcm_count = snd_pcm_lib_period_bytes(substream);
@@ -459,24 +483,11 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 	if (ret)
 		return ret;
 
-	ret = q6apm_graph_start(prtd->graph);
-	if (ret) {
-		audioreach_stop_graphs(prtd->graph, 0);
-		dev_err(dev, "Failed to Start Graph %d\n", ret);
-		return ret;
-	}
-	if (!hostless && !q6apm_is_graph_in_push_pull_mode(prtd->graph)) {
-		if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
-			int i;
-			/* Queue the buffers for Capture ONLY after graph is started */
-			for (i = 0; i < runtime->periods; i++)
-				q6apm_read(prtd->graph);
-		}
-	}
-
-	/* Now that graph as been prepared and started update the internal state accordingly */
-	prtd->state = Q6APM_STREAM_RUNNING;
+	prtd->state = Q6APM_STREAM_STOPPED;
 	prtd->graph->path_prepared = true;
+
+	if (hostless)
+		runtime->stop_threshold = runtime->boundary;
 
 	return 0;
 }
@@ -488,7 +499,8 @@ static int q6apm_dai_ack(struct snd_soc_component *component, struct snd_pcm_sub
 	int i, ret = 0, avail_periods;
 
 	if (q6apm_graph_is_hostless(prtd->graph) ||
-	    q6apm_is_graph_in_push_pull_mode(prtd->graph))
+	    q6apm_is_graph_in_push_pull_mode(prtd->graph) ||
+	    prtd->state != Q6APM_STREAM_RUNNING)
 		return 0;
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -511,16 +523,58 @@ static int q6apm_dai_trigger(struct snd_soc_component *component,
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct q6apm_dai_rtd *prtd = runtime->private_data;
-	int ret = 0;
+	struct q6apm_graph *graph = prtd->graph;
+	int i, ret = 0;
+
+	guard(mutex)(&graph->path_lock);
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		if (!graph->path_prepared)
+			return -EPIPE;
+
+		if (graph->started)
+			return 0;
+
+		ret = audioreach_start_graphs(graph);
+		if (ret)
+			return ret;
+
+		ret = q6apm_graph_start(graph);
+		if (ret) {
+			audioreach_stop_graphs(graph, 0);
+			return ret;
+		}
+
+		prtd->state = Q6APM_STREAM_RUNNING;
+
+		if (!q6apm_graph_is_hostless(graph) &&
+		    !q6apm_is_graph_in_push_pull_mode(graph)) {
+			if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
+				for (i = 0; i < runtime->periods; i++) {
+					ret = q6apm_read(graph);
+					if (ret)
+						break;
+				}
+			} else {
+				ret = q6apm_dai_ack(component, substream);
+			}
+		}
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
-		/* TODO support be handled via SoftPause Module */
+		graph->path_prepared = false;
 		prtd->state = Q6APM_STREAM_STOPPED;
+
+		ret = q6apm_graph_stop(graph);
+		if (ret)
+			return ret;
+
+		ret = audioreach_stop_graphs(graph, 0);
+		if (ret)
+			return ret;
+
 		prtd->queue_ptr = 0;
 		prtd->last_pos_index = 0;
 		break;
@@ -646,6 +700,8 @@ static int q6apm_dai_close(struct snd_soc_component *component,
 	struct q6apm_dai_rtd *prtd = runtime->private_data;
 
 	snd_soc_dai_set_dma_data(snd_soc_rtd_to_cpu(rtd, 0), substream, NULL);
+
+	q6apm_dai_free_graphs(prtd);
 
 	if (prtd->state) {
 		/* only stop graph that is started */
