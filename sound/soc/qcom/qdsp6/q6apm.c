@@ -1158,6 +1158,9 @@ int q6apm_graph_start(struct q6apm_graph *graph)
 
 	guard(mutex)(&graph->apm->graph_lock);
 
+	if (graph->started)
+		return 0;
+
 	if (ar_graph->start_count == 0) {
 		ret = audioreach_graph_mgmt_cmd(ar_graph, APM_CMD_GRAPH_START);
 		if (ret)
@@ -1165,6 +1168,7 @@ int q6apm_graph_start(struct q6apm_graph *graph)
 	}
 
 	ar_graph->start_count++;
+	graph->started = true;
 
 	return 0;
 }
@@ -1173,16 +1177,23 @@ EXPORT_SYMBOL_GPL(q6apm_graph_start);
 int q6apm_graph_stop(struct q6apm_graph *graph)
 {
 	struct audioreach_graph *ar_graph = graph->ar_graph;
+	int ret;
 
 	guard(mutex)(&graph->apm->graph_lock);
 
-	if (ar_graph->start_count == 0)
+	if (!graph->started)
 		return 0;
 
-	if (--ar_graph->start_count > 0)
-		return 0;
+	if (ar_graph->start_count == 1) {
+		ret = audioreach_graph_mgmt_cmd(ar_graph, APM_CMD_GRAPH_STOP);
+		if (ret)
+			return ret;
+	}
 
-	return audioreach_graph_mgmt_cmd(ar_graph, APM_CMD_GRAPH_STOP);
+	ar_graph->start_count--;
+	graph->started = false;
+
+	return 0;
 }
 EXPORT_SYMBOL_GPL(q6apm_graph_stop);
 

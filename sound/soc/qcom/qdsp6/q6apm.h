@@ -137,6 +137,7 @@ struct q6apm_graph {
 	unsigned int num_connected;
 	unsigned int num_started;
 	bool path_prepared;
+	bool started;
 };
 
 /* Graph Operations */
