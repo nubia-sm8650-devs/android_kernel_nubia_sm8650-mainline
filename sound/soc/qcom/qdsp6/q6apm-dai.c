@@ -37,6 +37,10 @@
 #define COMPR_PLAYBACK_MAX_NUM_FRAGMENTS (16 * 4)
 #define COMPR_PLAYBACK_MIN_FRAGMENT_SIZE (8 * 1024)
 #define COMPR_PLAYBACK_MIN_NUM_FRAGMENTS (4)
+#define COMPR_CAPTURE_MAX_FRAGMENT_SIZE (8 * 1024)
+#define COMPR_CAPTURE_MAX_NUM_FRAGMENTS (16)
+#define COMPR_CAPTURE_MIN_FRAGMENT_SIZE (2 * 1024)
+#define COMPR_CAPTURE_MIN_NUM_FRAGMENTS (4)
 #define SID_MASK_DEFAULT	0xF
 
 static const struct snd_compr_codec_caps q6apm_compr_caps = {
@@ -84,6 +88,11 @@ struct q6apm_dai_rtd {
 	struct q6apm_graph *graph;
 	struct mutex lock;
 	bool notify_on_drain;
+	u32 read_sizes[COMPR_CAPTURE_MAX_NUM_FRAGMENTS];
+	unsigned int read_head;
+	unsigned int read_offset;
+	unsigned int reads_filled;
+	unsigned int reads_queued;
 	struct list_head events;
 	struct snd_ctl_elem_id events_id;
 	unsigned int event_count;
@@ -222,6 +231,48 @@ static void event_handler(uint32_t opcode, uint32_t token, void *payload, void *
 	}
 }
 
+static int q6apm_dai_compr_queue_reads(struct q6apm_dai_rtd *prtd)
+{
+	int ret;
+
+	while (prtd->reads_filled + prtd->reads_queued < prtd->periods) {
+		ret = q6apm_read(prtd->graph);
+		if (ret)
+			return ret;
+
+		prtd->reads_queued++;
+	}
+
+	return 0;
+}
+
+static void q6apm_dai_compr_release_read(struct q6apm_dai_rtd *prtd)
+{
+	prtd->read_offset = 0;
+	prtd->read_head = (prtd->read_head + 1) % prtd->periods;
+	prtd->reads_filled--;
+}
+
+static void
+q6apm_dai_compr_read_done(struct q6apm_dai_rtd *prtd, uint32_t token,
+			  const struct data_cmd_rsp_rd_sh_mem_ep_data_buffer_done_v2 *done)
+{
+	if (prtd->state != Q6APM_STREAM_RUNNING || !prtd->reads_queued ||
+	    token != (prtd->read_head + prtd->reads_filled) % prtd->periods)
+		return;
+
+	prtd->reads_queued--;
+	prtd->reads_filled++;
+	prtd->read_sizes[token] = min(done->data_size, prtd->pcm_count);
+	prtd->copied_total += prtd->read_sizes[token];
+
+	while (prtd->reads_filled && !prtd->read_sizes[prtd->read_head])
+		q6apm_dai_compr_release_read(prtd);
+
+	q6apm_dai_compr_queue_reads(prtd);
+	snd_compr_fragment_elapsed(prtd->cstream);
+}
+
 static void event_handler_compr(uint32_t opcode, uint32_t token,
 				void *payload, void *priv)
 {
@@ -241,6 +292,9 @@ static void event_handler_compr(uint32_t opcode, uint32_t token,
 		} else {
 			prtd->state = Q6APM_STREAM_STOPPED;
 		}
+		break;
+	case APM_CLIENT_EVENT_DATA_READ_DONE:
+		q6apm_dai_compr_read_done(prtd, token, payload);
 		break;
 	case APM_CLIENT_EVENT_DATA_WRITE_DONE:
 		bytes_written = token >> APM_WRITE_TOKEN_LEN_SHIFT;
@@ -1081,7 +1135,7 @@ static int q6apm_dai_compr_open(struct snd_soc_component *component,
 
 	prtd->cstream = stream;
 	prtd->graph = q6apm_graph_open(dev, event_handler_compr, prtd, graph_id,
-					SNDRV_PCM_STREAM_PLAYBACK);
+					stream->direction);
 	if (IS_ERR(prtd->graph)) {
 		ret = PTR_ERR(prtd->graph);
 		kfree(prtd);
@@ -1090,7 +1144,11 @@ static int q6apm_dai_compr_open(struct snd_soc_component *component,
 
 	runtime->private_data = prtd;
 	runtime->dma_bytes = BUFFER_BYTES_MAX;
-	size = COMPR_PLAYBACK_MAX_FRAGMENT_SIZE * COMPR_PLAYBACK_MAX_NUM_FRAGMENTS;
+	if (stream->direction == SND_COMPRESS_CAPTURE)
+		size = COMPR_CAPTURE_MAX_FRAGMENT_SIZE * COMPR_CAPTURE_MAX_NUM_FRAGMENTS;
+	else
+		size = COMPR_PLAYBACK_MAX_FRAGMENT_SIZE * COMPR_PLAYBACK_MAX_NUM_FRAGMENTS;
+
 	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, dev, size, &prtd->dma_buffer);
 	if (ret)
 		goto err_close_graph;
@@ -1107,7 +1165,11 @@ static int q6apm_dai_compr_open(struct snd_soc_component *component,
 	snd_compr_set_runtime_buffer(stream, &prtd->dma_buffer);
 	mutex_init(&prtd->lock);
 
-	q6apm_enable_compress_module(dev, prtd->graph, true);
+	if (stream->direction == SND_COMPRESS_PLAYBACK)
+		q6apm_enable_compress_module(dev, prtd->graph, true);
+	else
+		runtime->poll_frames = true;
+
 	return 0;
 
 err_free_pages:
@@ -1127,7 +1189,7 @@ static int q6apm_dai_compr_free(struct snd_soc_component *component,
 	struct q6apm_dai_rtd *prtd = runtime->private_data;
 
 	q6apm_graph_stop(prtd->graph);
-	q6apm_free_fragments(prtd->graph, SNDRV_PCM_STREAM_PLAYBACK);
+	q6apm_free_fragments(prtd->graph, stream->direction);
 	q6apm_unmap_memory_fixed_region(component->dev, prtd->graph->id);
 	q6apm_graph_close(prtd->graph);
 	snd_dma_free_pages(&prtd->dma_buffer);
@@ -1142,6 +1204,18 @@ static int q6apm_dai_compr_get_caps(struct snd_soc_component *component,
 				    struct snd_compr_stream *stream,
 				    struct snd_compr_caps *caps)
 {
+	if (stream->direction == SND_COMPRESS_CAPTURE) {
+		caps->direction = SND_COMPRESS_CAPTURE;
+		caps->min_fragment_size = COMPR_CAPTURE_MIN_FRAGMENT_SIZE;
+		caps->max_fragment_size = COMPR_CAPTURE_MAX_FRAGMENT_SIZE;
+		caps->min_fragments = COMPR_CAPTURE_MIN_NUM_FRAGMENTS;
+		caps->max_fragments = COMPR_CAPTURE_MAX_NUM_FRAGMENTS;
+		caps->num_codecs = 1;
+		caps->codecs[0] = SND_AUDIOCODEC_AAC;
+
+		return 0;
+	}
+
 	caps->direction = SND_COMPRESS_PLAYBACK;
 	caps->min_fragment_size = COMPR_PLAYBACK_MIN_FRAGMENT_SIZE;
 	caps->max_fragment_size = COMPR_PLAYBACK_MAX_FRAGMENT_SIZE;
@@ -1191,6 +1265,45 @@ static int q6apm_dai_compr_pointer(struct snd_soc_component *component,
 	return 0;
 }
 
+static int q6apm_dai_compr_capture_start(struct q6apm_dai_rtd *prtd)
+{
+	int ret;
+
+	ret = q6apm_graph_prepare(prtd->graph);
+	if (ret)
+		return ret;
+
+	ret = q6apm_graph_start(prtd->graph);
+	if (ret)
+		return ret;
+
+	guard(mutex)(&prtd->lock);
+	prtd->state = Q6APM_STREAM_RUNNING;
+
+	return q6apm_dai_compr_queue_reads(prtd);
+}
+
+static int q6apm_dai_compr_capture_stop(struct q6apm_dai_rtd *prtd)
+{
+	int ret;
+
+	scoped_guard(mutex, &prtd->lock)
+		prtd->state = Q6APM_STREAM_STOPPED;
+
+	ret = q6apm_graph_stop(prtd->graph);
+
+	guard(mutex)(&prtd->lock);
+	prtd->reads_filled = 0;
+	prtd->reads_queued = 0;
+	prtd->read_head = 0;
+	prtd->read_offset = 0;
+	prtd->copied_total = 0;
+	q6apm_alloc_fragments(prtd->graph, SNDRV_PCM_STREAM_CAPTURE, prtd->phys,
+			      prtd->pcm_count, prtd->periods);
+
+	return ret;
+}
+
 static int q6apm_dai_compr_trigger(struct snd_soc_component *component,
 			    struct snd_compr_stream *stream, int cmd)
 {
@@ -1198,6 +1311,16 @@ static int q6apm_dai_compr_trigger(struct snd_soc_component *component,
 	struct q6apm_dai_rtd *prtd = runtime->private_data;
 	uint32_t bytes_to_write;
 	int ret = 0;
+
+	if (stream->direction == SND_COMPRESS_CAPTURE) {
+		if (cmd == SNDRV_PCM_TRIGGER_START)
+			return q6apm_dai_compr_capture_start(prtd);
+
+		if (cmd == SNDRV_PCM_TRIGGER_STOP)
+			return q6apm_dai_compr_capture_stop(prtd);
+
+		return -EINVAL;
+	}
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
@@ -1242,10 +1365,63 @@ static int q6apm_dai_compr_ack(struct snd_soc_component *component, struct snd_c
 	struct snd_compr_runtime *runtime = stream->runtime;
 	struct q6apm_dai_rtd *prtd = runtime->private_data;
 
+	if (stream->direction == SND_COMPRESS_CAPTURE)
+		return -EINVAL;
+
 	guard(mutex)(&prtd->lock);
 	prtd->bytes_received += count;
 
 	return count;
+}
+
+static int q6apm_dai_compr_capture_params(struct snd_soc_component *component,
+					  struct q6apm_dai_rtd *prtd,
+					  const struct snd_codec *codec)
+{
+	struct audioreach_module_config cfg = {};
+	int ret;
+
+	if (prtd->pcm_count < COMPR_CAPTURE_MIN_FRAGMENT_SIZE ||
+	    prtd->pcm_count > COMPR_CAPTURE_MAX_FRAGMENT_SIZE ||
+	    prtd->periods < COMPR_CAPTURE_MIN_NUM_FRAGMENTS ||
+	    prtd->periods > COMPR_CAPTURE_MAX_NUM_FRAGMENTS ||
+	    codec->format == SND_AUDIOSTREAMFORMAT_RAW ||
+	    codec->format == SND_AUDIOSTREAMFORMAT_MP4FF)
+		return -EINVAL;
+
+	memcpy(&prtd->codec, codec, sizeof(*codec));
+
+	ret = q6apm_set_real_encoder_id(component->dev, prtd->graph, codec);
+	if (ret)
+		return ret;
+
+	cfg.direction = SNDRV_PCM_STREAM_CAPTURE;
+	cfg.sample_rate = codec->sample_rate;
+	cfg.num_channels = codec->ch_in ? codec->ch_in : 2;
+	cfg.bit_width = prtd->bits_per_sample;
+	cfg.fmt = codec->id;
+	memcpy(&cfg.codec, codec, sizeof(*codec));
+
+	ret = q6dsp_map_channels(cfg.channel_map, cfg.num_channels);
+	if (ret)
+		return ret;
+
+	ret = q6apm_graph_media_format_pcm(prtd->graph, &cfg);
+	if (ret)
+		return ret;
+
+	ret = q6apm_graph_set_read_frames(prtd->graph, 1);
+	if (ret)
+		return ret;
+
+	ret = q6apm_alloc_fragments(prtd->graph, SNDRV_PCM_STREAM_CAPTURE, prtd->phys,
+				    prtd->pcm_count, prtd->periods);
+	if (ret)
+		return ret;
+
+	prtd->state = Q6APM_STREAM_STOPPED;
+
+	return 0;
 }
 
 static int q6apm_dai_compr_set_params(struct snd_soc_component *component,
@@ -1268,6 +1444,9 @@ static int q6apm_dai_compr_set_params(struct snd_soc_component *component,
 	prtd->pcm_count = runtime->fragment_size;
 	prtd->pcm_size = runtime->fragments * runtime->fragment_size;
 	prtd->bits_per_sample = 16;
+
+	if (dir == SND_COMPRESS_CAPTURE)
+		return q6apm_dai_compr_capture_params(component, prtd, codec);
 
 	if (prtd->next_track != true) {
 		memcpy(&prtd->codec, codec, sizeof(*codec));
@@ -1359,8 +1538,44 @@ static int q6apm_dai_compr_mmap(struct snd_soc_component *component,
 	struct q6apm_dai_rtd *prtd = runtime->private_data;
 	struct device *dev = component->dev;
 
+	if (stream->direction == SND_COMPRESS_CAPTURE)
+		return -EINVAL;
+
 	return dma_mmap_coherent(dev, vma, prtd->dma_buffer.area, prtd->dma_buffer.addr,
 				 prtd->dma_buffer.bytes);
+}
+
+static int q6apm_compr_copy_capture(struct q6apm_dai_rtd *prtd, char __user *buf,
+				    size_t count)
+{
+	size_t copied = 0;
+
+	guard(mutex)(&prtd->lock);
+
+	while (prtd->reads_filled && !prtd->read_sizes[prtd->read_head])
+		q6apm_dai_compr_release_read(prtd);
+
+	if (prtd->reads_filled) {
+		unsigned int index = prtd->read_head;
+		void *source = prtd->dma_buffer.area + index * prtd->pcm_count +
+			       prtd->read_offset;
+
+		copied = min_t(size_t, count,
+			       prtd->read_sizes[index] - prtd->read_offset);
+
+		if (copy_to_user(buf, source, copied))
+			return -EFAULT;
+
+		prtd->read_offset += copied;
+
+		if (prtd->read_offset == prtd->read_sizes[index])
+			q6apm_dai_compr_release_read(prtd);
+	}
+
+	if (prtd->state == Q6APM_STREAM_RUNNING)
+		q6apm_dai_compr_queue_reads(prtd);
+
+	return copied;
 }
 
 static int q6apm_compr_copy(struct snd_soc_component *component,
@@ -1377,6 +1592,9 @@ static int q6apm_compr_copy(struct snd_soc_component *component,
 	uint64_t temp_bytes_received;
 	uint32_t bytes_to_write;
 	uint64_t avail, bytes_in_flight = 0;
+
+	if (stream->direction == SND_COMPRESS_CAPTURE)
+		return q6apm_compr_copy_capture(prtd, buf, count);
 
 	bytes_received = prtd->bytes_received;
 	temp_bytes_received = bytes_received;
