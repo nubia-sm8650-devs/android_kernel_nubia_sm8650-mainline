@@ -82,7 +82,7 @@ struct q6apm_dai_rtd {
 	bool next_track;
 	enum stream_state state;
 	struct q6apm_graph *graph;
-	spinlock_t lock;
+	struct mutex lock;
 	bool notify_on_drain;
 	struct list_head events;
 	struct snd_ctl_elem_id events_id;
@@ -154,7 +154,6 @@ static void q6apm_dai_queue_event(struct q6apm_dai_rtd *prtd,
 		      event->event_payload_size;
 	struct q6apm_dai_event *entry = NULL;
 	struct snd_ctl_elem_id id;
-	unsigned long flags;
 
 	if (size <= SZ_64K)
 		entry = kmalloc(struct_size(entry, data, size), GFP_KERNEL);
@@ -165,7 +164,7 @@ static void q6apm_dai_queue_event(struct q6apm_dai_rtd *prtd,
 		memcpy(entry->data + sizeof(u32), event, size - sizeof(u32));
 	}
 
-	spin_lock_irqsave(&prtd->lock, flags);
+	mutex_lock(&prtd->lock);
 
 	if (!entry || prtd->event_count == 64 || prtd->event_bytes + size > SZ_64K) {
 		prtd->events_lost = true;
@@ -177,7 +176,7 @@ static void q6apm_dai_queue_event(struct q6apm_dai_rtd *prtd,
 	}
 
 	id = prtd->events_id;
-	spin_unlock_irqrestore(&prtd->lock, flags);
+	mutex_unlock(&prtd->lock);
 
 	kfree(entry);
 	snd_ctl_notify(rtd->card->snd_card, SNDRV_CTL_EVENT_MASK_VALUE, &id);
@@ -233,7 +232,7 @@ static void event_handler_compr(uint32_t opcode, uint32_t token,
 	uint32_t bytes_written, bytes_to_write;
 	bool is_last_buffer = false;
 
-	guard(spinlock_irqsave)(&prtd->lock);
+	guard(mutex)(&prtd->lock);
 	switch (opcode) {
 	case APM_CLIENT_EVENT_CMD_EOS_DONE:
 		if (prtd->notify_on_drain) {
@@ -612,7 +611,7 @@ static int q6apm_dai_open(struct snd_soc_component *component,
 	if (prtd == NULL)
 		return -ENOMEM;
 
-	spin_lock_init(&prtd->lock);
+	mutex_init(&prtd->lock);
 	INIT_LIST_HEAD(&prtd->events);
 	prtd->substream = substream;
 	prtd->graph = q6apm_graph_open(dev, event_handler, prtd, graph_id, substream->stream);
@@ -849,7 +848,6 @@ static int q6apm_dai_events(struct snd_kcontrol *kcontrol, int op,
 	struct q6apm_dai_rtd *prtd;
 	struct q6apm_dai_event *entry;
 	u32 header[2];
-	unsigned long flags;
 	int ret = 0;
 
 	if (size < sizeof(header))
@@ -864,9 +862,9 @@ static int q6apm_dai_events(struct snd_kcontrol *kcontrol, int op,
 
 	prtd = substream->runtime->private_data;
 
-	spin_lock_irqsave(&prtd->lock, flags);
+	mutex_lock(&prtd->lock);
 	prtd->events_id = kcontrol->id;
-	spin_unlock_irqrestore(&prtd->lock, flags);
+	mutex_unlock(&prtd->lock);
 
 	if (op == SNDRV_CTL_TLV_OP_WRITE) {
 		void *data;
@@ -899,7 +897,7 @@ static int q6apm_dai_events(struct snd_kcontrol *kcontrol, int op,
 		goto unlock;
 	}
 
-	spin_lock_irqsave(&prtd->lock, flags);
+	mutex_lock(&prtd->lock);
 
 	if (prtd->events_lost) {
 		prtd->events_lost = false;
@@ -909,7 +907,7 @@ static int q6apm_dai_events(struct snd_kcontrol *kcontrol, int op,
 	}
 
 	entry = ret ? NULL : list_first_entry(&prtd->events, struct q6apm_dai_event, node);
-	spin_unlock_irqrestore(&prtd->lock, flags);
+	mutex_unlock(&prtd->lock);
 
 	if (ret)
 		goto unlock;
@@ -928,11 +926,11 @@ static int q6apm_dai_events(struct snd_kcontrol *kcontrol, int op,
 		goto unlock;
 	}
 
-	spin_lock_irqsave(&prtd->lock, flags);
+	mutex_lock(&prtd->lock);
 	list_del(&entry->node);
 	prtd->event_count--;
 	prtd->event_bytes -= entry->size;
-	spin_unlock_irqrestore(&prtd->lock, flags);
+	mutex_unlock(&prtd->lock);
 
 	kfree(entry);
 
@@ -1107,7 +1105,7 @@ static int q6apm_dai_compr_open(struct snd_soc_component *component,
 		goto err_free_pages;
 
 	snd_compr_set_runtime_buffer(stream, &prtd->dma_buffer);
-	spin_lock_init(&prtd->lock);
+	mutex_init(&prtd->lock);
 
 	q6apm_enable_compress_module(dev, prtd->graph, true);
 	return 0;
@@ -1181,7 +1179,7 @@ static int q6apm_dai_compr_pointer(struct snd_soc_component *component,
 	struct q6apm_dai_rtd *prtd = runtime->private_data;
 	uint64_t temp_copied_total;
 
-	guard(spinlock_irqsave)(&prtd->lock);
+	guard(mutex)(&prtd->lock);
 	tstamp->copied_total = prtd->copied_total;
 	temp_copied_total = tstamp->copied_total;
 	tstamp->byte_offset = do_div(temp_copied_total, prtd->pcm_size);
@@ -1228,7 +1226,7 @@ static int q6apm_dai_compr_ack(struct snd_soc_component *component, struct snd_c
 	struct snd_compr_runtime *runtime = stream->runtime;
 	struct q6apm_dai_rtd *prtd = runtime->private_data;
 
-	guard(spinlock_irqsave)(&prtd->lock);
+	guard(mutex)(&prtd->lock);
 	prtd->bytes_received += count;
 
 	return count;
@@ -1390,7 +1388,7 @@ static int q6apm_compr_copy(struct snd_soc_component *component,
 			return -EFAULT;
 	}
 
-	guard(spinlock_irqsave)(&prtd->lock);
+	guard(mutex)(&prtd->lock);
 	bytes_in_flight = prtd->bytes_received - prtd->copied_total;
 
 	if (prtd->next_track) {
