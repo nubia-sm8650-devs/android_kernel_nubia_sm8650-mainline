@@ -1341,6 +1341,8 @@ static int audioreach_compr_media_format_size(const struct audioreach_module_con
 		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_alac_t);
 	case SND_AUDIOCODEC_APE:
 		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_ape_t);
+	case SND_AUDIOCODEC_VORBIS:
+		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_vorbis_t);
 	case SND_AUDIOCODEC_OPUS_RAW:
 		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_opus_t);
 	default:
@@ -1402,6 +1404,7 @@ static int audioreach_set_compr_media_format(struct media_format *media_fmt_hdr,
 	struct payload_media_fmt_aac_t *aac_cfg;
 	struct payload_media_fmt_pcm *mp3_cfg;
 	struct payload_media_fmt_flac_t *flac_cfg;
+	struct payload_media_fmt_vorbis_t *vorbis_cfg;
 	struct payload_media_fmt_opus_t *opus_cfg;
 
 	switch (mcfg->fmt) {
@@ -1485,6 +1488,15 @@ static int audioreach_set_compr_media_format(struct media_format *media_fmt_hdr,
 		ape_cfg->num_channels = audioreach_compr_channels(mcfg);
 		ape_cfg->sample_rate = mcfg->sample_rate;
 		ape_cfg->is_seek_table_present = codec->options.ape_d.seek_table_present;
+		break;
+	case SND_AUDIOCODEC_VORBIS:
+		media_fmt_hdr->data_format = DATA_FORMAT_RAW_COMPRESSED;
+		media_fmt_hdr->fmt_id = MEDIA_FMT_ID_VORBIS;
+		media_fmt_hdr->payload_size = sizeof(*vorbis_cfg);
+		p = p + sizeof(*media_fmt_hdr);
+		vorbis_cfg = p;
+		vorbis_cfg->bit_stream_fmt = codec->format ?
+					     codec->format : VORBIS_BIT_STREAM_TRANSCODED;
 		break;
 	case SND_AUDIOCODEC_OPUS_RAW:
 		media_fmt_hdr->data_format = DATA_FORMAT_RAW_COMPRESSED;

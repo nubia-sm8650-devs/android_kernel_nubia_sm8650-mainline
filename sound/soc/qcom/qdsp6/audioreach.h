@@ -34,6 +34,7 @@ struct q6apm_graph;
 #define MODULE_ID_ALAC_DEC		0x0700102B
 #define MODULE_ID_APE_DEC		0x0700102C
 #define MODULE_ID_FLAC_DEC		0x0700102F
+#define MODULE_ID_VORBIS_DEC		0x07001030
 #define MODULE_ID_SMECNS_V2		0x07001031
 #define MODULE_ID_MP3_DECODE		0x0700103B
 #define MODULE_ID_GAPLESS		0x0700104D
@@ -379,6 +380,13 @@ struct payload_media_fmt_ape_t {
 	uint16_t num_channels;
 	uint32_t sample_rate;
 	uint32_t is_seek_table_present;
+} __packed;
+
+#define MEDIA_FMT_ID_VORBIS		0x09001005
+#define VORBIS_BIT_STREAM_TRANSCODED	1
+
+struct payload_media_fmt_vorbis_t {
+	uint32_t bit_stream_fmt;
 } __packed;
 
 #define MEDIA_FMT_ID_OPUS	0x09001039

@@ -743,6 +743,9 @@ int q6apm_set_real_module_id(struct device *dev, struct q6apm_graph *graph,
 	case SND_AUDIOCODEC_APE:
 		module_id = MODULE_ID_APE_DEC;
 		break;
+	case SND_AUDIOCODEC_VORBIS:
+		module_id = MODULE_ID_VORBIS_DEC;
+		break;
 	case SND_AUDIOCODEC_OPUS_RAW:
 		module_id = MODULE_ID_OPUS_DEC;
 		break;
