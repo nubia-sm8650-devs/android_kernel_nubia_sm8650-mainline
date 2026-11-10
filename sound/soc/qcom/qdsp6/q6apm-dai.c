@@ -1445,6 +1445,9 @@ static int q6apm_dai_compr_set_params(struct snd_soc_component *component,
 	prtd->pcm_size = runtime->fragments * runtime->fragment_size;
 	prtd->bits_per_sample = 16;
 
+	if (prtd->pcm_size > prtd->dma_buffer.bytes)
+		return -EINVAL;
+
 	if (dir == SND_COMPRESS_CAPTURE)
 		return q6apm_dai_compr_capture_params(component, prtd, codec);
 
