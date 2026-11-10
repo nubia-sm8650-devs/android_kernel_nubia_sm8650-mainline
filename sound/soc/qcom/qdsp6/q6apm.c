@@ -718,7 +718,7 @@ int q6apm_enable_compress_module(struct device *dev, struct q6apm_graph *graph, 
 EXPORT_SYMBOL_GPL(q6apm_enable_compress_module);
 
 int q6apm_set_real_module_id(struct device *dev, struct q6apm_graph *graph,
-			     uint32_t codec_id)
+			     const struct snd_codec *codec)
 {
 	struct audioreach_module *module;
 	uint32_t module_id;
@@ -727,7 +727,7 @@ int q6apm_set_real_module_id(struct device *dev, struct q6apm_graph *graph,
 	if (!module)
 		return -ENODEV;
 
-	switch (codec_id) {
+	switch (codec->id) {
 	case SND_AUDIOCODEC_MP3:
 		module_id = MODULE_ID_MP3_DECODE;
 		break;

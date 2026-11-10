@@ -1259,7 +1259,7 @@ static int q6apm_dai_compr_set_params(struct snd_soc_component *component,
 	if (prtd->next_track != true) {
 		memcpy(&prtd->codec, codec, sizeof(*codec));
 
-		ret = q6apm_set_real_module_id(component->dev, prtd->graph, codec->id);
+		ret = q6apm_set_real_module_id(component->dev, prtd->graph, codec);
 		if (ret)
 			return ret;
 
