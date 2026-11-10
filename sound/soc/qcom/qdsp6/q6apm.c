@@ -722,6 +722,7 @@ int q6apm_set_real_module_id(struct device *dev, struct q6apm_graph *graph,
 {
 	struct audioreach_module *module;
 	uint32_t module_id;
+	int tag;
 
 	module = q6apm_find_module_by_mid(graph, MODULE_ID_PLACEHOLDER_DECODER);
 	if (!module)
@@ -745,6 +746,14 @@ int q6apm_set_real_module_id(struct device *dev, struct q6apm_graph *graph,
 		break;
 	case SND_AUDIOCODEC_VORBIS:
 		module_id = MODULE_ID_VORBIS_DEC;
+		break;
+	case SND_AUDIOCODEC_WMA:
+		tag = audioreach_wma_format_tag(codec);
+		if (tag < 0)
+			return tag;
+
+		module_id = tag == WMA_FORMAT_TAG_STD ? MODULE_ID_WMA_STD_DEC :
+							MODULE_ID_WMA_PRO_DEC;
 		break;
 	case SND_AUDIOCODEC_OPUS_RAW:
 		module_id = MODULE_ID_OPUS_DEC;

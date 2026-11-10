@@ -36,6 +36,8 @@ struct q6apm_graph;
 #define MODULE_ID_FLAC_DEC		0x0700102F
 #define MODULE_ID_VORBIS_DEC		0x07001030
 #define MODULE_ID_SMECNS_V2		0x07001031
+#define MODULE_ID_WMA_STD_DEC		0x07001036
+#define MODULE_ID_WMA_PRO_DEC		0x07001037
 #define MODULE_ID_MP3_DECODE		0x0700103B
 #define MODULE_ID_GAPLESS		0x0700104D
 #define MODULE_ID_USB_AUDIO_SINK	0x0700104F
@@ -380,6 +382,41 @@ struct payload_media_fmt_ape_t {
 	uint16_t num_channels;
 	uint32_t sample_rate;
 	uint32_t is_seek_table_present;
+} __packed;
+
+#define MEDIA_FMT_ID_WMA_PRO	0x09001006
+#define MEDIA_FMT_ID_WMA_STD	0x09001007
+#define WMA_FORMAT_TAG_STD		0x161
+#define WMA_FORMAT_TAG_PRO		0x162
+#define WMA_FORMAT_TAG_LOSSLESS		0x163
+#define WMA_FORMAT_TAG_10_PRO		0x166
+#define WMA_FORMAT_TAG_10_LOSSLESS	0x167
+#define WMA_CHANNEL_MASK_MONO	0x4
+#define WMA_CHANNEL_MASK_STEREO	0x3
+
+struct payload_media_fmt_wmastd_t {
+	uint16_t fmt_tag;
+	uint16_t num_channels;
+	uint32_t sample_rate;
+	uint32_t avg_bytes_per_sec;
+	uint16_t blk_align;
+	uint16_t bits_per_sample;
+	uint32_t channel_mask;
+	uint16_t enc_options;
+	uint16_t reserved;
+} __packed;
+
+struct payload_media_fmt_wmapro_t {
+	uint16_t fmt_tag;
+	uint16_t num_channels;
+	uint32_t sample_rate;
+	uint32_t avg_bytes_per_sec;
+	uint16_t blk_align;
+	uint16_t bits_per_sample;
+	uint32_t channel_mask;
+	uint16_t enc_options;
+	uint16_t advanced_enc_option;
+	uint32_t advanced_enc_options2;
 } __packed;
 
 #define MEDIA_FMT_ID_VORBIS		0x09001005
@@ -1150,6 +1187,7 @@ int audioreach_send_u32_param(struct q6apm_graph *graph,
 			      uint32_t param_id, uint32_t param_val);
 int audioreach_compr_set_param(struct q6apm_graph *graph,
 			       const struct audioreach_module_config *mcfg);
+int audioreach_wma_format_tag(const struct snd_codec *codec);
 int audioreach_setup_push_pull(struct q6apm_graph *graph, phys_addr_t bphys,
 				phys_addr_t pphys, uint32_t mem_map_handle,
 				uint32_t pos_buf_mem_map_handle, uint32_t size);

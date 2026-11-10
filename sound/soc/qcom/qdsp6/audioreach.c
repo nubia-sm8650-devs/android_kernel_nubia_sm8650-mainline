@@ -1328,8 +1328,28 @@ static int audioreach_mfc_set_media_format(struct q6apm_graph *graph,
 	return q6apm_send_cmd_sync(graph->apm, pkt, 0);
 }
 
+int audioreach_wma_format_tag(const struct snd_codec *codec)
+{
+	switch (codec->profile) {
+	case SND_AUDIOPROFILE_WMA9:
+		return WMA_FORMAT_TAG_STD;
+	case SND_AUDIOPROFILE_WMA9_PRO:
+		return WMA_FORMAT_TAG_PRO;
+	case SND_AUDIOPROFILE_WMA9_LOSSLESS:
+		return WMA_FORMAT_TAG_LOSSLESS;
+	case SND_AUDIOPROFILE_WMA10:
+		return WMA_FORMAT_TAG_10_PRO;
+	case SND_AUDIOPROFILE_WMA10_LOSSLESS:
+		return WMA_FORMAT_TAG_10_LOSSLESS;
+	default:
+		return -EINVAL;
+	}
+}
+
 static int audioreach_compr_media_format_size(const struct audioreach_module_config *mcfg)
 {
+	int tag;
+
 	switch (mcfg->fmt) {
 	case SND_AUDIOCODEC_MP3:
 		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_pcm);
@@ -1343,6 +1363,17 @@ static int audioreach_compr_media_format_size(const struct audioreach_module_con
 		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_ape_t);
 	case SND_AUDIOCODEC_VORBIS:
 		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_vorbis_t);
+	case SND_AUDIOCODEC_WMA:
+		tag = audioreach_wma_format_tag(&mcfg->codec);
+		if (tag < 0)
+			return tag;
+
+		if (tag == WMA_FORMAT_TAG_STD)
+			return sizeof(struct media_format) +
+			       sizeof(struct payload_media_fmt_wmastd_t);
+
+		return sizeof(struct media_format) +
+		       sizeof(struct payload_media_fmt_wmapro_t);
 	case SND_AUDIOCODEC_OPUS_RAW:
 		return sizeof(struct media_format) + sizeof(struct payload_media_fmt_opus_t);
 	default:
@@ -1405,7 +1436,11 @@ static int audioreach_set_compr_media_format(struct media_format *media_fmt_hdr,
 	struct payload_media_fmt_pcm *mp3_cfg;
 	struct payload_media_fmt_flac_t *flac_cfg;
 	struct payload_media_fmt_vorbis_t *vorbis_cfg;
+	struct payload_media_fmt_wmastd_t *wmastd_cfg;
+	struct payload_media_fmt_wmapro_t *wmapro_cfg;
 	struct payload_media_fmt_opus_t *opus_cfg;
+	u32 channels, channel_mask;
+	int tag;
 
 	switch (mcfg->fmt) {
 	case SND_AUDIOCODEC_MP3:
@@ -1497,6 +1532,52 @@ static int audioreach_set_compr_media_format(struct media_format *media_fmt_hdr,
 		vorbis_cfg = p;
 		vorbis_cfg->bit_stream_fmt = codec->format ?
 					     codec->format : VORBIS_BIT_STREAM_TRANSCODED;
+		break;
+	case SND_AUDIOCODEC_WMA:
+		tag = audioreach_wma_format_tag(codec);
+		if (tag < 0)
+			return tag;
+
+		channels = audioreach_compr_channels(mcfg);
+		if (channels == 1)
+			channel_mask = WMA_CHANNEL_MASK_MONO;
+		else if (channels == 2)
+			channel_mask = WMA_CHANNEL_MASK_STEREO;
+		else
+			return -EINVAL;
+
+		media_fmt_hdr->data_format = DATA_FORMAT_RAW_COMPRESSED;
+		p = p + sizeof(*media_fmt_hdr);
+
+		if (tag == WMA_FORMAT_TAG_STD) {
+			media_fmt_hdr->fmt_id = MEDIA_FMT_ID_WMA_STD;
+			media_fmt_hdr->payload_size = sizeof(*wmastd_cfg);
+			wmastd_cfg = p;
+			wmastd_cfg->fmt_tag = tag;
+			wmastd_cfg->num_channels = channels;
+			wmastd_cfg->sample_rate = mcfg->sample_rate;
+			wmastd_cfg->avg_bytes_per_sec = codec->bit_rate / 8;
+			wmastd_cfg->blk_align = codec->align;
+			wmastd_cfg->bits_per_sample = audioreach_compr_bit_width(mcfg);
+			wmastd_cfg->channel_mask = channel_mask;
+			wmastd_cfg->enc_options = codec->options.wma_d.encoder_option;
+		} else {
+			media_fmt_hdr->fmt_id = MEDIA_FMT_ID_WMA_PRO;
+			media_fmt_hdr->payload_size = sizeof(*wmapro_cfg);
+			wmapro_cfg = p;
+			wmapro_cfg->fmt_tag = tag;
+			wmapro_cfg->num_channels = channels;
+			wmapro_cfg->sample_rate = mcfg->sample_rate;
+			wmapro_cfg->avg_bytes_per_sec = codec->bit_rate / 8;
+			wmapro_cfg->blk_align = codec->align;
+			wmapro_cfg->bits_per_sample = audioreach_compr_bit_width(mcfg);
+			wmapro_cfg->channel_mask = channel_mask;
+			wmapro_cfg->enc_options = codec->options.wma_d.encoder_option;
+			wmapro_cfg->advanced_enc_option =
+				codec->options.wma_d.adv_encoder_option;
+			wmapro_cfg->advanced_enc_options2 =
+				codec->options.wma_d.adv_encoder_option2;
+		}
 		break;
 	case SND_AUDIOCODEC_OPUS_RAW:
 		media_fmt_hdr->data_format = DATA_FORMAT_RAW_COMPRESSED;
