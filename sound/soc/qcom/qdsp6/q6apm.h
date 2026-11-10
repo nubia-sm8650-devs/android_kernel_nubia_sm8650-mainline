@@ -204,6 +204,9 @@ int q6apm_remove_initial_silence(struct device *dev, struct q6apm_graph *graph, 
 int q6apm_remove_trailing_silence(struct device *dev, struct q6apm_graph *graph, uint32_t samples);
 int q6apm_set_real_module_id(struct device *dev, struct q6apm_graph *graph,
 			     const struct snd_codec *codec);
+int q6apm_set_real_encoder_id(struct device *dev, struct q6apm_graph *graph,
+			      const struct snd_codec *codec);
+int q6apm_graph_set_read_frames(struct q6apm_graph *graph, uint32_t frames);
 int q6apm_get_hw_pointer(struct q6apm_graph *graph, int dir);
 bool q6apm_is_graph_in_push_pull_mode(struct q6apm_graph *graph);
 bool q6apm_is_graph_hostless_from_id(struct device *dev, unsigned int graph_id);

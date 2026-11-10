@@ -2116,6 +2116,75 @@ static int audioreach_speaker_protection_vi(struct q6apm_graph *graph,
 	return rc;
 }
 
+static int audioreach_encoder_set_media_format(struct q6apm_graph *graph,
+					       const struct audioreach_module *module,
+					       const struct audioreach_module_config *cfg)
+{
+	struct param_id_encoder_output_config *output;
+	struct apm_module_param_data *param_data;
+	struct aac_enc_cfg *aac_cfg;
+	int payload_size, flag, rc;
+	void *p;
+
+	if (cfg->fmt != SND_AUDIOCODEC_AAC)
+		return -EINVAL;
+
+	flag = audioreach_aac_format_flag(&cfg->codec);
+	if (flag == AAC_FORMAT_FLAG_ADIF)
+		return -EINVAL;
+
+	payload_size = APM_MODULE_PARAM_DATA_SIZE + sizeof(*output) + sizeof(*aac_cfg);
+
+	struct gpr_pkt *pkt __free(kfree) =
+		audioreach_alloc_apm_cmd_pkt(payload_size, APM_CMD_SET_CFG, 0);
+	if (IS_ERR(pkt))
+		return PTR_ERR(pkt);
+
+	p = (void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE;
+	param_data = p;
+	param_data->module_instance_id = module->instance_id;
+	param_data->param_id = PARAM_ID_ENCODER_OUTPUT_CONFIG;
+	param_data->param_size = payload_size - APM_MODULE_PARAM_DATA_SIZE;
+
+	output = p + APM_MODULE_PARAM_DATA_SIZE;
+	output->data_format = DATA_FORMAT_FIXED_POINT;
+	output->fmt_id = MEDIA_FMT_ID_AAC;
+	output->payload_size = sizeof(*aac_cfg);
+
+	aac_cfg = (void *)(output + 1);
+	aac_cfg->enc_mode = cfg->codec.profile == SND_AUDIOMODE_AAC_HE ? AAC_AOT_SBR :
+			    cfg->codec.profile == SND_AUDIOMODE_AAC_HE_PS ? AAC_AOT_PS :
+			    AAC_AOT_LC;
+	aac_cfg->aac_fmt_flag = flag;
+
+	rc = q6apm_send_cmd_sync(graph->apm, pkt, 0);
+	if (rc)
+		return rc;
+
+	return audioreach_send_u32_param(graph, module, PARAM_ID_ENC_BITRATE,
+					 cfg->codec.bit_rate);
+}
+
+int audioreach_rd_shmem_set_frames(struct q6apm_graph *graph,
+				   const struct audioreach_module *module,
+				   uint32_t frames)
+{
+	struct apm_rd_shmem_module_config_cmd *cmd;
+
+	struct gpr_pkt *pkt __free(kfree) =
+		audioreach_alloc_apm_cmd_pkt(sizeof(*cmd), APM_CMD_SET_CFG, 0);
+	if (IS_ERR(pkt))
+		return PTR_ERR(pkt);
+
+	cmd = (void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE;
+	cmd->param_data.module_instance_id = module->instance_id;
+	cmd->param_data.param_id = PARAM_ID_RD_SH_MEM_CFG;
+	cmd->param_data.param_size = sizeof(cmd->cfg);
+	cmd->cfg.num_frames_per_buffer = frames;
+
+	return q6apm_send_cmd_sync(graph->apm, pkt, 0);
+}
+
 int audioreach_set_media_format(struct q6apm_graph *graph,
 				const struct audioreach_module *module,
 				const struct audioreach_module_config *cfg)
@@ -2131,11 +2200,17 @@ int audioreach_set_media_format(struct q6apm_graph *graph,
 		if (!rc)
 			rc = audioreach_logging_set_media_format(graph, module);
 		break;
+	case MODULE_ID_PLACEHOLDER_ENCODER:
+		if (cfg->fmt != SND_AUDIOCODEC_PCM) {
+			rc = audioreach_encoder_set_media_format(graph, module, cfg);
+			break;
+		}
+
+		fallthrough;
 	case MODULE_ID_PCM_DEC:
 	case MODULE_ID_PCM_ENC:
 	case MODULE_ID_PCM_CNV:
 	case MODULE_ID_PLACEHOLDER_DECODER:
-	case MODULE_ID_PLACEHOLDER_ENCODER:
 		rc = audioreach_pcm_set_media_format(graph, module, cfg);
 		break;
 	case MODULE_ID_DISPLAY_PORT_SINK:

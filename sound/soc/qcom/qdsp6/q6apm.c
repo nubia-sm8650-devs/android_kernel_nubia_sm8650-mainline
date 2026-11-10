@@ -767,6 +767,35 @@ int q6apm_set_real_module_id(struct device *dev, struct q6apm_graph *graph,
 }
 EXPORT_SYMBOL_GPL(q6apm_set_real_module_id);
 
+int q6apm_set_real_encoder_id(struct device *dev, struct q6apm_graph *graph,
+			      const struct snd_codec *codec)
+{
+	struct audioreach_module *module;
+
+	module = q6apm_find_module_by_mid(graph, MODULE_ID_PLACEHOLDER_ENCODER);
+	if (!module)
+		return -ENODEV;
+
+	if (codec->id != SND_AUDIOCODEC_AAC)
+		return -EINVAL;
+
+	return audioreach_send_u32_param(graph, module, PARAM_ID_REAL_MODULE_ID,
+					 MODULE_ID_AAC_ENC);
+}
+EXPORT_SYMBOL_GPL(q6apm_set_real_encoder_id);
+
+int q6apm_graph_set_read_frames(struct q6apm_graph *graph, uint32_t frames)
+{
+	struct audioreach_module *module;
+
+	module = q6apm_find_module_by_mid(graph, MODULE_ID_RD_SHARED_MEM_EP);
+	if (!module)
+		return -ENODEV;
+
+	return audioreach_rd_shmem_set_frames(graph, module, frames);
+}
+EXPORT_SYMBOL_GPL(q6apm_graph_set_read_frames);
+
 int q6apm_graph_media_format_pcm(struct q6apm_graph *graph, struct audioreach_module_config *cfg)
 {
 	struct audioreach_graph_info *info = graph->info;

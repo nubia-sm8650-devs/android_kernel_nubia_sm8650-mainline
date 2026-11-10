@@ -26,6 +26,7 @@ struct q6apm_graph;
 #define MODULE_ID_SAL			0x07001010
 #define MODULE_ID_MFC			0x07001015
 #define MODULE_ID_DATA_LOGGING		0x0700101A
+#define MODULE_ID_AAC_ENC		0x0700101E
 #define MODULE_ID_AAC_DEC		0x0700101F
 #define MODULE_ID_CODEC_DMA_SINK	0x07001023
 #define MODULE_ID_CODEC_DMA_SOURCE	0x07001024
@@ -508,6 +509,19 @@ struct data_cmd_rsp_rd_sh_mem_ep_data_buffer_done_v2 {
 } __packed;
 
 #define PARAM_ID_RD_SH_MEM_CFG				0x08001007
+#define PARAM_ID_ENCODER_OUTPUT_CONFIG			0x08001009
+#define PARAM_ID_ENC_BITRATE				0x08001052
+
+struct param_id_encoder_output_config {
+	uint32_t data_format;
+	uint32_t fmt_id;
+	uint32_t payload_size;
+} __packed;
+
+struct aac_enc_cfg {
+	uint16_t enc_mode;
+	uint16_t aac_fmt_flag;
+} __packed;
 
 struct param_id_rd_sh_mem_cfg {
 	uint32_t num_frames_per_buffer;
@@ -1188,6 +1202,9 @@ int audioreach_send_u32_param(struct q6apm_graph *graph,
 int audioreach_compr_set_param(struct q6apm_graph *graph,
 			       const struct audioreach_module_config *mcfg);
 int audioreach_wma_format_tag(const struct snd_codec *codec);
+int audioreach_rd_shmem_set_frames(struct q6apm_graph *graph,
+				   const struct audioreach_module *module,
+				   uint32_t frames);
 int audioreach_setup_push_pull(struct q6apm_graph *graph, phys_addr_t bphys,
 				phys_addr_t pphys, uint32_t mem_map_handle,
 				uint32_t pos_buf_mem_map_handle, uint32_t size);
