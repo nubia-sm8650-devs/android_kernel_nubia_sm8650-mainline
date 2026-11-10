@@ -75,6 +75,13 @@ struct qcom_snd_soc_common {
 	int (*snd_prepare)(struct snd_pcm_substream *substream);
 };
 
+struct sc8280xp_be_config {
+	unsigned int rate;
+	unsigned int channels_min;
+	unsigned int channels_max;
+	snd_pcm_format_t format;
+};
+
 struct sc8280xp_snd_data {
 	bool stream_prepared[AFE_PORT_MAX];
 	struct snd_soc_card *card;
@@ -82,6 +89,7 @@ struct sc8280xp_snd_data {
 	struct snd_soc_jack dp_jack[8];
 	const struct qcom_snd_soc_common *priv;
 	bool jack_setup;
+	struct sc8280xp_be_config be_config[AFE_PORT_MAX];
 };
 
 static inline int sc8280xp_get_mclk_freq(struct snd_pcm_hw_params *params)
@@ -173,6 +181,26 @@ static int sc8280xp_tdm_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+static void sc8280xp_init_be_config(struct snd_soc_pcm_runtime *rtd)
+{
+	struct sc8280xp_snd_data *data = snd_soc_card_get_drvdata(rtd->card);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	struct sc8280xp_be_config *cfg = &data->be_config[cpu_dai->id];
+
+	cfg->rate = 48000;
+	cfg->format = SNDRV_PCM_FORMAT_S16_LE;
+	cfg->channels_max = 2;
+
+	switch (cpu_dai->id) {
+	case TX_CODEC_DMA_TX_0 ... TX_CODEC_DMA_TX_3:
+		cfg->channels_min = 1;
+		break;
+	default:
+		cfg->channels_min = 2;
+		break;
+	}
+}
+
 static int sc8280xp_snd_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct sc8280xp_snd_data *data = snd_soc_card_get_drvdata(rtd->card);
@@ -180,6 +208,8 @@ static int sc8280xp_snd_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_card *card = rtd->card;
 	struct snd_soc_jack *dp_jack  = NULL;
 	int dp_pcm_id = 0;
+
+	sc8280xp_init_be_config(rtd);
 
 	switch (cpu_dai->id) {
 	case WSA_CODEC_DMA_RX_0:
@@ -273,25 +303,22 @@ static int sc8280xp_slim_hw_params(struct snd_soc_pcm_runtime *rtd)
 static int sc8280xp_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 				     struct snd_pcm_hw_params *params)
 {
+	struct sc8280xp_snd_data *data = snd_soc_card_get_drvdata(rtd->card);
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	struct snd_interval *rate = hw_param_interval(params,
 					SNDRV_PCM_HW_PARAM_RATE);
 	struct snd_interval *channels = hw_param_interval(params,
 					SNDRV_PCM_HW_PARAM_CHANNELS);
 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
+	struct sc8280xp_be_config *cfg = &data->be_config[cpu_dai->id];
 
-	rate->min = rate->max = 48000;
+	rate->min = rate->max = cfg->rate;
 	snd_mask_none(fmt);
-	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
-	channels->min = 2;
-	channels->max = 2;
+	snd_mask_set_format(fmt, cfg->format);
+	channels->min = cfg->channels_min;
+	channels->max = cfg->channels_max;
+
 	switch (cpu_dai->id) {
-	case TX_CODEC_DMA_TX_0:
-	case TX_CODEC_DMA_TX_1:
-	case TX_CODEC_DMA_TX_2:
-	case TX_CODEC_DMA_TX_3:
-		channels->min = 1;
-		break;
 	case SLIMBUS_0_RX ... SLIMBUS_6_TX: {
 		unsigned int ch[SLIM_MAX_PORTS];
 		unsigned int num;
