@@ -160,6 +160,102 @@ static void q6apm_put_audioreach_graph(struct kref *ref)
 }
 
 
+static bool q6apm_param_target_allowed(const struct audioreach_graph_info *info,
+				       u32 instance_id)
+{
+	struct audioreach_container *container;
+	struct audioreach_sub_graph *sg;
+	struct audioreach_module *module;
+
+	list_for_each_entry(sg, &info->sg_list, node) {
+		list_for_each_entry(container, &sg->container_list, node) {
+			list_for_each_entry(module, &container->modules_list, node) {
+				if (module->instance_id == instance_id)
+					return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+static int q6apm_validate_params(const struct audioreach_graph_info *info,
+				 const void *data, size_t size, u32 *destination)
+{
+	const struct apm_module_param_data *param;
+	unsigned int count = 0;
+	size_t record_size;
+
+	if (!size)
+		return -EINVAL;
+
+	while (size) {
+		if (size < sizeof(*param))
+			return -EINVAL;
+
+		param = data;
+		if (param->error_code || param->param_size > size - sizeof(*param))
+			return -EINVAL;
+
+		record_size = sizeof(*param) + ALIGN((size_t)param->param_size, 8);
+		if (record_size > size)
+			return -EINVAL;
+
+		if (!q6apm_param_target_allowed(info, param->module_instance_id))
+			return -EPERM;
+
+		*destination = count++ ? APM_MODULE_INSTANCE_ID : param->module_instance_id;
+
+		data += record_size;
+		size -= record_size;
+	}
+
+	return 0;
+}
+
+static struct gpr_pkt *q6apm_alloc_params_pkt(struct q6apm *apm, u32 graph_id,
+					      const void *data, size_t size, u32 opcode)
+{
+	struct audioreach_graph *graph;
+	u32 destination, token;
+	struct gpr_pkt *pkt;
+	int ret;
+
+	if (size > Q6APM_MAX_INBAND_PARAMS)
+		return ERR_PTR(-EMSGSIZE);
+
+	graph = idr_find(&apm->graph_idr, graph_id);
+	if (!graph)
+		return ERR_PTR(-ENODEV);
+
+	ret = q6apm_validate_params(graph->info, data, size, &destination);
+	if (ret)
+		return ERR_PTR(ret);
+
+	token = ++apm->param_token;
+	if (!token)
+		token = ++apm->param_token;
+
+	pkt = audioreach_alloc_cmd_pkt(size, opcode, token, GPR_APM_MODULE_IID, destination);
+	if (!IS_ERR(pkt))
+		memcpy((void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE, data, size);
+
+	return pkt;
+}
+
+int q6apm_set_params(struct q6apm *apm, u32 graph_id,
+		     const void *data, size_t size)
+{
+	guard(mutex)(&apm->graph_lock);
+
+	struct gpr_pkt *pkt __free(kfree) =
+		q6apm_alloc_params_pkt(apm, graph_id, data, size, APM_CMD_SET_CFG);
+	if (IS_ERR(pkt))
+		return PTR_ERR(pkt);
+
+	return q6apm_send_cmd_sync(apm, pkt, 0);
+}
+
 static int q6apm_get_apm_state(struct q6apm *apm)
 {
 	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_apm_cmd_pkt(0,

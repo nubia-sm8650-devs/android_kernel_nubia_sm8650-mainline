@@ -4,6 +4,7 @@
 #include <linux/types.h>
 #include <linux/atomic.h>
 #include <linux/slab.h>
+#include <linux/sizes.h>
 #include <linux/wait.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -50,6 +51,8 @@
 #define APM_LAST_BUFFER_FLAG			BIT(30)
 #define NO_TIMESTAMP				0xFF00
 
+#define Q6APM_MAX_INBAND_PARAMS	(SZ_64K - GPR_HDR_SIZE - APM_CMD_HDR_SIZE)
+
 struct q6apm {
 	struct device *dev;
 	gpr_port_t *port;
@@ -64,6 +67,7 @@ struct q6apm {
 	struct mutex response_lock;
 	u32 cmd_opcode;
 	u32 cmd_token;
+	u32 param_token;
 	uint32_t state;
 
 	struct list_head widget_list;
@@ -123,6 +127,8 @@ int q6apm_graph_prepare(struct q6apm_graph *graph);
 int q6apm_graph_start(struct q6apm_graph *graph);
 int q6apm_graph_stop(struct q6apm_graph *graph);
 int q6apm_graph_flush(struct q6apm_graph *graph);
+int q6apm_set_params(struct q6apm *apm, u32 graph_id,
+		     const void *data, size_t size);
 
 /* Media Format */
 int q6apm_graph_media_format_pcm(struct q6apm_graph *graph,
