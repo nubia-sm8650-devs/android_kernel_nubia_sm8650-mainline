@@ -59,6 +59,7 @@ struct q6apm {
 	struct gpr_ibasic_rsp_result_t result;
 
 	struct mutex cmd_lock;
+	struct mutex graph_lock;
 	struct mutex lock;
 	struct mutex response_lock;
 	u32 cmd_opcode;

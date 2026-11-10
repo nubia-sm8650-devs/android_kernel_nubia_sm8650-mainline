@@ -51,6 +51,8 @@ static struct audioreach_graph *q6apm_get_audioreach_graph(struct q6apm *apm, ui
 	struct audioreach_graph *graph;
 	int id, ret;
 
+	guard(mutex)(&apm->graph_lock);
+
 	mutex_lock(&apm->lock);
 	graph = idr_find(&apm->graph_idr, graph_id);
 	mutex_unlock(&apm->lock);
@@ -151,6 +153,7 @@ static void q6apm_put_audioreach_graph(struct kref *ref)
 	mutex_lock(&apm->lock);
 	graph = idr_remove(&apm->graph_idr, graph->id);
 	mutex_unlock(&apm->lock);
+	mutex_unlock(&apm->graph_lock);
 
 	kfree(graph->graph);
 	kfree(graph);
@@ -795,7 +798,8 @@ struct q6apm_graph *q6apm_graph_open(struct device *dev, q6apm_cb cb,
 free_graph:
 	kfree(graph);
 put_ar_graph:
-	kref_put(&ar_graph->refcount, q6apm_put_audioreach_graph);
+	kref_put_mutex(&ar_graph->refcount, q6apm_put_audioreach_graph,
+		       &ar_graph->apm->graph_lock);
 	return ERR_PTR(ret);
 }
 EXPORT_SYMBOL_GPL(q6apm_graph_open);
@@ -805,7 +809,8 @@ int q6apm_graph_close(struct q6apm_graph *graph)
 	struct audioreach_graph *ar_graph = graph->ar_graph;
 
 	graph->ar_graph = NULL;
-	kref_put(&ar_graph->refcount, q6apm_put_audioreach_graph);
+	kref_put_mutex(&ar_graph->refcount, q6apm_put_audioreach_graph,
+		       &ar_graph->apm->graph_lock);
 	gpr_free_port(graph->port);
 	kfree(graph);
 
@@ -901,6 +906,7 @@ static int apm_probe(gpr_device_t *gdev)
 
 	mutex_init(&apm->lock);
 	mutex_init(&apm->cmd_lock);
+	mutex_init(&apm->graph_lock);
 	mutex_init(&apm->response_lock);
 	apm->dev = dev;
 	apm->gdev = gdev;
