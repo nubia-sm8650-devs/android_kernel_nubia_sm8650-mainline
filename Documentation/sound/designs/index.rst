@@ -17,3 +17,4 @@ Designs and Implementations
    seq-oss
    jack-injection
    midi-2.0
+   pcm-buffer-descriptor
