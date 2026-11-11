@@ -4,6 +4,7 @@
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
  */
 
+#include <linux/anon_inodes.h>
 #include <linux/compat.h>
 #include <linux/mm.h>
 #include <linux/module.h>
@@ -2991,6 +2992,113 @@ static int snd_pcm_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+static int snd_pcm_buffer_release(struct inode *inode, struct file *file)
+{
+	if (!file->private_data)
+		return 0;
+
+	return snd_pcm_release(inode, file);
+}
+
+static int snd_pcm_buffer_mmap(struct file *file, struct vm_area_struct *area)
+{
+	struct snd_pcm_file *pcm_file = file->private_data;
+	struct snd_pcm_substream *substream = pcm_file->substream;
+
+	if (PCM_RUNTIME_CHECK(substream))
+		return -ENXIO;
+
+	if (substream->runtime->state == SNDRV_PCM_STATE_DISCONNECTED)
+		return -EBADFD;
+
+	return snd_pcm_mmap_data(substream, file, area);
+}
+
+#ifndef CONFIG_MMU
+static unsigned long snd_pcm_buffer_get_unmapped_area(struct file *file,
+						      unsigned long addr,
+						      unsigned long len,
+						      unsigned long pgoff,
+						      unsigned long flags)
+{
+	struct snd_pcm_file *pcm_file = file->private_data;
+	struct snd_pcm_runtime *runtime = pcm_file->substream->runtime;
+
+	return (unsigned long)runtime->dma_area + (pgoff << PAGE_SHIFT);
+}
+#else
+# define snd_pcm_buffer_get_unmapped_area NULL
+#endif
+
+static const struct file_operations snd_pcm_buffer_f_ops = {
+	.owner			=	THIS_MODULE,
+	.release		=	snd_pcm_buffer_release,
+	.mmap			=	snd_pcm_buffer_mmap,
+	.get_unmapped_area	=	snd_pcm_buffer_get_unmapped_area,
+};
+
+static struct file *snd_pcm_buffer_file(struct file *file,
+					struct snd_pcm_substream *substream)
+{
+	struct snd_pcm *pcm = substream->pcm;
+	struct snd_pcm_file *pcm_file;
+	struct file *buffer;
+	int err;
+
+	pcm_file = kzalloc_obj(*pcm_file);
+	if (!pcm_file)
+		return ERR_PTR(-ENOMEM);
+
+	pcm_file->substream = substream;
+
+	if (!try_module_get(pcm->card->module)) {
+		err = -ENODEV;
+		goto free;
+	}
+
+	buffer = anon_inode_getfile("[snd-pcm-buffer]", &snd_pcm_buffer_f_ops,
+				    NULL, file->f_flags & O_ACCMODE);
+	if (IS_ERR(buffer)) {
+		err = PTR_ERR(buffer);
+		goto put;
+	}
+
+	err = snd_card_file_add(pcm->card, buffer);
+	if (err < 0) {
+		fput(buffer);
+		goto put;
+	}
+
+	scoped_guard(mutex, &pcm->open_mutex)
+		substream->ref_count++;
+
+	buffer->private_data = pcm_file;
+
+	return buffer;
+
+put:
+	module_put(pcm->card->module);
+free:
+	kfree(pcm_file);
+
+	return ERR_PTR(err);
+}
+
+static int snd_pcm_anonymous_dup(struct file *file,
+				 struct snd_pcm_substream *substream,
+				 int __user *arg)
+{
+	int mode;
+
+	if (get_user(mode, arg))
+		return -EFAULT;
+
+	if (mode != SNDRV_PCM_ANON_DUP_BUFFER)
+		return -EINVAL;
+
+	return FD_ADD(O_CLOEXEC, snd_pcm_buffer_file(file, substream));
+}
+
 /* check and update PCM state; return 0 or a negative error
  * call this inside PCM lock
  */
@@ -3433,6 +3541,8 @@ static int snd_pcm_common_ioctl(struct file *file,
 			     (unsigned int __user *)arg))
 			return -EFAULT;
 		return 0;
+	case SNDRV_PCM_IOCTL_ANONYMOUS_DUP:
+		return snd_pcm_anonymous_dup(file, substream, arg);
 	case SNDRV_PCM_IOCTL_HW_REFINE:
 		return snd_pcm_hw_refine_user(substream, arg);
 	case SNDRV_PCM_IOCTL_HW_PARAMS:
