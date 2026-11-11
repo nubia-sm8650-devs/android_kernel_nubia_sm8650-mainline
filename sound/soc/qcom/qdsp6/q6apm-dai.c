@@ -297,12 +297,12 @@ static void event_handler_compr(uint32_t opcode, uint32_t token,
 		q6apm_dai_compr_read_done(prtd, token, payload);
 		break;
 	case APM_CLIENT_EVENT_DATA_WRITE_DONE:
+		if (prtd->state != Q6APM_STREAM_RUNNING)
+			break;
+
 		bytes_written = token >> APM_WRITE_TOKEN_LEN_SHIFT;
 		prtd->copied_total += bytes_written;
 		snd_compr_fragment_elapsed(substream);
-
-		if (prtd->state != Q6APM_STREAM_RUNNING)
-			break;
 
 		avail = prtd->bytes_received - prtd->bytes_sent;
 
@@ -1304,6 +1304,82 @@ static int q6apm_dai_compr_capture_stop(struct q6apm_dai_rtd *prtd)
 	return ret;
 }
 
+static int q6apm_dai_compr_playback_run(struct q6apm_dai_rtd *prtd)
+{
+	struct audioreach_module_config cfg = {};
+	int ret;
+
+	cfg.direction = SND_COMPRESS_PLAYBACK;
+	cfg.sample_rate = prtd->codec.sample_rate;
+	cfg.num_channels = 2;
+	cfg.bit_width = prtd->bits_per_sample;
+	cfg.fmt = prtd->codec.id;
+	ret = q6dsp_map_channels(cfg.channel_map, cfg.num_channels);
+	if (ret)
+		return ret;
+
+	memcpy(&cfg.codec, &prtd->codec, sizeof(cfg.codec));
+
+	ret = q6apm_graph_media_format_shmem(prtd->graph, &cfg);
+	if (ret < 0)
+		return ret;
+
+	ret = q6apm_graph_media_format_pcm(prtd->graph, &cfg);
+	if (ret)
+		return ret;
+
+	ret = q6apm_alloc_fragments(prtd->graph, SNDRV_PCM_STREAM_PLAYBACK,
+				    prtd->phys, prtd->pcm_count, prtd->periods);
+	if (ret < 0)
+		return -ENOMEM;
+
+	ret = q6apm_graph_prepare(prtd->graph);
+	if (ret)
+		return ret;
+
+	return q6apm_graph_start(prtd->graph);
+}
+
+static int q6apm_dai_compr_playback_restart(struct q6apm_dai_rtd *prtd)
+{
+	int ret;
+
+	scoped_guard(mutex, &prtd->lock) {
+		if (prtd->state != Q6APM_STREAM_STOPPED)
+			return 0;
+	}
+
+	ret = q6apm_dai_compr_playback_run(prtd);
+	if (ret)
+		return ret;
+
+	guard(mutex)(&prtd->lock);
+	prtd->state = Q6APM_STREAM_RUNNING;
+
+	return 0;
+}
+
+static int q6apm_dai_compr_playback_stop(struct q6apm_dai_rtd *prtd)
+{
+	int ret;
+
+	scoped_guard(mutex, &prtd->lock)
+		prtd->state = Q6APM_STREAM_STOPPED;
+
+	ret = q6apm_graph_stop(prtd->graph);
+	if (ret)
+		return ret;
+
+	guard(mutex)(&prtd->lock);
+	prtd->bytes_received = 0;
+	prtd->bytes_sent = 0;
+	prtd->copied_total = 0;
+	prtd->notify_on_drain = false;
+	prtd->next_track = false;
+
+	return 0;
+}
+
 static int q6apm_dai_compr_trigger(struct snd_soc_component *component,
 			    struct snd_compr_stream *stream, int cmd)
 {
@@ -1324,6 +1400,11 @@ static int q6apm_dai_compr_trigger(struct snd_soc_component *component,
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
+		ret = q6apm_dai_compr_playback_restart(prtd);
+		if (ret)
+			return ret;
+
+		fallthrough;
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE: {
 		guard(mutex)(&prtd->lock);
@@ -1340,6 +1421,7 @@ static int q6apm_dai_compr_trigger(struct snd_soc_component *component,
 		break;
 	}
 	case SNDRV_PCM_TRIGGER_STOP:
+		ret = q6apm_dai_compr_playback_stop(prtd);
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
@@ -1458,39 +1540,9 @@ static int q6apm_dai_compr_set_params(struct snd_soc_component *component,
 		if (ret)
 			return ret;
 
-		cfg.direction = dir;
-		cfg.sample_rate = codec->sample_rate;
-		cfg.num_channels = 2;
-		cfg.bit_width = prtd->bits_per_sample;
-		cfg.fmt = codec->id;
-		ret = q6dsp_map_channels(cfg.channel_map, cfg.num_channels);
+		ret = q6apm_dai_compr_playback_run(prtd);
 		if (ret)
 			return ret;
-
-		memcpy(&cfg.codec, codec, sizeof(*codec));
-
-		ret = q6apm_graph_media_format_shmem(prtd->graph, &cfg);
-		if (ret < 0)
-			return ret;
-
-		ret = q6apm_graph_media_format_pcm(prtd->graph, &cfg);
-		if (ret)
-			return ret;
-
-		ret = q6apm_alloc_fragments(prtd->graph, SNDRV_PCM_STREAM_PLAYBACK,
-					prtd->phys, (prtd->pcm_size / prtd->periods),
-					prtd->periods);
-		if (ret < 0)
-			return -ENOMEM;
-
-		ret = q6apm_graph_prepare(prtd->graph);
-		if (ret)
-			return ret;
-
-		ret = q6apm_graph_start(prtd->graph);
-		if (ret)
-			return ret;
-
 	} else {
 		cfg.direction = dir;
 		cfg.sample_rate = codec->sample_rate;
@@ -1502,6 +1554,8 @@ static int q6apm_dai_compr_set_params(struct snd_soc_component *component,
 		ret = audioreach_compr_set_param(prtd->graph,  &cfg);
 		if (ret < 0)
 			return ret;
+
+		memcpy(&prtd->codec, codec, sizeof(*codec));
 	}
 	prtd->state = Q6APM_STREAM_RUNNING;
 
