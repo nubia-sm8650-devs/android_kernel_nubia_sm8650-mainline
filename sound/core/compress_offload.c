@@ -436,7 +436,7 @@ static __poll_t snd_compr_poll(struct file *f, poll_table *wait)
 	struct snd_compr_file *data = f->private_data;
 	struct snd_compr_stream *stream;
 	struct snd_compr_runtime *runtime;
-	size_t avail;
+	size_t avail, threshold;
 	__poll_t retval = 0;
 
 	if (snd_BUG_ON(!data))
@@ -474,6 +474,10 @@ static __poll_t snd_compr_poll(struct file *f, poll_table *wait)
 	avail = snd_compr_get_avail(stream);
 	pr_debug("avail is %lu\n", (unsigned long)avail);
 	/* check if we have at least one fragment to fill */
+	threshold = runtime->fragment_size;
+	if (stream->direction == SND_COMPRESS_CAPTURE && runtime->poll_frames)
+		threshold = 1;
+
 	switch (runtime->state) {
 	case SNDRV_PCM_STATE_DRAINING:
 		/* stream has been woken up after drain is complete
@@ -485,7 +489,7 @@ static __poll_t snd_compr_poll(struct file *f, poll_table *wait)
 	case SNDRV_PCM_STATE_RUNNING:
 	case SNDRV_PCM_STATE_PREPARED:
 	case SNDRV_PCM_STATE_PAUSED:
-		if (avail >= runtime->fragment_size)
+		if (avail >= threshold)
 			retval = snd_compr_get_poll(stream);
 		break;
 	default:

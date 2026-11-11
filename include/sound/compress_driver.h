@@ -56,6 +56,9 @@ struct snd_compr_task_runtime {
  *	the ring buffer
  * @total_bytes_transferred: cumulative bytes transferred by offload DSP
  * @sleep: poll sleep
+ * @poll_frames: report a capture stream as readable once it holds any
+ *	data, for drivers that wake it for encoded frames smaller than a
+ *	fragment
  * @private_data: driver private data pointer
  * @dma_area: virtual buffer address
  * @dma_addr: physical buffer address (not accessible from main CPU)
@@ -76,6 +79,7 @@ struct snd_compr_runtime {
 	u64 total_bytes_available;
 	u64 total_bytes_transferred;
 	wait_queue_head_t sleep;
+	bool poll_frames;
 	void *private_data;
 
 	unsigned char *dma_area;
