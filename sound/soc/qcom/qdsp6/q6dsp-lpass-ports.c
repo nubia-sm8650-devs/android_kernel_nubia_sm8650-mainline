@@ -693,6 +693,22 @@ static struct snd_soc_dai_driver q6dsp_audio_fe_dais[] = {
 		.id = USB_TX,
 		.name = "USB_TX",
 	},
+	{
+		.playback = {
+			.stream_name = "Dummy Playback",
+			.rates = SNDRV_PCM_RATE_8000_192000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE |
+				   SNDRV_PCM_FMTBIT_S24_LE |
+				   SNDRV_PCM_FMTBIT_S24_3LE |
+				   SNDRV_PCM_FMTBIT_S32_LE,
+			.channels_min = 1,
+			.channels_max = 8,
+			.rate_min = 8000,
+			.rate_max = 192000,
+		},
+		.id = DUMMY_RX,
+		.name = "DUMMY_RX",
+	},
 };
 
 int q6dsp_audio_ports_of_xlate_dai_name(struct snd_soc_component *component,

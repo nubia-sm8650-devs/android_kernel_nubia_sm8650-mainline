@@ -7,7 +7,7 @@
 #include <dt-bindings/sound/qcom,q6afe.h>
 #include <sound/soc.h>
 
-#define LPASS_MAX_PORT			(USB_TX + 1)
+#define LPASS_MAX_PORT			(DUMMY_RX + 1)
 
 struct qcom_snd_tdm_slot_cfg {
 	unsigned int tx_mask;
