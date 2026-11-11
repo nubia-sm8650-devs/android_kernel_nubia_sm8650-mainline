@@ -1,5 +1,6 @@
 global-timer
 mixer-test
+pcm-anon-dup-test
 pcm-test
 test-pcmtest-driver
 utimer-test
