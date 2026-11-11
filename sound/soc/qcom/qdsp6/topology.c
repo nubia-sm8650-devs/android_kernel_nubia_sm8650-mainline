@@ -1496,7 +1496,7 @@ static int audioreach_check_dai_graphs(struct q6apm *apm, struct snd_soc_pcm_run
 		for_each_rtd_cpu_dais(be, i, dai) {
 			struct snd_soc_dapm_widget *w;
 
-			if (dai->dev->parent != apm->dev)
+			if (dai->dev->parent != apm->dev || dai->id == DUMMY_RX)
 				continue;
 
 			for_each_dapm_widgets(list, j, w) {
