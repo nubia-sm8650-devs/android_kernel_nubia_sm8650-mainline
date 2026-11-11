@@ -1112,6 +1112,84 @@ static void q6apm_dai_pcm_free(struct snd_soc_component *component, struct snd_p
 		q6apm_dai_memory_unmap(component, substream);
 }
 
+static int q6apm_dai_compr_walk_graphs(struct q6apm_dai_rtd *prtd, bool prepare)
+{
+	struct snd_compr_stream *stream = prtd->cstream;
+	struct snd_soc_pcm_runtime *rtd = stream->private_data;
+	struct snd_soc_dai *dai = snd_soc_rtd_to_cpu(rtd, 0);
+	struct snd_soc_dapm_widget_list *list;
+	int ret;
+
+	ret = snd_soc_dapm_dai_get_connected_widgets(dai, stream->direction, &list,
+						     dpcm_end_walk_at_be);
+	if (ret < 0)
+		return ret;
+
+	if (prepare)
+		ret = audioreach_prepare_graphs(prtd->graph, rtd, stream->direction, list);
+	else
+		ret = audioreach_open_graphs(prtd->graph, rtd, stream->direction, list);
+
+	snd_soc_dapm_dai_free_widgets(&list);
+
+	return ret;
+}
+
+static int q6apm_dai_compr_start_graphs(struct q6apm_dai_rtd *prtd)
+{
+	struct snd_soc_pcm_runtime *rtd = prtd->cstream->private_data;
+	struct q6apm_graph *root = prtd->graph;
+	int ret;
+
+	snd_soc_dpcm_mutex_lock(rtd);
+	mutex_lock(&root->path_lock);
+
+	root->path_prepared = false;
+
+	ret = q6apm_graph_prepare(root);
+	if (ret)
+		goto out;
+
+	ret = q6apm_dai_compr_walk_graphs(prtd, true);
+	if (ret)
+		goto out;
+
+	root->path_prepared = true;
+
+	ret = audioreach_start_graphs(root);
+	if (ret)
+		goto out;
+
+	ret = q6apm_graph_start(root);
+	if (ret)
+		audioreach_stop_graphs(root, 0);
+
+out:
+	if (ret)
+		root->path_prepared = false;
+
+	mutex_unlock(&root->path_lock);
+	snd_soc_dpcm_mutex_unlock(rtd);
+
+	return ret;
+}
+
+static int q6apm_dai_compr_stop_graphs(struct q6apm_dai_rtd *prtd)
+{
+	struct q6apm_graph *root = prtd->graph;
+	int ret;
+
+	guard(mutex)(&root->path_lock);
+
+	root->path_prepared = false;
+
+	ret = q6apm_graph_stop(root);
+	if (ret)
+		return ret;
+
+	return audioreach_stop_graphs(root, 0);
+}
+
 static int q6apm_dai_compr_open(struct snd_soc_component *component,
 				struct snd_compr_stream *stream)
 {
@@ -1170,8 +1248,18 @@ static int q6apm_dai_compr_open(struct snd_soc_component *component,
 	else
 		runtime->poll_frames = true;
 
+	scoped_guard(mutex, &prtd->graph->path_lock)
+		ret = q6apm_dai_compr_walk_graphs(prtd, false);
+	if (ret)
+		goto err_free_graphs;
+
+	snd_soc_dai_dma_data_set(cpu_dai, stream->direction, prtd->graph);
+
 	return 0;
 
+err_free_graphs:
+	q6apm_dai_free_graphs(prtd);
+	q6apm_unmap_memory_fixed_region(dev, graph_id);
 err_free_pages:
 	snd_dma_free_pages(&prtd->dma_buffer);
 err_close_graph:
@@ -1185,10 +1273,16 @@ err_close_graph:
 static int q6apm_dai_compr_free(struct snd_soc_component *component,
 				struct snd_compr_stream *stream)
 {
+	struct snd_soc_pcm_runtime *rtd = stream->private_data;
 	struct snd_compr_runtime *runtime = stream->runtime;
 	struct q6apm_dai_rtd *prtd = runtime->private_data;
 
+	snd_soc_dpcm_mutex_lock(rtd);
+	snd_soc_dai_dma_data_set(snd_soc_rtd_to_cpu(rtd, 0), stream->direction, NULL);
+	snd_soc_dpcm_mutex_unlock(rtd);
+
 	q6apm_graph_stop(prtd->graph);
+	q6apm_dai_free_graphs(prtd);
 	q6apm_free_fragments(prtd->graph, stream->direction);
 	q6apm_unmap_memory_fixed_region(component->dev, prtd->graph->id);
 	q6apm_graph_close(prtd->graph);
@@ -1269,11 +1363,7 @@ static int q6apm_dai_compr_capture_start(struct q6apm_dai_rtd *prtd)
 {
 	int ret;
 
-	ret = q6apm_graph_prepare(prtd->graph);
-	if (ret)
-		return ret;
-
-	ret = q6apm_graph_start(prtd->graph);
+	ret = q6apm_dai_compr_start_graphs(prtd);
 	if (ret)
 		return ret;
 
@@ -1290,7 +1380,7 @@ static int q6apm_dai_compr_capture_stop(struct q6apm_dai_rtd *prtd)
 	scoped_guard(mutex, &prtd->lock)
 		prtd->state = Q6APM_STREAM_STOPPED;
 
-	ret = q6apm_graph_stop(prtd->graph);
+	ret = q6apm_dai_compr_stop_graphs(prtd);
 
 	guard(mutex)(&prtd->lock);
 	prtd->reads_filled = 0;
@@ -1333,11 +1423,7 @@ static int q6apm_dai_compr_playback_run(struct q6apm_dai_rtd *prtd)
 	if (ret < 0)
 		return -ENOMEM;
 
-	ret = q6apm_graph_prepare(prtd->graph);
-	if (ret)
-		return ret;
-
-	return q6apm_graph_start(prtd->graph);
+	return q6apm_dai_compr_start_graphs(prtd);
 }
 
 static int q6apm_dai_compr_playback_restart(struct q6apm_dai_rtd *prtd)
@@ -1366,7 +1452,7 @@ static int q6apm_dai_compr_playback_stop(struct q6apm_dai_rtd *prtd)
 	scoped_guard(mutex, &prtd->lock)
 		prtd->state = Q6APM_STREAM_STOPPED;
 
-	ret = q6apm_graph_stop(prtd->graph);
+	ret = q6apm_dai_compr_stop_graphs(prtd);
 	if (ret)
 		return ret;
 
