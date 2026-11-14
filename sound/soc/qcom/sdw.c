@@ -52,12 +52,35 @@ static bool qcom_snd_is_sdw_dai(int id)
 	return false;
 }
 
+static struct sdw_stream_runtime *
+qcom_snd_sdw_find_stream(struct snd_pcm_substream *substream,
+			 struct snd_soc_dai **dai)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct sdw_stream_runtime *sruntime;
+	struct snd_soc_dai *codec_dai;
+	int i;
+
+	for_each_rtd_codec_dais(rtd, i, codec_dai) {
+		sruntime = snd_soc_dai_get_stream(codec_dai, substream->stream);
+		if (sruntime == ERR_PTR(-ENOTSUPP))
+			continue;
+
+		*dai = codec_dai;
+
+		return sruntime;
+	}
+
+	return NULL;
+}
+
 /**
  * qcom_snd_sdw_startup() - Helper to start Soundwire stream for SoC audio card
  * @substream: The PCM substream from audio, as passed to snd_soc_ops->startup()
  *
  * Helper for the SoC audio card (snd_soc_ops->startup()) to allocate and set
- * Soundwire stream runtime to each codec DAI.
+ * Soundwire stream runtime to each codec DAI. A link whose codec DAI already
+ * holds the stream of another link uses that stream.
  *
  * The shutdown() callback should call sdw_release_stream() on the same
  * sdw_stream_runtime.
@@ -73,14 +96,20 @@ int qcom_snd_sdw_startup(struct snd_pcm_substream *substream)
 	struct snd_soc_dai *codec_dai;
 	u32 rx_ch_cnt = 0, tx_ch_cnt = 0;
 	bool has_sdw = false;
+	bool shared;
 	int ret, i, j;
 
 	if (!qcom_snd_is_sdw_dai(cpu_dai->id))
 		return 0;
 
-	sruntime = sdw_alloc_stream(cpu_dai->name, SDW_STREAM_PCM);
-	if (!sruntime)
-		return -ENOMEM;
+	sruntime = qcom_snd_sdw_find_stream(substream, &codec_dai);
+	shared = !IS_ERR_OR_NULL(sruntime);
+
+	if (!shared) {
+		sruntime = sdw_alloc_stream(cpu_dai->name, SDW_STREAM_PCM);
+		if (!sruntime)
+			return -ENOMEM;
+	}
 
 	for_each_rtd_codec_dais(rtd, i, codec_dai) {
 		ret = snd_soc_dai_set_stream(codec_dai, sruntime,
@@ -107,7 +136,9 @@ int qcom_snd_sdw_startup(struct snd_pcm_substream *substream)
 	}
 
 	if (!has_sdw) {
-		sdw_release_stream(sruntime);
+		if (!shared)
+			sdw_release_stream(sruntime);
+
 		return 0;
 	}
 
@@ -128,6 +159,9 @@ int qcom_snd_sdw_startup(struct snd_pcm_substream *substream)
 	return 0;
 
 err_set_stream:
+	if (shared)
+		return ret;
+
 	for_each_rtd_codec_dais(rtd, j, codec_dai)
 		snd_soc_dai_set_stream(codec_dai, NULL, substream->stream);
 	sdw_release_stream(sruntime);
@@ -200,12 +234,20 @@ EXPORT_SYMBOL_GPL(qcom_snd_sdw_get_stream);
 
 void qcom_snd_sdw_shutdown(struct snd_pcm_substream *substream)
 {
-	struct sdw_stream_runtime *sruntime = qcom_snd_sdw_get_stream(substream);
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	struct sdw_stream_runtime *sruntime;
 	struct snd_soc_dai *codec_dai;
 	int i;
 
-	if (!sruntime)
+	if (!qcom_snd_is_sdw_dai(cpu_dai->id))
+		return;
+
+	sruntime = qcom_snd_sdw_find_stream(substream, &codec_dai);
+	if (IS_ERR_OR_NULL(sruntime))
+		return;
+
+	if (snd_soc_dai_stream_active(codec_dai, substream->stream))
 		return;
 
 	for_each_rtd_codec_dais(rtd, i, codec_dai)
