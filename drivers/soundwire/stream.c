@@ -997,11 +997,6 @@ static void sdw_port_free(struct sdw_port_runtime *p_rt)
 	kfree(p_rt);
 }
 
-static bool sdw_slave_port_allocated(struct sdw_slave_runtime *s_rt)
-{
-	return !list_empty(&s_rt->port_list);
-}
-
 static void sdw_slave_port_free(struct sdw_slave *slave,
 				struct sdw_stream_runtime *stream)
 {
@@ -2017,6 +2012,7 @@ int sdw_stream_add_master(struct sdw_bus *bus,
 {
 	struct sdw_master_runtime *m_rt;
 	bool alloc_master_rt = false;
+	bool allocated;
 	int ret;
 
 	mutex_lock(&bus->bus_lock);
@@ -2056,13 +2052,18 @@ int sdw_stream_add_master(struct sdw_bus *bus,
 		alloc_master_rt = true;
 	}
 
-	if (!sdw_master_port_allocated(m_rt)) {
+	allocated = sdw_master_port_allocated(m_rt);
+
+	if (list_count_nodes(&m_rt->port_list) != num_ports) {
+		sdw_master_port_free(m_rt);
+
 		ret = sdw_master_port_alloc(m_rt, num_ports);
 		if (ret)
 			goto alloc_error;
-
-		stream->m_rt_count++;
 	}
+
+	if (!allocated)
+		stream->m_rt_count++;
 
 	ret = sdw_master_rt_config(m_rt, stream_config);
 	if (ret < 0)
@@ -2190,7 +2191,9 @@ int sdw_stream_add_slave(struct sdw_slave *slave,
 		alloc_slave_rt = true;
 	}
 
-	if (!sdw_slave_port_allocated(s_rt)) {
+	if (list_count_nodes(&s_rt->port_list) != num_ports) {
+		sdw_slave_port_free(slave, stream);
+
 		ret = sdw_slave_port_alloc(slave, s_rt, num_ports);
 		if (ret)
 			goto alloc_error;
