@@ -186,8 +186,11 @@ int qcom_snd_sdw_prepare(struct snd_pcm_substream *substream,
 	if (!sruntime)
 		return 0;
 
-	if (*stream_prepared)
+	if (sruntime->state == SDW_STREAM_ENABLED) {
+		*stream_prepared = true;
+
 		return 0;
+	}
 
 	ret = sdw_prepare_stream(sruntime);
 	if (ret)
@@ -250,6 +253,11 @@ void qcom_snd_sdw_shutdown(struct snd_pcm_substream *substream)
 	if (snd_soc_dai_stream_active(codec_dai, substream->stream))
 		return;
 
+	if (sruntime->state == SDW_STREAM_ENABLED) {
+		sdw_disable_stream(sruntime);
+		sdw_deprepare_stream(sruntime);
+	}
+
 	for_each_rtd_codec_dais(rtd, i, codec_dai)
 		snd_soc_dai_set_stream(codec_dai, NULL, substream->stream);
 
@@ -262,15 +270,23 @@ int qcom_snd_sdw_hw_free(struct snd_pcm_substream *substream, bool *stream_prepa
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	struct sdw_stream_runtime *sruntime;
+	struct snd_soc_dai *codec_dai;
 
 	if (!qcom_snd_is_sdw_dai(cpu_dai->id))
 		return 0;
 
-	sruntime = qcom_snd_sdw_get_stream(substream);
-	if (sruntime && *stream_prepared) {
+	sruntime = qcom_snd_sdw_find_stream(substream, &codec_dai);
+	if (IS_ERR_OR_NULL(sruntime))
+		return 0;
+
+	*stream_prepared = false;
+
+	if (snd_soc_dai_stream_active(codec_dai, substream->stream) > 1)
+		return 0;
+
+	if (sruntime->state == SDW_STREAM_ENABLED) {
 		sdw_disable_stream(sruntime);
 		sdw_deprepare_stream(sruntime);
-		*stream_prepared = false;
 	}
 
 	return 0;
