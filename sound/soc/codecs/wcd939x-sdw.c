@@ -169,6 +169,9 @@ int wcd939x_sdw_free(struct wcd939x_sdw_priv *wcd,
 		     struct snd_pcm_substream *substream,
 		     struct snd_soc_dai *dai)
 {
+	if (snd_soc_dai_stream_active(dai, substream->stream) > 1)
+		return 0;
+
 	sdw_stream_remove_slave(wcd->sdev, wcd->sruntime);
 
 	return 0;
@@ -179,6 +182,9 @@ int wcd939x_sdw_set_sdw_stream(struct wcd939x_sdw_priv *wcd,
 			       struct snd_soc_dai *dai, void *stream,
 			       int direction)
 {
+	if (!stream)
+		sdw_stream_remove_slave(wcd->sdev, wcd->sruntime);
+
 	wcd->sruntime = stream;
 
 	return 0;
