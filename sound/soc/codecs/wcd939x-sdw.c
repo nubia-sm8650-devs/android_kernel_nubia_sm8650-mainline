@@ -133,11 +133,11 @@ int wcd939x_sdw_hw_params(struct wcd939x_sdw_priv *wcd,
 			  struct snd_soc_dai *dai)
 {
 	struct sdw_port_config port_config[WCD939X_MAX_SWR_PORTS];
+	unsigned int ch_count = 1;
 	unsigned long ch_mask;
-	int i, j;
+	int ports = 0;
+	int i, j, ret;
 
-	wcd->sconfig.ch_count = 1;
-	wcd->active_ports = 0;
 	for (i = 0; i < WCD939X_MAX_SWR_PORTS; i++) {
 		ch_mask = wcd->port_config[i].ch_mask;
 
@@ -145,11 +145,30 @@ int wcd939x_sdw_hw_params(struct wcd939x_sdw_priv *wcd,
 			continue;
 
 		for_each_set_bit(j, &ch_mask, 4)
-			wcd->sconfig.ch_count++;
+			ch_count++;
 
-		port_config[wcd->active_ports] = wcd->port_config[i];
-		wcd->active_ports++;
+		port_config[ports] = wcd->port_config[i];
+		ports++;
 	}
+
+	if (wcd->sruntime->state == SDW_STREAM_ENABLED) {
+		if (ports == wcd->active_ports &&
+		    !memcmp(port_config, wcd->stream_ports,
+			    ports * sizeof(*port_config)))
+			return 0;
+
+		ret = sdw_disable_stream(wcd->sruntime);
+		if (ret)
+			return ret;
+
+		ret = sdw_deprepare_stream(wcd->sruntime);
+		if (ret)
+			return ret;
+	}
+
+	wcd->sconfig.ch_count = ch_count;
+	wcd->active_ports = ports;
+	memcpy(wcd->stream_ports, port_config, ports * sizeof(*port_config));
 
 	wcd->sconfig.bps = 1;
 	wcd->sconfig.frame_rate = params_rate(params);
