@@ -1326,6 +1326,9 @@ static int qcom_swrm_hw_free(struct snd_pcm_substream *substream,
 	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(dai->dev);
 	struct sdw_stream_runtime *sruntime = ctrl->sruntime[dai->id];
 
+	if (snd_soc_dai_stream_active(dai, substream->stream) > 1)
+		return 0;
+
 	qcom_swrm_stream_free_ports(ctrl, sruntime);
 	sdw_stream_remove_master(&ctrl->bus, sruntime);
 
@@ -1336,6 +1339,12 @@ static int qcom_swrm_set_sdw_stream(struct snd_soc_dai *dai,
 				    void *stream, int direction)
 {
 	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(dai->dev);
+	struct sdw_stream_runtime *sruntime = ctrl->sruntime[dai->id];
+
+	if (!stream && sruntime) {
+		qcom_swrm_stream_free_ports(ctrl, sruntime);
+		sdw_stream_remove_master(&ctrl->bus, sruntime);
+	}
 
 	ctrl->sruntime[dai->id] = stream;
 
