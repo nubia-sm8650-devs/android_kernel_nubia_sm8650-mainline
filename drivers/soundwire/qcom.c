@@ -1310,6 +1310,9 @@ static int qcom_swrm_hw_params(struct snd_pcm_substream *substream,
 	struct sdw_stream_runtime *sruntime = ctrl->sruntime[dai->id];
 	int ret;
 
+	if (sruntime->state == SDW_STREAM_ENABLED)
+		return 0;
+
 	qcom_swrm_stream_free_ports(ctrl, sruntime);
 
 	ret = qcom_swrm_stream_alloc_ports(ctrl, sruntime, params,
