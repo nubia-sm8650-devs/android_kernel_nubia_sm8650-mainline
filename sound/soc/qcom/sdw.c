@@ -281,8 +281,14 @@ int qcom_snd_sdw_hw_free(struct snd_pcm_substream *substream, bool *stream_prepa
 
 	*stream_prepared = false;
 
-	if (snd_soc_dai_stream_active(codec_dai, substream->stream) > 1)
+	if (snd_soc_dai_stream_active(codec_dai, substream->stream) > 1) {
+		if (sruntime->state == SDW_STREAM_DEPREPARED &&
+		    !sdw_prepare_stream(sruntime) &&
+		    sdw_enable_stream(sruntime))
+			sdw_deprepare_stream(sruntime);
+
 		return 0;
+	}
 
 	if (sruntime->state == SDW_STREAM_ENABLED) {
 		sdw_disable_stream(sruntime);
