@@ -175,6 +175,10 @@ static void q6apm_dai_queue_event(struct q6apm_dai_rtd *prtd,
 
 	mutex_lock(&prtd->lock);
 
+	dev_dbg(rtd->dev, "module %#x event %#x, %u bytes, %u queued\n",
+		notification->module_instance_id, event->event_id, event->event_payload_size,
+		prtd->event_count);
+
 	if (!entry || prtd->event_count == 64 || prtd->event_bytes + size > SZ_64K) {
 		prtd->events_lost = true;
 	} else {
@@ -465,6 +469,11 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 	if (ret)
 		return ret;
 
+	dev_dbg(dev, "graph %#x: prepare %s at %u Hz, %u channels, %u bits in %u%s\n",
+		prtd->graph->id, substream->stream ? "capture" : "playback", cfg.sample_rate,
+		cfg.num_channels, cfg.bit_width, cfg.bits_per_sample,
+		hostless ? ", hostless" : "");
+
 	if (prtd->state) {
 		/* clear the previous setup if any  */
 		ret = q6apm_graph_stop(prtd->graph);
@@ -580,6 +589,9 @@ static int q6apm_dai_trigger(struct snd_soc_component *component,
 	int i, ret = 0;
 
 	guard(mutex)(&graph->path_lock);
+
+	dev_dbg(component->dev, "graph %#x: trigger %d in state %d, path %sprepared\n",
+		graph->id, cmd, prtd->state, graph->path_prepared ? "" : "not ");
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
@@ -1474,6 +1486,9 @@ static int q6apm_dai_compr_trigger(struct snd_soc_component *component,
 	uint32_t bytes_to_write;
 	int ret = 0;
 
+	dev_dbg(component->dev, "graph %#x: compress trigger %d in state %d\n",
+		prtd->graph->id, cmd, prtd->state);
+
 	if (stream->direction == SND_COMPRESS_CAPTURE) {
 		if (cmd == SNDRV_PCM_TRIGGER_START)
 			return q6apm_dai_compr_capture_start(prtd);
@@ -1615,6 +1630,10 @@ static int q6apm_dai_compr_set_params(struct snd_soc_component *component,
 
 	if (prtd->pcm_size > prtd->dma_buffer.bytes)
 		return -EINVAL;
+
+	dev_dbg(component->dev, "graph %#x: codec %u at %u Hz, %u fragments of %u bytes%s\n",
+		prtd->graph->id, codec->id, codec->sample_rate, prtd->periods,
+		prtd->pcm_count, prtd->next_track ? ", next track" : "");
 
 	if (dir == SND_COMPRESS_CAPTURE)
 		return q6apm_dai_compr_capture_params(component, prtd, codec);
