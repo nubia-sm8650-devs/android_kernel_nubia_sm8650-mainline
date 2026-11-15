@@ -209,6 +209,9 @@ static int audioreach_graph_mgmt_cmd(struct audioreach_graph *graph, uint32_t op
 	list_for_each_entry(sg, &info->sg_list, node)
 		mgmt_cmd->sub_graph_id_list[i++] = sg->sub_graph_id;
 
+	dev_dbg(apm->dev, "graph %#x: command %#x for %d subgraphs\n", info->id, opcode,
+		num_sub_graphs);
+
 	return q6apm_send_cmd_sync(apm, pkt, 0);
 }
 
@@ -304,8 +307,16 @@ static int q6apm_validate_params(const struct audioreach_graph_info *info,
 			return -EINVAL;
 
 		if (!q6apm_param_target_allowed(info, param->module_instance_id,
-						param->param_id, get))
+						param->param_id, get)) {
+			pr_debug("q6apm: graph %#x: %s of parameter %#x of module %#x refused\n",
+				 info->id, get ? "query" : "write", param->param_id,
+				 param->module_instance_id);
 			return -EPERM;
+		}
+
+		pr_debug("q6apm: graph %#x: %s of parameter %#x of module %#x, %u bytes\n",
+			 info->id, get ? "query" : "write", param->param_id,
+			 param->module_instance_id, param->param_size);
 
 		*destination = count++ ? APM_MODULE_INSTANCE_ID : param->module_instance_id;
 
