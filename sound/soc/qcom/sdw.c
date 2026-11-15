@@ -105,6 +105,9 @@ int qcom_snd_sdw_startup(struct snd_pcm_substream *substream)
 	sruntime = qcom_snd_sdw_find_stream(substream, &codec_dai);
 	shared = !IS_ERR_OR_NULL(sruntime);
 
+	dev_dbg(rtd->dev, "%s the SoundWire stream of %s\n",
+		shared ? "shares" : "allocates", cpu_dai->name);
+
 	if (!shared) {
 		sruntime = sdw_alloc_stream(cpu_dai->name, SDW_STREAM_PCM);
 		if (!sruntime)
@@ -187,6 +190,7 @@ int qcom_snd_sdw_prepare(struct snd_pcm_substream *substream,
 		return 0;
 
 	if (sruntime->state == SDW_STREAM_ENABLED) {
+		dev_dbg(rtd->dev, "SoundWire stream %s is already enabled\n", sruntime->name);
 		*stream_prepared = true;
 
 		return 0;
@@ -282,6 +286,9 @@ int qcom_snd_sdw_hw_free(struct snd_pcm_substream *substream, bool *stream_prepa
 	*stream_prepared = false;
 
 	if (snd_soc_dai_stream_active(codec_dai, substream->stream) > 1) {
+		dev_dbg(rtd->dev, "SoundWire stream %s stays with another link, state %d\n",
+			sruntime->name, sruntime->state);
+
 		if (sruntime->state == SDW_STREAM_DEPREPARED &&
 		    !sdw_prepare_stream(sruntime) &&
 		    sdw_enable_stream(sruntime))
