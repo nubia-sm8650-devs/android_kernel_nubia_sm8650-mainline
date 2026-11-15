@@ -1511,11 +1511,17 @@ static int audioreach_check_dai_graphs(struct q6apm *apm, struct snd_soc_pcm_run
 					return id;
 
 				graph = snd_soc_dai_dma_data_get(dai, stream);
-				if (graph && graph->id != id)
+				if (graph && graph->id != id) {
+					dev_dbg(apm->dev, "%s runs graph %#x, wanted %#x\n",
+						dai->name, graph->id, id);
 					return -EBUSY;
+				}
 
-				if (prepared && (!graph || !graph->path_prepared))
+				if (prepared && (!graph || !graph->path_prepared)) {
+					dev_dbg(apm->dev, "%s is not prepared for graph %#x\n",
+						dai->name, id);
 					return -EPIPE;
+				}
 			}
 		}
 	}
@@ -1576,6 +1582,9 @@ int audioreach_start_graphs(struct q6apm_graph *root)
 			audioreach_stop_graphs(root, first);
 			return ret;
 		}
+
+		dev_dbg(root->dev, "graph %#x: started graph %#x of its path\n", root->id,
+			graph->id);
 
 		swap(root->connected[i], root->connected[root->num_started]);
 		root->num_started++;
