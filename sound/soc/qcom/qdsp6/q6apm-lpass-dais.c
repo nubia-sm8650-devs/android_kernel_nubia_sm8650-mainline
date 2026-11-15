@@ -363,8 +363,14 @@ static int q6apm_lpass_dai_prepare(struct snd_pcm_substream *substream, struct s
 		return graph_id;
 
 	graph = dai_data->graph[dai->id];
-	if (graph && graph->id != graph_id)
+	if (graph && graph->id != graph_id) {
+		dev_dbg(dai->dev, "%s runs graph %#x, wanted %#x\n", dai->name, graph->id,
+			graph_id);
 		return -EBUSY;
+	}
+
+	dev_dbg(dai->dev, "%s: prepare graph %#x at %u Hz, %u channels, %u bits\n",
+		dai->name, graph_id, cfg->sample_rate, cfg->num_channels, cfg->bit_width);
 
 	if (graph)
 		graph->path_prepared = false;
