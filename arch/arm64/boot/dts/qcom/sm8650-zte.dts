@@ -541,6 +541,14 @@
 	status = "okay";
 };
 
+&remoteproc_adsp {
+	glink-edge {
+		fastrpc {
+			/delete-property/ qcom,non-secure-domain;
+		};
+	};
+};
+
 &reserved_memory {
 	lost_reg_mem: lost-reg-mem@9b09c000 {
 		reg = <0x0 0x9b09c000 0x0 0x4000>;
